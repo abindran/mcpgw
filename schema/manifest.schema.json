@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "ToolDef": {
+      "additionalProperties": true,
+      "description": "One tool as advertised by a backend (the MCP `Tool` object).\n\nKnown fields are typed; anything else (`icons`, `_meta`, ...) is kept in\n`extra` so a manifest round-trips the server's tool exactly.",
+      "properties": {
+        "annotations": {
+          "description": "Behaviour hints (`readOnlyHint`, `destructiveHint`, ...)."
+        },
+        "description": {
+          "description": "Description shown to the model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "inputSchema": {
+          "default": {
+            "type": "object"
+          },
+          "description": "JSON Schema of the arguments."
+        },
+        "name": {
+          "description": "Tool name, unique within its server.",
+          "type": "string"
+        },
+        "outputSchema": {
+          "description": "JSON Schema of structured results."
+        },
+        "title": {
+          "description": "Display title.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The tools one server advertised at a point in time.",
+  "properties": {
+    "captured_at": {
+      "description": "Capture time, Unix seconds.",
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "protocol_version": {
+      "description": "Negotiated protocol version when captured.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "server": {
+      "description": "Server name.",
+      "type": "string"
+    },
+    "sha256": {
+      "description": "Pin: lowercase hex SHA-256 of the canonical JSON of `tools`.",
+      "type": "string"
+    },
+    "tools": {
+      "description": "Tools, sorted by name.",
+      "items": {
+        "$ref": "#/$defs/ToolDef"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "server",
+    "captured_at",
+    "tools",
+    "sha256"
+  ],
+  "title": "ToolManifest",
+  "type": "object"
+}

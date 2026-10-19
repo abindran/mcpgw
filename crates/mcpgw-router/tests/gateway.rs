@@ -3,12 +3,12 @@
 
 use std::{sync::Arc, time::Duration};
 
-use mcpgw_core::ServerConfig;
+use mcpgw_core::ServerSpec;
 use mcpgw_runtime::{BackendManager, ManagerOptions, ProtoError};
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
-fn fixture_server(name: &str) -> ServerConfig {
+fn fixture_server(name: &str) -> ServerSpec {
     mcpgw_testkit::stdio(name, &[])
 }
 
@@ -103,7 +103,7 @@ async fn lists_and_calls_through_gateway() {
     m.shutdown().await;
 }
 
-fn fixture_env(name: &str, prefix: &str) -> ServerConfig {
+fn fixture_env(name: &str, prefix: &str) -> ServerSpec {
     mcpgw_testkit::stdio(name, &[("FAKE_PREFIX", prefix)])
 }
 

@@ -8,7 +8,7 @@ use std::{collections::BTreeMap, path::PathBuf, process::ExitCode, sync::Arc, ti
 use clap::{Parser, Subcommand};
 use mcpgw_auth::Token;
 use mcpgw_config::Config;
-use mcpgw_core::{ServerConfig, Transport};
+use mcpgw_core::{ServerSpec, Transport};
 use mcpgw_runtime::{BackendManager, BackendState, ManagerOptions};
 use mcpgw_store::{SqliteStore, Store, effective_servers};
 
@@ -125,17 +125,16 @@ fn run(cli: Cli) -> AnyResult<()> {
                     command,
                     args,
                     env: env.into_iter().collect::<BTreeMap<_, _>>(),
+                    cwd: None,
                 },
-                (None, Some(url)) => Transport::Http { url },
+                (None, Some(url)) => Transport::http(url),
                 _ => return Err("give exactly one of --command or --url".into()),
             };
             let s = store()?;
             let existed = s.server(&name)?.is_some();
-            s.upsert_server(&ServerConfig {
-                name: name.clone(),
-                transport,
-                enabled: !disabled,
-            })?;
+            let mut spec = ServerSpec::new(name.clone(), transport);
+            spec.enabled = !disabled;
+            s.upsert_server(&spec)?;
             println!(
                 "{} server {name}",
                 if existed { "updated" } else { "added" }
@@ -190,13 +189,13 @@ fn serve(config: &Config, store: &SqliteStore) -> AnyResult<()> {
     Ok(())
 }
 
-fn describe(s: &ServerConfig) -> String {
+fn describe(s: &ServerSpec) -> String {
     match &s.transport {
         Transport::Stdio { command, args, .. } => std::iter::once(command.as_str())
             .chain(args.iter().map(String::as_str))
             .collect::<Vec<_>>()
             .join(" "),
-        Transport::Http { url } => url.clone(),
+        Transport::Http { url, .. } => url.clone(),
     }
 }
 

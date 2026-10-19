@@ -1,7 +1,7 @@
 //! `mcpgw-testkit` — fake MCP servers for integration tests.
 //!
 //! [`fake_mcp`] locates the `fake-mcp` binary (building it on first use),
-//! [`stdio`] makes a `ServerConfig` that launches it, and [`HttpFake`] runs
+//! [`stdio`] makes a `ServerSpec` that launches it, and [`HttpFake`] runs
 //! it as a Streamable HTTP server. See `src/bin/fake-mcp.rs` for the knobs.
 
 use std::{
@@ -12,7 +12,7 @@ use std::{
     sync::OnceLock,
 };
 
-use mcpgw_core::{ServerConfig, Transport};
+use mcpgw_core::{ServerSpec, Transport};
 
 /// Path to the `fake-mcp` binary, built once per test process.
 ///
@@ -62,20 +62,20 @@ pub fn fake_mcp() -> PathBuf {
     .clone()
 }
 
-/// A stdio `ServerConfig` named `name` that launches `fake-mcp` with `env`.
-pub fn stdio(name: &str, env: &[(&str, &str)]) -> ServerConfig {
-    ServerConfig {
-        name: name.into(),
-        transport: Transport::Stdio {
+/// A stdio `ServerSpec` named `name` that launches `fake-mcp` with `env`.
+pub fn stdio(name: &str, env: &[(&str, &str)]) -> ServerSpec {
+    ServerSpec::new(
+        name,
+        Transport::Stdio {
             command: fake_mcp().to_string_lossy().into_owned(),
             args: vec![],
             env: env
                 .iter()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect::<BTreeMap<_, _>>(),
+            cwd: None,
         },
-        enabled: true,
-    }
+    )
 }
 
 /// A `fake-mcp` serving Streamable HTTP on a random loopback port.

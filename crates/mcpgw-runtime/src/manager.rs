@@ -13,7 +13,7 @@ use std::{
     time::Duration,
 };
 
-use mcpgw_core::{ServerConfig, Transport};
+use mcpgw_core::{ServerSpec, Transport};
 use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StdioSpec};
 use tokio::sync::{Notify, RwLock, watch};
 
@@ -117,7 +117,7 @@ pub struct BackendManager {
 impl BackendManager {
     /// Start supervising `servers`. Returns immediately; connections are
     /// established in the background (see [`BackendManager::wait_ready`]).
-    pub fn start(servers: &[ServerConfig], opts: ManagerOptions) -> Self {
+    pub fn start(servers: &[ServerSpec], opts: ManagerOptions) -> Self {
         let (stop, _) = watch::channel(false);
         let mut backends = BTreeMap::new();
         let mut tasks = Vec::new();
@@ -137,13 +137,21 @@ impl BackendManager {
                 restarts: AtomicU32::new(0),
                 wake: Notify::new(),
             });
-            if let (BackendState::Starting, Transport::Stdio { command, args, env }) =
-                (&initial, &cfg.transport)
+            if let (
+                BackendState::Starting,
+                Transport::Stdio {
+                    command,
+                    args,
+                    env,
+                    cwd,
+                },
+            ) = (&initial, &cfg.transport)
             {
                 let spec = StdioSpec {
                     command: command.clone(),
                     args: args.clone(),
                     env: env.clone(),
+                    cwd: cwd.clone(),
                 };
                 tasks.push(tokio::spawn(supervise(
                     b.clone(),

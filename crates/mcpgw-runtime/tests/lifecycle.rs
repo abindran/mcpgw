@@ -1,8 +1,8 @@
 //! Lifecycle tests against real child-process backends (`fake-mcp`).
 
-use std::{collections::BTreeMap, time::Duration};
+use std::time::Duration;
 
-use mcpgw_core::{ServerConfig, Transport};
+use mcpgw_core::{ServerSpec, Transport};
 use mcpgw_runtime::{BackendManager, BackendState, ManagerOptions, ProtoError};
 
 use mcpgw_testkit::stdio as server;
@@ -132,22 +132,8 @@ async fn failed_health_check_triggers_restart() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn bad_command_backs_off_and_unsupported_is_reported() {
-    let bad = ServerConfig {
-        name: "bad".into(),
-        transport: Transport::Stdio {
-            command: "/nonexistent/mcp-server".into(),
-            args: vec![],
-            env: BTreeMap::new(),
-        },
-        enabled: true,
-    };
-    let web = ServerConfig {
-        name: "web".into(),
-        transport: Transport::Http {
-            url: "http://127.0.0.1:1/mcp".into(),
-        },
-        enabled: true,
-    };
+    let bad = ServerSpec::new("bad", Transport::stdio("/nonexistent/mcp-server", vec![]));
+    let web = ServerSpec::new("web", Transport::http("http://127.0.0.1:1/mcp"));
     let mut off = server("off", &[]);
     off.enabled = false;
     let m = BackendManager::start(&[bad, web, off], fast());

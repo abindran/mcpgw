@@ -7,7 +7,7 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use mcpgw_core::{Error, Result, ServerConfig};
+use mcpgw_core::{Error, Result, ServerSpec};
 use rusqlite::{Connection, OptionalExtension, params};
 
 /// Current schema version, stored in `PRAGMA user_version`.
@@ -21,13 +21,13 @@ pub trait Store: Send + Sync {
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>>;
 
     /// Insert or replace a backend server (keyed by name).
-    fn upsert_server(&self, server: &ServerConfig) -> Result<()>;
+    fn upsert_server(&self, server: &ServerSpec) -> Result<()>;
     /// Remove a server; returns whether it existed.
     fn remove_server(&self, name: &str) -> Result<bool>;
     /// Look up one server.
-    fn server(&self, name: &str) -> Result<Option<ServerConfig>>;
+    fn server(&self, name: &str) -> Result<Option<ServerSpec>>;
     /// All registered servers, ordered by name.
-    fn servers(&self) -> Result<Vec<ServerConfig>>;
+    fn servers(&self) -> Result<Vec<ServerSpec>>;
 }
 
 fn db_err(e: impl std::fmt::Display) -> Error {
@@ -114,7 +114,7 @@ impl Store for SqliteStore {
         })
     }
 
-    fn upsert_server(&self, server: &ServerConfig) -> Result<()> {
+    fn upsert_server(&self, server: &ServerSpec) -> Result<()> {
         server.validate()?;
         let json = serde_json::to_string(server).map_err(db_err)?;
         self.with(|c| {
@@ -132,7 +132,7 @@ impl Store for SqliteStore {
             .map(|n| n > 0)
     }
 
-    fn server(&self, name: &str) -> Result<Option<ServerConfig>> {
+    fn server(&self, name: &str) -> Result<Option<ServerSpec>> {
         let json: Option<String> = self.with(|c| {
             c.query_row("SELECT config FROM servers WHERE name = ?1", [name], |r| {
                 r.get(0)
@@ -143,7 +143,7 @@ impl Store for SqliteStore {
             .transpose()
     }
 
-    fn servers(&self) -> Result<Vec<ServerConfig>> {
+    fn servers(&self) -> Result<Vec<ServerSpec>> {
         let rows: Vec<String> = self.with(|c| {
             let mut st = c.prepare("SELECT config FROM servers ORDER BY name")?;
             let rows = st.query_map([], |r| r.get(0))?;
@@ -159,8 +159,8 @@ impl Store for SqliteStore {
 ///
 /// Config-file entries win on name clashes (the file is the operator's
 /// explicit source of truth); the result is ordered by name.
-pub fn effective_servers(config: &[ServerConfig], store: &dyn Store) -> Result<Vec<ServerConfig>> {
-    let mut out: Vec<ServerConfig> = config.to_vec();
+pub fn effective_servers(config: &[ServerSpec], store: &dyn Store) -> Result<Vec<ServerSpec>> {
+    let mut out: Vec<ServerSpec> = config.to_vec();
     for s in store.servers()? {
         if !out.iter().any(|c| c.name == s.name) {
             out.push(s);
@@ -175,16 +175,16 @@ mod tests {
     use super::*;
     use mcpgw_core::Transport;
 
-    fn stdio(name: &str, cmd: &str) -> ServerConfig {
-        ServerConfig {
-            name: name.into(),
-            transport: Transport::Stdio {
+    fn stdio(name: &str, cmd: &str) -> ServerSpec {
+        ServerSpec::new(
+            name,
+            Transport::Stdio {
                 command: cmd.into(),
                 args: vec!["-x".into()],
                 env: [("K".to_string(), "V".to_string())].into(),
+                cwd: None,
             },
-            enabled: true,
-        }
+        )
     }
 
     #[test]

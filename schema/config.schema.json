@@ -1,0 +1,177 @@
+{
+  "$defs": {
+    "Duration": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9]+(ms|s|m|h|d)?$",
+          "type": "string"
+        },
+        {
+          "minimum": 0,
+          "type": "integer"
+        }
+      ],
+      "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds."
+    },
+    "GatewayConfig": {
+      "additionalProperties": false,
+      "description": "Gateway-wide settings.",
+      "properties": {
+        "allow_agent_add_servers": {
+          "default": false,
+          "description": "Whether the agent may add new backend servers itself. Default: `false`.",
+          "type": "boolean"
+        },
+        "store_path": {
+          "default": null,
+          "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token_path": {
+          "default": null,
+          "description": "Path of the static loopback auth token file.\nDefault: `<data dir>/mcpgw/token`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ServerSpec": {
+      "description": "One backend tool server (`[[server]]` in the config file).",
+      "oneOf": [
+        {
+          "description": "Spawn a local child process speaking MCP over stdio.",
+          "properties": {
+            "args": {
+              "description": "Arguments.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "command": {
+              "description": "Executable to run.",
+              "type": "string"
+            },
+            "cwd": {
+              "description": "Working directory. Default: the gateway's.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Extra environment variables for the child.",
+              "type": "object"
+            },
+            "transport": {
+              "const": "stdio",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transport",
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Connect to a remote Streamable HTTP endpoint.",
+          "properties": {
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Extra request headers.",
+              "type": "object"
+            },
+            "transport": {
+              "const": "http",
+              "type": "string"
+            },
+            "url": {
+              "description": "Endpoint URL.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transport",
+            "url"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "enabled": {
+          "description": "Whether the gateway may start this server. Default: `true`.",
+          "type": "boolean"
+        },
+        "idle_timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stop the server after this long without calls. Default: gateway-wide."
+        },
+        "name": {
+          "description": "Unique server name; tools appear as `<name>__<tool>`.",
+          "type": "string"
+        },
+        "startup_timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Deadline for start-up and the MCP handshake. Default: gateway-wide."
+        },
+        "stateful": {
+          "description": "The server keeps user state (browser, database session): it is never\nstopped for idleness or evicted.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Root configuration.",
+  "properties": {
+    "gateway": {
+      "$ref": "#/$defs/GatewayConfig",
+      "default": {
+        "allow_agent_add_servers": false,
+        "store_path": null,
+        "token_path": null
+      },
+      "description": "Gateway-wide behaviour."
+    },
+    "server": {
+      "description": "Backend tool servers.",
+      "items": {
+        "$ref": "#/$defs/ServerSpec"
+      },
+      "type": "array"
+    }
+  },
+  "title": "Config",
+  "type": "object"
+}

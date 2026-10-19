@@ -1,6 +1,7 @@
 //! `mcpgw-config` — gateway configuration loaded from TOML.
 
-use mcpgw_core::{Error, Result, ServerConfig};
+use mcpgw_core::{Error, Result, ServerSpec};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -9,19 +10,24 @@ use std::path::{Path, PathBuf};
 pub const CONFIG_ENV: &str = "MCPGW_CONFIG";
 
 /// Root configuration.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     /// Gateway-wide behaviour.
     #[serde(default)]
     pub gateway: GatewayConfig,
     /// Backend tool servers.
-    #[serde(default, rename = "server")]
-    pub servers: Vec<ServerConfig>,
+    #[serde(default, rename = "server", skip_serializing_if = "Vec::is_empty")]
+    pub servers: Vec<ServerSpec>,
+}
+
+/// JSON Schema of the config file.
+pub fn json_schema() -> serde_json::Value {
+    serde_json::to_value(schemars::schema_for!(Config)).expect("schema serialises")
 }
 
 /// Gateway-wide settings.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct GatewayConfig {
     /// Whether the agent may add new backend servers itself. Default: `false`.
@@ -107,7 +113,7 @@ impl Config {
     }
 
     /// Enabled servers only.
-    pub fn enabled_servers(&self) -> impl Iterator<Item = &ServerConfig> {
+    pub fn enabled_servers(&self) -> impl Iterator<Item = &ServerSpec> {
         self.servers.iter().filter(|s| s.enabled)
     }
 
@@ -124,7 +130,7 @@ impl Config {
     }
 
     /// Look up a server by name.
-    pub fn server(&self, name: &str) -> Result<&ServerConfig> {
+    pub fn server(&self, name: &str) -> Result<&ServerSpec> {
         self.servers
             .iter()
             .find(|s| s.name == name)
@@ -136,7 +142,6 @@ impl Config {
 mod tests {
     use super::*;
     use mcpgw_core::Transport;
-    use std::collections::BTreeMap;
 
     #[test]
     fn locked_defaults() {
@@ -248,15 +253,10 @@ mod tests {
         assert_eq!(Config::load_or_default(&p).unwrap(), Config::default());
 
         let mut c = Config::default();
-        c.servers.push(ServerConfig {
-            name: "fs".into(),
-            transport: Transport::Stdio {
-                command: "mcp-fs".into(),
-                args: vec!["--ro".into()],
-                env: BTreeMap::new(),
-            },
-            enabled: true,
-        });
+        c.servers.push(ServerSpec::new(
+            "fs",
+            Transport::stdio("mcp-fs", vec!["--ro".into()]),
+        ));
         std::fs::write(&p, c.to_toml_string().unwrap()).unwrap();
         assert_eq!(Config::load(&p).unwrap(), c);
         std::fs::remove_dir_all(&dir).unwrap();

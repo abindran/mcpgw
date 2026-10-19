@@ -77,6 +77,8 @@ pub struct StdioSpec {
     pub args: Vec<String>,
     /// Extra environment variables.
     pub env: BTreeMap<String, String>,
+    /// Working directory.
+    pub cwd: Option<std::path::PathBuf>,
 }
 
 #[derive(Clone, Default)]
@@ -108,6 +110,9 @@ impl BackendConn {
     pub async fn connect_stdio(spec: &StdioSpec, timeout: Duration) -> Result<Self, ProtoError> {
         let mut cmd = tokio::process::Command::new(&spec.command);
         cmd.args(&spec.args).envs(&spec.env);
+        if let Some(dir) = &spec.cwd {
+            cmd.current_dir(dir);
+        }
         let child = TokioChildProcess::new(cmd)
             .map_err(|e| ProtoError::Connect(format!("spawn {}: {e}", spec.command)))?;
         Self::connect_transport(child, timeout).await

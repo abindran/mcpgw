@@ -3,9 +3,15 @@
 //! Servers, tools, profiles, manifests, policies and the crate-wide
 //! [`Error`] / [`Result`]. Nothing here performs I/O.
 
+pub mod duration;
+pub mod manifest;
+pub mod profile;
 pub mod server;
 
-pub use server::{ServerConfig, TOOL_SEPARATOR, Transport, validate_server_name};
+pub use duration::Duration;
+pub use manifest::{ToolDef, ToolManifest};
+pub use profile::{Mode, Policy, Profile};
+pub use server::{ServerSpec, TOOL_SEPARATOR, Transport, validate_server_name};
 
 use thiserror::Error;
 

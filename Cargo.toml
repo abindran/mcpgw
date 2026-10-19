@@ -69,3 +69,14 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 clap = { version = "4.6", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 getrandom = "0.4"
+schemars = "1"
+sha2 = "0.10"
+
+# Keep target/ small: line tables are enough for backtraces, and
+# incremental caches are the bulk of a debug build's size.
+[profile.dev]
+debug = "line-tables-only"
+incremental = false
+
+[profile.dev.package."*"]
+debug = false
