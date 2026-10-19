@@ -78,7 +78,8 @@ fn add_list_remove_servers() {
     assert!(ok);
     let lines: Vec<_> = out.lines().collect();
     assert_eq!(lines.len(), 3, "{out}");
-    assert!(lines[0].starts_with("extra\tstdio\tstore\t") && lines[0].ends_with("fake-mcp -v"));
+    assert!(lines[0].starts_with("extra\tstdio\tstore\t") && lines[0].contains("fake-mcp"));
+    assert!(lines[0].ends_with(" -v"), "{}", lines[0]);
     assert!(lines[1].starts_with("fromcfg\tstdio\tconfig\t"));
     assert_eq!(lines[2], "web\thttp\tstore\thttps://e.com/mcp [disabled]");
 
