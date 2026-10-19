@@ -26,3 +26,4 @@ mod tests {
         assert_eq!(e.to_string(), "configuration error: missing field");
     }
 }
+use rmcp::x;
