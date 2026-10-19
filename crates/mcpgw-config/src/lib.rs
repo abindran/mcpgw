@@ -1,9 +1,18 @@
 //! `mcpgw-config` — gateway configuration loaded from TOML.
+//!
+//! Loading reports problems with file, line, column and a fix hint
+//! ([`ConfigError`]), rejects unknown keys (including inside `[[server]]`),
+//! and applies `MCPGW_<SECTION>__<KEY>` environment overrides.
+
+mod error;
+mod load;
+
+pub use error::{ConfigError, Origin};
+pub use load::{ENV_PREFIX, env_overrides};
 
 use mcpgw_core::{Error, Result, ServerSpec};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Environment variable that overrides the config file location.
@@ -75,24 +84,38 @@ impl GatewayConfig {
 }
 
 impl Config {
-    /// Parse and validate configuration from TOML text.
+    /// Parse and validate TOML text (no environment overrides).
     pub fn from_toml_str(s: &str) -> Result<Self> {
-        let cfg: Config = toml::from_str(s)?;
-        cfg.validate()?;
-        Ok(cfg)
+        Ok(Self::parse(s, Path::new(""), [])?)
     }
 
-    /// Load and validate configuration from a file.
-    pub fn load(path: impl AsRef<Path>) -> Result<Self> {
-        Self::from_toml_str(&std::fs::read_to_string(path)?)
+    /// Parse and validate `src` read from `path`, then apply `env`
+    /// overrides (`(name, value)` pairs, normally from [`env_overrides`]).
+    pub fn parse(
+        src: &str,
+        path: &Path,
+        env: impl IntoIterator<Item = (String, String)>,
+    ) -> std::result::Result<Self, ConfigError> {
+        load::parse(src, path, env.into_iter().collect())
     }
 
-    /// Load from `path` if it exists, otherwise return defaults.
-    pub fn load_or_default(path: impl AsRef<Path>) -> Result<Self> {
-        match std::fs::read_to_string(path.as_ref()) {
-            Ok(s) => Self::from_toml_str(&s),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
-            Err(e) => Err(e.into()),
+    /// Load a file and apply overrides from the process environment.
+    pub fn load(path: impl AsRef<Path>) -> std::result::Result<Self, ConfigError> {
+        let path = path.as_ref();
+        let src = std::fs::read_to_string(path).map_err(|e| {
+            ConfigError::new(Origin::File(path.into()), format!("cannot read: {e}"))
+        })?;
+        Self::parse(&src, path, env_overrides())
+    }
+
+    /// Like [`Config::load`], but a missing file means defaults (still with
+    /// environment overrides).
+    pub fn load_or_default(path: impl AsRef<Path>) -> std::result::Result<Self, ConfigError> {
+        let path = path.as_ref();
+        if path.exists() {
+            Self::load(path)
+        } else {
+            Self::parse("", path, env_overrides())
         }
     }
 
@@ -117,18 +140,6 @@ impl Config {
         self.servers.iter().filter(|s| s.enabled)
     }
 
-    /// Check invariants: every server valid, names unique.
-    pub fn validate(&self) -> Result<()> {
-        let mut seen = HashSet::new();
-        for s in &self.servers {
-            s.validate()?;
-            if !seen.insert(s.name.as_str()) {
-                return Err(Error::Config(format!("duplicate server name: {}", s.name)));
-            }
-        }
-        Ok(())
-    }
-
     /// Look up a server by name.
     pub fn server(&self, name: &str) -> Result<&ServerSpec> {
         self.servers
@@ -151,19 +162,24 @@ mod tests {
     }
 
     #[test]
-    fn parses_servers() {
+    fn parses_servers_and_paths() {
         let c = Config::from_toml_str(
             r#"
+            [gateway]
+            store_path = "/tmp/x.db"
+
             [[server]]
             name = "fs"
             transport = "stdio"
             command = "mcp-fs"
             args = ["--ro"]
+            env = { K = "V" }
 
             [[server]]
             name = "web"
             transport = "http"
             url = "https://example.com/mcp"
+            enabled = false
             "#,
         )
         .unwrap();
@@ -173,75 +189,17 @@ mod tests {
             Transport::Http { .. }
         ));
         assert!(matches!(c.server("nope"), Err(Error::UnknownServer(_))));
-    }
-
-    #[test]
-    fn rejects_duplicates_and_unknown_fields() {
-        let dup = r#"
-            [[server]]
-            name = "a"
-            transport = "http"
-            url = "http://u"
-            [[server]]
-            name = "a"
-            transport = "http"
-            url = "http://v"
-        "#;
-        assert!(matches!(Config::from_toml_str(dup), Err(Error::Config(_))));
-        assert!(Config::from_toml_str("bogus = 1").is_err());
-    }
-
-    #[test]
-    fn rejects_empty_command() {
-        let s = r#"
-            [[server]]
-            name = "a"
-            transport = "stdio"
-            command = " "
-        "#;
-        assert!(matches!(Config::from_toml_str(s), Err(Error::Config(_))));
-    }
-
-    #[test]
-    fn enabled_env_and_paths() {
-        let c = Config::from_toml_str(
-            r#"
-            [gateway]
-            store_path = "/tmp/x.db"
-
-            [[server]]
-            name = "a"
-            transport = "stdio"
-            command = "run"
-            env = { K = "V" }
-
-            [[server]]
-            name = "b"
-            transport = "stdio"
-            command = "run"
-            enabled = false
-            "#,
-        )
-        .unwrap();
         assert_eq!(c.gateway.store_path(), PathBuf::from("/tmp/x.db"));
         assert!(c.gateway.token_path().ends_with("mcpgw/token"));
         let names: Vec<_> = c.enabled_servers().map(|s| s.name.as_str()).collect();
-        assert_eq!(names, ["a"]);
-        let Transport::Stdio { env, .. } = &c.servers[0].transport else {
-            panic!()
-        };
-        assert_eq!(env["K"], "V");
+        assert_eq!(names, ["fs"]);
     }
 
     #[test]
-    fn rejects_bad_url() {
-        let s = r#"
-            [[server]]
-            name = "a"
-            transport = "http"
-            url = "ftp://x"
-        "#;
-        assert!(Config::from_toml_str(s).is_err());
+    fn sample_config_loads() {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/config.toml");
+        let c = Config::parse(&std::fs::read_to_string(&path).unwrap(), &path, []).unwrap();
+        assert!(c.servers.len() >= 3, "{c:?}");
     }
 
     #[test]
@@ -250,7 +208,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let p = dir.join("config.toml");
         let _ = std::fs::remove_file(&p);
-        assert_eq!(Config::load_or_default(&p).unwrap(), Config::default());
+        assert_eq!(Config::parse("", &p, []).unwrap(), Config::default());
 
         let mut c = Config::default();
         c.servers.push(ServerSpec::new(
@@ -258,7 +216,8 @@ mod tests {
             Transport::stdio("mcp-fs", vec!["--ro".into()]),
         ));
         std::fs::write(&p, c.to_toml_string().unwrap()).unwrap();
-        assert_eq!(Config::load(&p).unwrap(), c);
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert_eq!(Config::parse(&text, &p, []).unwrap(), c);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -136,4 +136,18 @@ fn version_and_bad_config() {
     std::fs::write(e.dir.join("config.toml"), "nonsense = 1\n").unwrap();
     let (ok, _, err) = e.run(&["list-servers"]);
     assert!(!ok && err.starts_with("mcpgw: "), "{err}");
+
+    // file, line and column, then a fix hint
+    std::fs::write(
+        e.dir.join("config.toml"),
+        "[[server]]\nname = \"gh\"\ntransport = \"stdio\"\ncomand = \"gh-mcp\"\n",
+    )
+    .unwrap();
+    let (ok, _, err) = e.run(&["list-servers"]);
+    assert!(!ok, "{err}");
+    assert!(
+        err.contains("config.toml:4:1: unknown key `comand`"),
+        "{err}"
+    );
+    assert!(err.contains("hint: did you mean `command`?"), "{err}");
 }

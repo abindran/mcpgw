@@ -1,0 +1,40 @@
+# Sample mcpgw configuration (~/.config/mcpgw/config.toml).
+#
+# Any [gateway] key can be overridden with an environment variable named
+# MCPGW_GATEWAY__<KEY>, for example MCPGW_GATEWAY__STORE_PATH=/tmp/mcpgw.db.
+# The full schema is in schema/config.schema.json.
+
+[gateway]
+# Let the agent register new servers itself (off by default; see the README).
+allow_agent_add_servers = false
+
+# A local server started on demand over stdio.
+[[server]]
+name = "fs"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+idle_timeout = "10m"
+
+# A server with environment variables.
+[[server]]
+name = "github"
+transport = "stdio"
+command = "github-mcp-server"
+args = ["stdio"]
+env = { GITHUB_TOOLSETS = "repos,issues,pull_requests" }
+
+# A browser session keeps state, so it is never stopped for idleness.
+[[server]]
+name = "browser"
+transport = "stdio"
+command = "npx"
+args = ["-y", "@playwright/mcp"]
+stateful = true
+
+# A remote MCP server (connected from M2-04).
+[[server]]
+name = "docs"
+transport = "http"
+url = "https://example.com/mcp"
+enabled = false

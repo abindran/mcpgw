@@ -30,7 +30,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | M0-04 | Protocol spike: forward one `tools/call` | ✅ ([history](history/M0-04-rmcp-Server-Spike.md)) |
 | M0-05 | Version negotiation spike, both directions | ✅ ([history](history/M0-05-rmcp-Client-and-Bridging-Spike.md)); ADR in M0-09 |
 | [M0-06](M0-06-Core-Domain-Types.md) | Core domain types + JSON Schema | ✅ |
-| M0-07 | Config loader: env overrides, line-numbered errors | ⏳ |
+| [M0-07](M0-07-Config-Loader.md) | Config loader: env overrides, line-numbered errors | ✅ |
 | M0-08 | Telemetry baseline: JSON/pretty, request IDs | ⏳ |
 | M0-09 | ADRs: protocol, storage, vault crypto, process model | ⏳ |
 | [M0-10](M0-10-Test-Harness.md) | Test harness: fake MCP servers (stdio + HTTP) | ✅ |
