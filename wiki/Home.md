@@ -33,7 +33,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | M0-07 | Config loader: env overrides, line-numbered errors | ⏳ |
 | M0-08 | Telemetry baseline: JSON/pretty, request IDs | ⏳ |
 | M0-09 | ADRs: protocol, storage, vault crypto, process model | ⏳ |
-| M0-10 | Test harness: fake MCP servers (stdio + HTTP) | ⏳ |
+| [M0-10](M0-10-Test-Harness.md) | Test harness: fake MCP servers (stdio + HTTP) | ✅ |
 
 ### M1 — Local MVP
 

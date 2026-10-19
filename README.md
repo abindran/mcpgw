@@ -50,7 +50,7 @@ accepted from older clients and servers.
 
 ```sh
 cargo build --release            # binary at target/release/mcpgw
-cargo test --workspace           # tests need python3 for the fixture backend
+cargo test --workspace
 ```
 
 ## Quick start

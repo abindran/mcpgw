@@ -15,4 +15,5 @@ tracing.workspace = true
 serde_json.workspace = true
 
 [dev-dependencies]
+mcpgw-testkit.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time"] }

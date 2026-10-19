@@ -1,32 +1,11 @@
-//! M1-03 lifecycle tests against a real child-process backend
-//! (`testdata/fixture_server.py`, a legacy 2025-11-25 server).
+//! Lifecycle tests against real child-process backends (`fake-mcp`).
 
 use std::{collections::BTreeMap, time::Duration};
 
 use mcpgw_core::{ServerConfig, Transport};
 use mcpgw_runtime::{BackendManager, BackendState, ManagerOptions, ProtoError};
 
-fn fixture() -> String {
-    format!(
-        "{}/../../testdata/fixture_server.py",
-        env!("CARGO_MANIFEST_DIR")
-    )
-}
-
-fn server(name: &str, env: &[(&str, &str)]) -> ServerConfig {
-    ServerConfig {
-        name: name.into(),
-        transport: Transport::Stdio {
-            command: "python3".into(),
-            args: vec!["-u".into(), fixture()],
-            env: env
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect::<BTreeMap<_, _>>(),
-        },
-        enabled: true,
-    }
-}
+use mcpgw_testkit::stdio as server;
 
 fn fast() -> ManagerOptions {
     ManagerOptions {
@@ -63,7 +42,7 @@ fn text_of(r: &mcpgw_runtime::JsonObject) -> String {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn spawns_negotiates_legacy_and_calls() {
-    let m = BackendManager::start(&[server("fx", &[])], fast());
+    let m = BackendManager::start(&[server("fx", &[("FAKE_PROTOCOL", "legacy")])], fast());
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     let st = m.status().await;
     assert_eq!(
@@ -78,7 +57,10 @@ async fn spawns_negotiates_legacy_and_calls() {
         .iter()
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(names, ["add", "echo", "crash", "sleep"]);
+    assert_eq!(
+        names,
+        ["add", "echo", "crash", "sleep", "env", "spawn", "stderr"]
+    );
     let r = m
         .call_tool("fx", "add", args(serde_json::json!({"a": 2, "b": 40})))
         .await
@@ -90,7 +72,7 @@ async fn spawns_negotiates_legacy_and_calls() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn passes_env_and_rpc_errors() {
-    let m = BackendManager::start(&[server("fx", &[("FIXTURE_PREFIX", ">> ")])], fast());
+    let m = BackendManager::start(&[server("fx", &[("FAKE_PREFIX", ">> ")])], fast());
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     let r = m
         .call_tool("fx", "echo", args(serde_json::json!({"text": "hi"})))
@@ -134,7 +116,7 @@ async fn restarts_after_crash() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn failed_health_check_triggers_restart() {
-    let m = BackendManager::start(&[server("fx", &[("FIXTURE_HANG_PING", "1")])], fast());
+    let m = BackendManager::start(&[server("fx", &[("FAKE_HANG_PING", "1")])], fast());
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     let mut restarted = false;
     for _ in 0..300 {

@@ -1,4 +1,4 @@
-//! M1-07: CLI subcommands, run against the built binary with an isolated config.
+//! CLI subcommands, run against the built binary with an isolated config.
 
 use std::{path::PathBuf, process::Command};
 
@@ -13,8 +13,8 @@ impl Env {
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = format!(
             "[gateway]\nstore_path = {:?}\ntoken_path = {:?}\n\n\
-             [[server]]\nname = \"fromcfg\"\ntransport = \"stdio\"\ncommand = \"python3\"\n\
-             args = [\"-u\", {:?}]\n",
+             [[server]]\nname = \"fromcfg\"\ntransport = \"stdio\"\ncommand = {:?}\n\
+             env = {{ FAKE_PROTOCOL = \"legacy\" }}\n",
             dir.join("db.sqlite"),
             dir.join("token"),
             fixture()
@@ -45,10 +45,7 @@ impl Drop for Env {
 }
 
 fn fixture() -> String {
-    format!(
-        "{}/../../testdata/fixture_server.py",
-        env!("CARGO_MANIFEST_DIR")
-    )
+    mcpgw_testkit::fake_mcp().to_string_lossy().into_owned()
 }
 
 #[test]
@@ -58,12 +55,11 @@ fn add_list_remove_servers() {
         "add-server",
         "extra",
         "--command",
-        "python3",
-        "--env",
-        "FIXTURE_PREFIX=x",
-        "--",
-        "-u",
         &fixture(),
+        "--env",
+        "FAKE_PREFIX=x",
+        "--",
+        "-v",
     ]);
     assert!(ok, "{err}");
     assert_eq!(out.trim(), "added server extra");
@@ -82,7 +78,7 @@ fn add_list_remove_servers() {
     assert!(ok);
     let lines: Vec<_> = out.lines().collect();
     assert_eq!(lines.len(), 3, "{out}");
-    assert!(lines[0].starts_with("extra\tstdio\tstore\tpython3 -u"));
+    assert!(lines[0].starts_with("extra\tstdio\tstore\t") && lines[0].ends_with("fake-mcp -v"));
     assert!(lines[1].starts_with("fromcfg\tstdio\tconfig\t"));
     assert_eq!(lines[2], "web\thttp\tstore\thttps://e.com/mcp [disabled]");
 
@@ -107,7 +103,7 @@ fn list_servers_check_starts_backends() {
     let (ok, out, err) = e.run(&["list-servers", "--check"]);
     assert!(ok, "{err}");
     assert!(
-        out.contains("fromcfg\tstdio\tconfig") && out.contains("ok (4 tools, 2025-11-25)"),
+        out.contains("fromcfg\tstdio\tconfig") && out.contains("ok (7 tools, 2025-11-25)"),
         "{out}"
     );
     assert!(

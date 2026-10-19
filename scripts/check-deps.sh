@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Fails if any crate other than mcpgw-proto references `rmcp`.
+# Exception: mcpgw-testkit, a test-only crate whose fake servers use rmcp.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 fail=0
 for dir in crates/*/; do
   name=$(basename "$dir")
-  [ "$name" = "mcpgw-proto" ] && continue
+  case "$name" in mcpgw-proto|mcpgw-testkit) continue ;; esac
   # Ignore comment-only lines (//, //!, ///, #).
   if hits=$(grep -rnE '\brmcp\b' "$dir" --include='*.rs' --include='Cargo.toml' 2>/dev/null \
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|#)'); then
@@ -23,7 +24,7 @@ if command -v cargo >/dev/null; then
 import json,sys
 m=json.load(sys.stdin)
 for p in m["packages"]:
-    if p["name"]!="mcpgw-proto" and any(d["name"]=="rmcp" for d in p["dependencies"]):
+    if p["name"] not in ("mcpgw-proto","mcpgw-testkit") and any(d["name"]=="rmcp" for d in p["dependencies"]):
         print(p["name"])')
   if [ -n "$bad" ]; then
     echo "::error::Cargo dependency on rmcp in: $bad"
@@ -31,5 +32,5 @@ for p in m["packages"]:
   fi
 fi
 
-[ $fail -eq 0 ] && echo "dependency rule OK: rmcp confined to mcpgw-proto"
+[ $fail -eq 0 ] && echo "dependency rule OK: rmcp confined to mcpgw-proto (and test-only mcpgw-testkit)"
 exit $fail

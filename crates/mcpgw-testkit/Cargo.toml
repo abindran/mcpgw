@@ -1,0 +1,27 @@
+[package]
+name = "mcpgw-testkit"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+description = "Fake MCP servers and helpers for mcpgw integration tests (test-only)."
+
+# Test-only crate: the fake servers are built on `rmcp`, which is the one
+# exception to the dependency rule (see scripts/check-deps.sh).
+[dependencies]
+mcpgw-core.workspace = true
+rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "transport-child-process", "transport-streamable-http-server"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
+serde_json.workspace = true
+tokio = { workspace = true, features = ["io-std", "io-util", "process", "time", "net", "signal"] }
+
+[[bin]]
+name = "fake-mcp"
+path = "src/bin/fake-mcp.rs"
+
+[dev-dependencies]
+rmcp = { version = "3.5.1", features = ["client", "transport-child-process", "transport-streamable-http-client-reqwest"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "time", "process"] }
