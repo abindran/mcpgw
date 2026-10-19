@@ -21,9 +21,21 @@ client to backend tool servers, bridging between them.
 | [M0-04](M0-04-rmcp-Server-Spike) | Spike: rmcp as MCP **server** to a client | ✅ Done |
 | [M0-05](M0-05-rmcp-Client-and-Bridging-Spike) | Spike: rmcp as MCP **client** + version bridging | ✅ Done |
 
+### Milestone M1 — Core runtime, store, process lifecycle
+
+| ID | Item | Status |
+|----|------|--------|
+| [M1-01](M1-01-Config-Loading) | Config file loading, defaults, validation (`mcpgw-core`) | ✅ Done |
+| M1-02 | SQLite-backed server registry (`mcpgw-store`) | ⏳ Todo |
+| M1-03 | Backend process lifecycle: spawn, health, restart, shutdown | ⏳ Todo |
+| M1-04 | Tool aggregation with server-name prefixes | ⏳ Todo |
+| M1-05 | Gateway stdio server forwarding `tools/list` / `tools/call` | ⏳ Todo |
+| M1-06 | Static loopback-token auth | ⏳ Todo |
+| M1-07 | `mcpgw` CLI: `serve`, `add-server`, `list-servers` | ⏳ Todo |
+| M1-08 | End-to-end test through the gateway binary | ⏳ Todo |
+
 ### Later milestones
 
-- **M1** — Core runtime, store, process lifecycle
 - **M2** — OAuth, remote backends, profiles, policy, approvals, admin API/UI
 - **M3** — Discovery, search (BM25 + embeddings), performance
 - **M4** — Extensions, polish, v1.0 docs

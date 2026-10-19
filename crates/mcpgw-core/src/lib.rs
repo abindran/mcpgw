@@ -7,7 +7,10 @@
 
 pub mod config;
 
-pub use config::{Config, GatewayConfig, SearchConfig, ServerConfig, Transport};
+pub use config::{
+    data_dir, validate_server_name, Config, GatewayConfig, SearchConfig, ServerConfig, Transport,
+    CONFIG_ENV, TOOL_SEPARATOR,
+};
 
 use thiserror::Error;
 
