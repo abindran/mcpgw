@@ -5,8 +5,10 @@
 //! - agent self-adding of servers is **disabled** by default;
 //! - embeddings-based tool search is **enabled** by default.
 
+pub mod auth;
 pub mod config;
 
+pub use auth::Token;
 pub use config::{
     data_dir, validate_server_name, Config, GatewayConfig, SearchConfig, ServerConfig, Transport,
     CONFIG_ENV, TOOL_SEPARATOR,

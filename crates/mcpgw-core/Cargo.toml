@@ -10,3 +10,4 @@ license.workspace = true
 thiserror.workspace = true
 serde.workspace = true
 toml.workspace = true
+getrandom.workspace = true
