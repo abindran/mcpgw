@@ -81,7 +81,6 @@ fn serve_lists_and_calls_and_logs_one_line_per_request() {
     send(json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"fx__nope"}}));
     assert!(recv(4)["error"].is_object());
 
-    drop(send);
     drop(stdin); // client hangs up; the gateway exits
     let status = child.wait().unwrap();
     assert!(status.success(), "{status:?}");
