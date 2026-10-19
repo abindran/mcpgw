@@ -28,8 +28,8 @@ client to backend tool servers, bridging between them.
 | [M1-01](M1-01-Config-Loading) | Config file loading, defaults, validation (`mcpgw-core`) | ✅ Done |
 | [M1-02](M1-02-SQLite-Server-Registry) | SQLite-backed server registry (`mcpgw-store`) | ✅ Done |
 | [M1-03](M1-03-Backend-Process-Lifecycle) | Backend process lifecycle: spawn, health, restart, shutdown | ✅ Done |
-| M1-04 | Tool aggregation with server-name prefixes | ⏳ Todo |
-| M1-05 | Gateway stdio server forwarding `tools/list` / `tools/call` | ⏳ Todo |
+| [M1-04](M1-04-Tool-Aggregation) | Tool aggregation with server-name prefixes | ✅ Done |
+| [M1-05](M1-05-Gateway-Stdio-Server) | Gateway stdio server forwarding `tools/list` / `tools/call` | ✅ Done |
 | M1-06 | Static loopback-token auth | ⏳ Todo |
 | M1-07 | `mcpgw` CLI: `serve`, `add-server`, `list-servers` | ⏳ Todo |
 | M1-08 | End-to-end test through the gateway binary | ⏳ Todo |

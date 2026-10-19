@@ -16,7 +16,8 @@ rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "mac
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
-tokio = { workspace = true, features = ["process", "time"] }
+tokio = { workspace = true, features = ["process", "time", "io-std", "io-util"] }
+tracing = { workspace = true }
 
 [dev-dependencies]
 serde_json = "1.0.154"

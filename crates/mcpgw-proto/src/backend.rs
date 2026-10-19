@@ -206,7 +206,6 @@ impl BackendConn {
 }
 
 /// Parse a tool JSON object back into a typed tool (used by the front server).
-#[allow(dead_code)] // used by the front server (M1-05)
 pub(crate) fn tool_from_json(o: JsonObject) -> Result<Tool, ProtoError> {
     serde_json::from_value(Value::Object(o)).map_err(|e| ProtoError::Other(e.to_string()))
 }

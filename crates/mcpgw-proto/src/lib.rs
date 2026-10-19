@@ -7,6 +7,7 @@
 //! (enforced in CI, see M0-02).
 
 pub mod backend;
+pub mod front;
 pub mod spike_bridge;
 pub mod spike_server;
 
