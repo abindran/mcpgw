@@ -57,6 +57,15 @@ cargo test --workspace
 
 Requires Rust `1.85+` (edition 2021).
 
+## CI & local checks
+
+GitHub Actions (`.github/workflows/ci.yml`) runs fmt, clippy (`-D warnings`), build, test, the `rmcp` dependency-rule check, and a canary-secret scan. Run the rule checks locally:
+
+```sh
+bash scripts/check-deps.sh
+bash scripts/canary-scan.sh
+```
+
 ## Roadmap
 
 | Milestone | Theme |
