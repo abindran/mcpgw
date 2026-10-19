@@ -31,7 +31,7 @@ client to backend tool servers, bridging between them.
 | [M1-04](M1-04-Tool-Aggregation) | Tool aggregation with server-name prefixes | ✅ Done |
 | [M1-05](M1-05-Gateway-Stdio-Server) | Gateway stdio server forwarding `tools/list` / `tools/call` | ✅ Done |
 | [M1-06](M1-06-Loopback-Token-Auth) | Static loopback-token auth | ✅ Done |
-| M1-07 | `mcpgw` CLI: `serve`, `add-server`, `list-servers` | ⏳ Todo |
+| [M1-07](M1-07-CLI) | `mcpgw` CLI: `serve`, `add-server`, `list-servers` | ✅ Done |
 | M1-08 | End-to-end test through the gateway binary | ⏳ Todo |
 
 ### Later milestones

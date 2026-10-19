@@ -7,7 +7,7 @@ A single-binary, local **MCP gateway**. `mcpgw` is simultaneously:
 
 proxying and bridging between them (including across protocol versions).
 
-> Status: **early development** — currently at milestone **M0 (foundations & risk spikes)**.
+> Status: **early development**. M0 (foundations) and M1 (core runtime) are done: stdio backends, tool aggregation, a stdio front end, and a CLI.
 
 ## Workspace layout
 
@@ -45,15 +45,32 @@ The gateway bridges two protocol versions:
 ## Build & run
 
 ```sh
-# Build the whole workspace
-cargo build --workspace
-
-# Run the gateway binary
-cargo run --bin mcpgw
-
-# Run all tests
-cargo test --workspace
+cargo build --release            # binary at target/release/mcpgw
+cargo test --workspace           # tests need python3 for the fixture backend
 ```
+
+## Quick start
+
+```sh
+# Register backends (stored in ~/.local/share/mcpgw/mcpgw.db)
+mcpgw add-server fs --command npx -- -y @modelcontextprotocol/server-filesystem /tmp
+mcpgw add-server gh --command github-mcp --env GITHUB_TOKEN=...
+
+mcpgw list-servers --check       # start each backend and report status and tool count
+mcpgw serve                      # run the gateway on stdio
+mcpgw token [--rotate]           # loopback token (used by the HTTP front end from M2)
+mcpgw remove-server gh
+```
+
+Point your MCP client at the gateway, for example:
+
+```json
+{ "mcpServers": { "mcpgw": { "command": "mcpgw", "args": ["serve"] } } }
+```
+
+Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can also be declared in `~/.config/mcpgw/config.toml` (or `$MCPGW_CONFIG`, or `--config`); see [M1-01](wiki/M1-01-Config-Loading.md). Config-file entries take precedence over stored ones with the same name. Logs go to stderr and are controlled by `MCPGW_LOG` (default `warn`).
+
+Backends speaking `2025-11-25` or `2026-07-28` are both supported. Crashed or unresponsive backends are restarted with exponential backoff.
 
 Requires Rust `1.85+` (edition 2021).
 
@@ -70,8 +87,8 @@ bash scripts/canary-scan.sh
 
 | Milestone | Theme |
 |-----------|-------|
-| **M0** | Foundations & risk spikes (workspace, CI, config, proxy spikes) |
-| M1 | Core runtime, store, process lifecycle |
+| M0 ✅ | Foundations & risk spikes (workspace, CI, config, proxy spikes) |
+| M1 ✅ | Core runtime, store, process lifecycle |
 | M2 | OAuth, remote backends, profiles, policy, approvals, admin API/UI |
 | M3 | Discovery, search (BM25 + embeddings), performance |
 | M4 | Extensions, polish, v1.0 docs |
