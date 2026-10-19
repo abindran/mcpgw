@@ -14,7 +14,9 @@ license.workspace = true
 # Pinned in the M0-04 spike (see wiki/M0-04-rmcp-Server-Spike.md).
 rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "macros", "transport-child-process"] }
 serde = { workspace = true }
-tokio = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["process", "time"] }
 
 [dev-dependencies]
 serde_json = "1.0.154"
