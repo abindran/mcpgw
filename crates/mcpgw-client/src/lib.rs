@@ -4,8 +4,10 @@
 //! lifecycle. It never imports `rmcp` directly; all protocol access goes
 //! through `mcpgw-proto`.
 
+pub mod aggregate;
 pub mod manager;
 
+pub use aggregate::{public_name, split_name};
 pub use manager::{BackendManager, BackendState, BackendStatus, ManagerOptions};
 pub use mcpgw_proto::{JsonObject, ProtoError};
 

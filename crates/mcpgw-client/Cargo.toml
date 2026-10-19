@@ -11,7 +11,7 @@ mcpgw-core.workspace = true
 mcpgw-proto.workspace = true
 tokio = { workspace = true, features = ["sync", "time"] }
 tracing.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
-serde_json.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time"] }

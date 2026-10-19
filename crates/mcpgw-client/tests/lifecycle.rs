@@ -89,6 +89,48 @@ async fn spawns_negotiates_legacy_and_calls() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn aggregates_two_backends_and_routes_by_prefix() {
+    let m = BackendManager::start(
+        &[
+            server("one", &[("FIXTURE_PREFIX", "1:")]),
+            server("two", &[("FIXTURE_PREFIX", "2:")]),
+        ],
+        fast(),
+    );
+    assert!(m.wait_ready(Duration::from_secs(20)).await);
+    let all = m.list_all_tools().await;
+    let names: Vec<_> = all.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(
+        names,
+        [
+            "one__add",
+            "one__echo",
+            "one__crash",
+            "one__sleep",
+            "two__add",
+            "two__echo",
+            "two__crash",
+            "two__sleep"
+        ]
+    );
+    assert_eq!(all[0]["description"], "[one] Add two integers");
+    for (who, want) in [("one__echo", "1:x"), ("two__echo", "2:x")] {
+        let r = m
+            .call_public(who, args(serde_json::json!({"text": "x"})))
+            .await
+            .unwrap();
+        assert_eq!(text_of(&r), want);
+    }
+    for bad in ["echo", "three__echo"] {
+        assert!(matches!(
+            m.call_public(bad, None).await,
+            Err(ProtoError::Rpc { code: -32602, .. })
+        ));
+    }
+    m.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn passes_env_and_rpc_errors() {
     let m = BackendManager::start(&[server("fx", &[("FIXTURE_PREFIX", ">> ")])], fast());
     assert!(m.wait_ready(Duration::from_secs(20)).await);
