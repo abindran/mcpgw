@@ -1,0 +1,45 @@
+# mcpgw — workspace root
+#
+# Crate layout (M0-01):
+#   mcpgw-proto   -> the ONLY crate allowed to depend on `rmcp` (protocol isolation seam)
+#   mcpgw-core    -> shared types, errors, config
+#   mcpgw-store   -> persistence trait + local implementation
+#   mcpgw-server  -> MCP server side (faces the LLM client)
+#   mcpgw-client  -> MCP client side (faces backend tool servers)
+#   mcpgw         -> the binary that wires everything together
+#
+# Dependency rule (enforced in CI, M0-02): no crate other than `mcpgw-proto`
+# may import `rmcp`. This keeps all protocol churn contained to one seam.
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/mcpgw-proto",
+    "crates/mcpgw-core",
+    "crates/mcpgw-store",
+    "crates/mcpgw-server",
+    "crates/mcpgw-client",
+    "crates/mcpgw",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+authors = ["zohocode"]
+license = "MIT OR Apache-2.0"
+repository = ""
+
+[workspace.dependencies]
+# Internal crates
+mcpgw-proto = { path = "crates/mcpgw-proto" }
+mcpgw-core = { path = "crates/mcpgw-core" }
+mcpgw-store = { path = "crates/mcpgw-store" }
+mcpgw-server = { path = "crates/mcpgw-server" }
+mcpgw-client = { path = "crates/mcpgw-client" }
+
+# Shared third-party crates
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing = "0.1"

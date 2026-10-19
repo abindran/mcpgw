@@ -1,0 +1,15 @@
+[package]
+name = "mcpgw-proto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+# NOTE: This is the ONLY crate permitted to depend on `rmcp`.
+# All MCP protocol handling and version bridging lives here so that
+# protocol churn stays contained behind this seam. CI (M0-02) enforces
+# that no other workspace crate imports `rmcp`.
+[dependencies]
+# rmcp is added in the M0-04 / M0-05 spikes. Kept out of the skeleton
+# build until the version is pinned during those spikes.
