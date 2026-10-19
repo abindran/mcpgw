@@ -32,6 +32,9 @@ pub enum Error {
     /// A named backend server was not found.
     #[error("unknown server: {0}")]
     UnknownServer(String),
+    /// Persistence failure.
+    #[error("store error: {0}")]
+    Store(String),
     /// A protocol-level failure reported by another crate.
     #[error("protocol error: {0}")]
     Protocol(String),

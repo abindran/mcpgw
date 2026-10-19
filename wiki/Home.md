@@ -26,7 +26,7 @@ client to backend tool servers, bridging between them.
 | ID | Item | Status |
 |----|------|--------|
 | [M1-01](M1-01-Config-Loading) | Config file loading, defaults, validation (`mcpgw-core`) | ✅ Done |
-| M1-02 | SQLite-backed server registry (`mcpgw-store`) | ⏳ Todo |
+| [M1-02](M1-02-SQLite-Server-Registry) | SQLite-backed server registry (`mcpgw-store`) | ✅ Done |
 | M1-03 | Backend process lifecycle: spawn, health, restart, shutdown | ⏳ Todo |
 | M1-04 | Tool aggregation with server-name prefixes | ⏳ Todo |
 | M1-05 | Gateway stdio server forwarding `tools/list` / `tools/call` | ⏳ Todo |
