@@ -27,7 +27,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | [M0-01](M0-01-Workspace-and-Crate-Layout.md) | Workspace with all crates, MSRV 1.98, edition 2024 | ✅ |
 | [M0-02](M0-02-CI-Matrix.md) | CI matrix: macOS arm64/x86, Linux glibc/musl, Windows | ✅ |
 | [M0-03](M0-03-Supply-Chain-Gates.md) | Supply-chain gates: cargo deny, cargo audit, licences, SBOM | ✅ |
-| M0-04 | Protocol spike: forward one `tools/call` | ✅ ([history](history/M0-04-rmcp-Server-Spike.md)) |
+| [M0-04](M0-04-Protocol-Spike.md) | Protocol spike: forward one `tools/call` | ✅ |
 | M0-05 | Version negotiation spike, both directions | ✅ ([history](history/M0-05-rmcp-Client-and-Bridging-Spike.md), [ADR-0001](../docs/adr/0001-protocol.md)) |
 | [M0-06](M0-06-Core-Domain-Types.md) | Core domain types + JSON Schema | ✅ |
 | [M0-07](M0-07-Config-Loader.md) | Config loader: env overrides, line-numbered errors | ✅ |

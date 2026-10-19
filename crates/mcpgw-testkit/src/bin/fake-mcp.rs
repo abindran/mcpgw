@@ -11,6 +11,7 @@
 //! | `FAKE_DESC_SUFFIX` | appended to every tool description (drift tests) |
 //! | `FAKE_PREFIX` | prefix for `echo` replies |
 //! | `FAKE_START_DELAY_MS` | sleep before serving (cold-start tests) |
+//! | `FAKE_DELAY_MARKER` | file; with it, the start delay applies only until the file exists (first start only) |
 //! | `FAKE_CRASH_AFTER` | exit after this many tool calls |
 //! | `FAKE_HANG_PING` | `1`: never answer `ping` (health-check tests) |
 //! | `FAKE_STDERR` | line written to stderr at startup |
@@ -275,7 +276,16 @@ async fn main() {
         eprintln!("{line}");
     }
     if let Some(ms) = env("FAKE_START_DELAY_MS").and_then(|v| v.parse().ok()) {
-        tokio::time::sleep(Duration::from_millis(ms)).await;
+        let marker = env("FAKE_DELAY_MARKER");
+        if marker
+            .as_ref()
+            .is_none_or(|m| !std::path::Path::new(m).exists())
+        {
+            tokio::time::sleep(Duration::from_millis(ms)).await;
+            if let Some(m) = marker {
+                std::fs::write(m, b"started").ok();
+            }
+        }
     }
     let fake = Fake {
         s: Arc::new(settings()),

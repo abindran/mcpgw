@@ -159,3 +159,50 @@ async fn bad_command_backs_off_and_unsupported_is_reported() {
     ));
     m.shutdown().await;
 }
+
+/// A legacy server that takes longer than rmcp's 10 s discover probe on its
+/// first start (a cold `npx` download) still connects: the late reply to the
+/// probe is not fatal because the gateway retries with plain `initialize`.
+#[tokio::test(flavor = "multi_thread")]
+async fn slow_first_start_of_legacy_server_connects() {
+    let marker = std::env::temp_dir().join(format!("mcpgw-slow-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    let marker_s = marker.to_string_lossy().into_owned();
+    let opts = ManagerOptions {
+        connect_timeout: Duration::from_secs(40),
+        ..fast()
+    };
+    let m = BackendManager::start(
+        &[server(
+            "slow",
+            &[
+                ("FAKE_PROTOCOL", "legacy"),
+                ("FAKE_START_DELAY_MS", "10500"),
+                ("FAKE_DELAY_MARKER", &marker_s),
+            ],
+        )],
+        opts,
+    );
+    // Must go straight from Starting to Running: a pass through Restarting
+    // means the first handshake failed and the supervisor had to retry.
+    let mut seen = Vec::new();
+    for _ in 0..800 {
+        let st = m.status().await[0].state.clone();
+        if seen.last() != Some(&st) {
+            seen.push(st.clone());
+        }
+        if matches!(st, BackendState::Running { .. }) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        matches!(
+            seen.as_slice(),
+            [BackendState::Starting, BackendState::Running { .. }]
+        ),
+        "{seen:?}"
+    );
+    m.shutdown().await;
+    let _ = std::fs::remove_file(&marker);
+}

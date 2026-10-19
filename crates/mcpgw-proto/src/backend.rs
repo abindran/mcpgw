@@ -97,6 +97,11 @@ fn backend_lifecycle() -> ClientLifecycleMode {
     }
 }
 
+/// Plain legacy `initialize` at 2025-11-25 (retry path, see `connect_stdio`).
+fn legacy_lifecycle() -> ClientLifecycleMode {
+    ClientLifecycleMode::Initialize
+}
+
 /// A live connection to one backend.
 pub struct BackendConn {
     service: RunningService<RoleClient, GatewayClient>,
@@ -107,7 +112,32 @@ impl BackendConn {
     ///
     /// The child's stderr is inherited; stdout carries the protocol. The child
     /// is killed when the connection is dropped.
+    ///
+    /// The handshake probes `server/discover` and falls back to `initialize`.
+    /// rmcp gives up on the probe after a fixed 10 s; a slow legacy server
+    /// (a cold `npx` download) then answers the abandoned probe late and the
+    /// fallback fails on the uncorrelated reply. So when the automatic
+    /// handshake fails, the server is started once more with a plain legacy
+    /// `initialize`.
     pub async fn connect_stdio(spec: &StdioSpec, timeout: Duration) -> Result<Self, ProtoError> {
+        let deadline = tokio::time::Instant::now() + timeout;
+        match Self::spawn_with(spec, timeout, backend_lifecycle()).await {
+            Err(ProtoError::Connect(first)) if !first.starts_with("spawn ") => {
+                tracing::debug!(command = %spec.command, error = %first, "auto handshake failed; retrying with initialize");
+                let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+                Self::spawn_with(spec, left.max(Duration::from_secs(1)), legacy_lifecycle())
+                    .await
+                    .map_err(|e| ProtoError::Connect(format!("{first}; legacy retry: {e}")))
+            }
+            other => other,
+        }
+    }
+
+    async fn spawn_with(
+        spec: &StdioSpec,
+        timeout: Duration,
+        lifecycle: ClientLifecycleMode,
+    ) -> Result<Self, ProtoError> {
         let mut cmd = tokio::process::Command::new(&spec.command);
         cmd.args(&spec.args).envs(&spec.env);
         if let Some(dir) = &spec.cwd {
@@ -115,7 +145,7 @@ impl BackendConn {
         }
         let child = TokioChildProcess::new(cmd)
             .map_err(|e| ProtoError::Connect(format!("spawn {}: {e}", spec.command)))?;
-        Self::connect_transport(child, timeout).await
+        Self::connect_transport(child, timeout, lifecycle).await
     }
 
     /// Handshake over an arbitrary transport (in-memory pipes in tests).
@@ -123,15 +153,19 @@ impl BackendConn {
     where
         T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + 'static,
     {
-        Self::connect_transport(io, timeout).await
+        Self::connect_transport(io, timeout, backend_lifecycle()).await
     }
 
-    async fn connect_transport<T, E, A>(transport: T, timeout: Duration) -> Result<Self, ProtoError>
+    async fn connect_transport<T, E, A>(
+        transport: T,
+        timeout: Duration,
+        lifecycle: ClientLifecycleMode,
+    ) -> Result<Self, ProtoError>
     where
         T: rmcp::transport::IntoTransport<RoleClient, E, A>,
         E: std::error::Error + Send + Sync + 'static,
     {
-        let fut = GatewayClient.serve_with_lifecycle(transport, backend_lifecycle());
+        let fut = GatewayClient.serve_with_lifecycle(transport, lifecycle);
         match tokio::time::timeout(timeout, fut).await {
             Ok(Ok(service)) => Ok(Self { service }),
             Ok(Err(e)) => Err(ProtoError::Connect(e.to_string())),

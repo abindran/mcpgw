@@ -12,7 +12,9 @@ fn check(file: &str, schema: serde_json::Value) {
         std::fs::write(&path, &text).unwrap();
         return;
     }
-    let committed = std::fs::read_to_string(&path).unwrap_or_default();
+    let committed = std::fs::read_to_string(&path)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
     assert!(
         committed == text,
         "schema/{file} is stale; run `cargo xtask schema`"
