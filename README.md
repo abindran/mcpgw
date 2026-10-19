@@ -74,12 +74,16 @@ claude mcp add --transport http mcpgw http://127.0.0.1:7777/mcp \
   --header "Authorization: Bearer $(mcpgw token)"
 ```
 
-Clients that can only launch a command can use `mcpgw serve --stdio`, a
-single-client gateway on stdin/stdout:
+Clients that can only launch a command (Cursor, VS Code, Claude Desktop) use
+the stdio shim, which finds the daemon, starts it if it isn't running, and
+relays messages:
 
 ```json
-{ "mcpServers": { "mcpgw": { "command": "mcpgw", "args": ["serve", "--stdio"] } } }
+{ "mcpServers": { "mcpgw": { "command": "mcpgw", "args": ["connect"] } } }
 ```
+
+`mcpgw serve --stdio` runs a separate single-client gateway on stdin/stdout
+instead of using the daemon.
 
 The daemon only listens on loopback, refuses requests whose `Host` is not a
 loopback name or whose `Origin` is a foreign web page (403), and requires the

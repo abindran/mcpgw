@@ -87,13 +87,28 @@ impl Token {
     }
 
     /// Load the token, creating it (mode 0600) if the file does not exist.
+    ///
+    /// Safe against concurrent callers: if another process creates the file
+    /// first, its token is loaded.
     pub fn load_or_create(path: &Path) -> Result<Self> {
         if path.exists() {
             return Self::load(path);
         }
         let t = Self::generate()?;
-        t.write_new(path)?;
-        Ok(t)
+        match t.write_new(path) {
+            Ok(()) => Ok(t),
+            Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Give the winner a moment to finish writing.
+                for _ in 0..50 {
+                    if let Ok(t) = Self::load(path) {
+                        return Ok(t);
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+                Self::load(path)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Replace the token file with a fresh token.

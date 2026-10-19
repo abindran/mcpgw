@@ -172,9 +172,21 @@ impl McpClient {
 
     /// Spawn `cmd` and speak MCP over its stdio (e.g. `mcpgw connect`).
     pub async fn stdio(cmd: tokio::process::Command) -> Result<Self, String> {
+        Self::stdio_with(cmd, lifecycle()).await
+    }
+
+    /// Like [`McpClient::stdio`] but as a 2025-11-25 client.
+    pub async fn stdio_legacy(cmd: tokio::process::Command) -> Result<Self, String> {
+        Self::stdio_with(cmd, rmcp::ClientLifecycleMode::Initialize).await
+    }
+
+    async fn stdio_with(
+        cmd: tokio::process::Command,
+        lifecycle: rmcp::ClientLifecycleMode,
+    ) -> Result<Self, String> {
         use rmcp::{ClientServiceExt, transport::TokioChildProcess};
         let t = TokioChildProcess::new(cmd).map_err(|e| e.to_string())?;
-        let svc = ().serve_with_lifecycle(t, lifecycle()).await.map_err(|e| e.to_string())?;
+        let svc = ().serve_with_lifecycle(t, lifecycle).await.map_err(|e| e.to_string())?;
         Ok(Self { svc })
     }
 

@@ -6,6 +6,8 @@
 
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode, sync::Arc, time::Duration};
 
+mod daemon;
+
 use clap::{Parser, Subcommand};
 use mcpgw_auth::Token;
 use mcpgw_config::Config;
@@ -39,6 +41,9 @@ enum Cmd {
         #[arg(long)]
         stdio: bool,
     },
+    /// Relay stdin/stdout to the daemon, starting it if needed. Use this as
+    /// the command in clients that only launch stdio servers.
+    Connect,
     /// Register a backend server in the store.
     AddServer {
         /// Server name ([A-Za-z0-9_-], no "__").
@@ -108,6 +113,7 @@ fn run(cli: Cli) -> AnyResult<()> {
     let store = || SqliteStore::open(config.gateway.store_path());
     match cli.cmd {
         Cmd::Serve { stdio } => serve(&config, &store()?, stdio),
+        Cmd::Connect => connect(&config, &path),
         Cmd::AddServer {
             name,
             command,
@@ -224,9 +230,30 @@ async fn serve_http(config: &Config, token: Token, mgr: Arc<BackendManager>) -> 
             allowed_origins: config.gateway.allowed_origins.clone(),
         },
     );
+    let info_path = daemon::info_path(config);
+    daemon::DaemonInfo::current(local).write(&info_path)?;
     eprintln!("mcpgw: listening on http://{local}{}", mcpgw_api::MCP_PATH);
     tracing::info!(%local, "mcpgw serving on http");
-    mcpgw_api::serve(listener, app, shutdown_signal()).await?;
+    let res = mcpgw_api::serve(listener, app, shutdown_signal()).await;
+    // Only remove the file if it is still ours (a newer daemon may own it).
+    if daemon::DaemonInfo::read(&info_path).is_some_and(|i| i.pid == std::process::id()) {
+        let _ = std::fs::remove_file(&info_path);
+    }
+    res?;
+    Ok(())
+}
+
+fn connect(config: &Config, config_path: &std::path::Path) -> AnyResult<()> {
+    let info = match daemon::running(config) {
+        Some(info) => info,
+        None => {
+            tracing::info!("no running daemon; starting one");
+            daemon::start(config, config_path, Duration::from_secs(60))?
+        }
+    };
+    let token = Token::load_or_create(&config.gateway.token_path())?;
+    tracing::info!(url = %info.url, pid = info.pid, "relaying stdio to the daemon");
+    runtime()?.block_on(mcpgw_proto::relay::stdio_to_http(&info.url, token.expose()))?;
     Ok(())
 }
 
