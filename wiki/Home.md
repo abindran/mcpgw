@@ -24,9 +24,9 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 
 | ID | Item | Status |
 |----|------|--------|
-| [M0-01](M0-01-Workspace-and-Crate-Layout.md) | Workspace with all crates, MSRV 1.88, edition 2024 | ✅ |
+| [M0-01](M0-01-Workspace-and-Crate-Layout.md) | Workspace with all crates, MSRV 1.98, edition 2024 | ✅ |
 | [M0-02](M0-02-CI-Matrix.md) | CI matrix: macOS arm64/x86, Linux glibc/musl, Windows | ✅ |
-| M0-03 | Supply-chain gates: cargo deny, cargo audit, licences, SBOM | ⏳ |
+| [M0-03](M0-03-Supply-Chain-Gates.md) | Supply-chain gates: cargo deny, cargo audit, licences, SBOM | ✅ |
 | M0-04 | Protocol spike: forward one `tools/call` | ✅ ([history](history/M0-04-rmcp-Server-Spike.md)) |
 | M0-05 | Version negotiation spike, both directions | ✅ ([history](history/M0-05-rmcp-Client-and-Bridging-Spike.md)); ADR in M0-09 |
 | M0-06 | Core domain types + JSON Schema | ⏳ |

@@ -1,0 +1,13 @@
+# Self-test fixture: depends on a crate version with a RustSec advisory
+# (smallvec 1.6.0, RUSTSEC-2021-0003). `cargo deny check advisories` must fail.
+[package]
+name = "supply-chain-vulnerable"
+version = "0.0.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[dependencies]
+smallvec = "=1.6.0"
+
+[workspace]

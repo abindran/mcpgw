@@ -39,24 +39,24 @@ default-members = ["crates/*"]
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.98"
 authors = ["abindran"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/abindran/mcpgw"
 
 [workspace.dependencies]
 # Internal crates
-mcpgw-proto = { path = "crates/mcpgw-proto" }
-mcpgw-core = { path = "crates/mcpgw-core" }
-mcpgw-config = { path = "crates/mcpgw-config" }
-mcpgw-store = { path = "crates/mcpgw-store" }
-mcpgw-vault = { path = "crates/mcpgw-vault" }
-mcpgw-router = { path = "crates/mcpgw-router" }
-mcpgw-runtime = { path = "crates/mcpgw-runtime" }
-mcpgw-auth = { path = "crates/mcpgw-auth" }
-mcpgw-api = { path = "crates/mcpgw-api" }
-mcpgw-telemetry = { path = "crates/mcpgw-telemetry" }
-mcpgw-testkit = { path = "crates/mcpgw-testkit" }
+mcpgw-proto = { path = "crates/mcpgw-proto", version = "0.1.0" }
+mcpgw-core = { path = "crates/mcpgw-core", version = "0.1.0" }
+mcpgw-config = { path = "crates/mcpgw-config", version = "0.1.0" }
+mcpgw-store = { path = "crates/mcpgw-store", version = "0.1.0" }
+mcpgw-vault = { path = "crates/mcpgw-vault", version = "0.1.0" }
+mcpgw-router = { path = "crates/mcpgw-router", version = "0.1.0" }
+mcpgw-runtime = { path = "crates/mcpgw-runtime", version = "0.1.0" }
+mcpgw-auth = { path = "crates/mcpgw-auth", version = "0.1.0" }
+mcpgw-api = { path = "crates/mcpgw-api", version = "0.1.0" }
+mcpgw-telemetry = { path = "crates/mcpgw-telemetry", version = "0.1.0" }
+mcpgw-testkit = { path = "crates/mcpgw-testkit", version = "0.1.0" }
 
 # Shared third-party crates
 thiserror = "2"

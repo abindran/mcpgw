@@ -6,7 +6,7 @@
 
 ## What changed
 
-- Edition **2024**, MSRV **1.88**, workspace resolver 3.
+- Edition **2024**, MSRV **1.98** (the locally installed toolchain; the plan said 1.88), workspace resolver 3.
 - The workspace now has every crate from the plan:
 
 | Crate | Responsibility | Code today |

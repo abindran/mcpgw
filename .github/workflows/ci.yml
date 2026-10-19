@@ -23,6 +23,25 @@ jobs:
       - run: bash scripts/check-deps.sh
       - run: bash scripts/canary-scan.sh
 
+  supply-chain:
+    name: Supply chain (deny, audit, SBOM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny,cargo-audit,cargo-cyclonedx
+      - run: cargo deny --locked check
+      - run: cargo audit --deny warnings
+      - run: bash scripts/supply-chain-selftest.sh
+      - run: cargo cyclonedx --format json --all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: "**/*.cdx.json"
+          if-no-files-found: error
+
   lint:
     name: fmt / clippy
     runs-on: ubuntu-latest
@@ -36,11 +55,11 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   msrv:
-    name: MSRV 1.88
+    name: MSRV 1.98
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@1.98
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --workspace --all-targets --locked
 

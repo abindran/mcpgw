@@ -10,7 +10,7 @@
 |-----|--------|--------------|
 | `rules` | ubuntu | `scripts/check-deps.sh` (rmcp only in `mcpgw-proto`) and `scripts/canary-scan.sh` |
 | `lint` | ubuntu | `cargo fmt --check`, `cargo clippy -D warnings` |
-| `msrv` | ubuntu | `cargo check` on Rust 1.88 |
+| `msrv` | ubuntu | `cargo check` on Rust 1.98 (the MSRV) |
 | `test (macOS arm64)` | macos-14 | build + test, `aarch64-apple-darwin` |
 | `test (macOS x86_64)` | macos-15-intel | build + test, `x86_64-apple-darwin` |
 | `test (Linux glibc)` | ubuntu | build + test, `x86_64-unknown-linux-gnu` |

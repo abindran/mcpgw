@@ -11,7 +11,7 @@ proxying and bridging between them (including across protocol versions).
 
 ## Workspace layout
 
-This is a Cargo workspace (edition 2024, MSRV 1.88). Crates are split so
+This is a Cargo workspace (edition 2024, MSRV 1.98). Crates are split so
 that protocol churn stays contained behind a single seam.
 
 | Crate | Role |
@@ -76,7 +76,7 @@ Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can al
 
 Backends speaking `2025-11-25` or `2026-07-28` are both supported. Crashed or unresponsive backends are restarted with exponential backoff.
 
-Requires Rust `1.88+` (edition 2024).
+Requires Rust `1.98+` (edition 2024).
 
 ## CI & local checks
 
