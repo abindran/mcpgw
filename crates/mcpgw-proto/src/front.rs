@@ -7,16 +7,16 @@
 use std::{future::Future, pin::Pin, sync::Arc};
 
 use rmcp::{
+    ErrorData, RoleServer, ServerHandler, ServiceExt,
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ErrorCode, Implementation,
         ListToolsResult, PaginatedRequestParams, ServerCapabilities, ServerConfig,
     },
     service::RequestContext,
-    ErrorData, RoleServer, ServerHandler, ServiceExt,
 };
 use serde_json::Value;
 
-use crate::backend::{tool_from_json, JsonObject, ProtoError, INTERNAL_ERROR};
+use crate::backend::{INTERNAL_ERROR, JsonObject, ProtoError, tool_from_json};
 
 /// Boxed, sendable future.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;

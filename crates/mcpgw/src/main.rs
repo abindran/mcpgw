@@ -1,4 +1,4 @@
-//! `mcpgw` — the gateway binary (M1-07).
+//! `mcpgw` — the gateway binary.
 //!
 //! `serve` runs the gateway on stdio. stdout carries MCP, so all logs go
 //! to stderr.
@@ -6,9 +6,11 @@
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode, sync::Arc, time::Duration};
 
 use clap::{Parser, Subcommand};
-use mcpgw_client::{BackendManager, BackendState, ManagerOptions};
-use mcpgw_core::{Config, ServerConfig, Token, Transport};
-use mcpgw_store::{effective_servers, SqliteStore, Store};
+use mcpgw_auth::Token;
+use mcpgw_config::Config;
+use mcpgw_core::{ServerConfig, Transport};
+use mcpgw_runtime::{BackendManager, BackendState, ManagerOptions};
+use mcpgw_store::{SqliteStore, Store, effective_servers};
 
 #[derive(Parser)]
 #[command(
@@ -172,14 +174,14 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
 
 fn serve(config: &Config, store: &SqliteStore) -> AnyResult<()> {
     Token::load_or_create(&config.gateway.token_path())?;
-    let servers = effective_servers(config, store)?;
+    let servers = effective_servers(&config.servers, store)?;
     runtime()?.block_on(async {
         let mgr = Arc::new(BackendManager::start(&servers, ManagerOptions::default()));
         // Give backends a moment so the first tools/list is complete.
         mgr.wait_ready(Duration::from_secs(30)).await;
         tracing::info!(servers = servers.len(), "mcpgw serving on stdio");
         let res = tokio::select! {
-            r = mcpgw_server::serve_stdio(mgr.clone()) => r.map_err(|e| e.to_string()),
+            r = mcpgw_router::serve_stdio(mgr.clone()) => r.map_err(|e| e.to_string()),
             _ = tokio::signal::ctrl_c() => Ok(()),
         };
         mgr.shutdown().await;
@@ -199,7 +201,7 @@ fn describe(s: &ServerConfig) -> String {
 }
 
 fn list_servers(config: &Config, store: &SqliteStore, check: bool) -> AnyResult<()> {
-    let servers = effective_servers(config, store)?;
+    let servers = effective_servers(&config.servers, store)?;
     if servers.is_empty() {
         println!("no servers configured");
         return Ok(());

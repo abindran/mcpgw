@@ -1,4 +1,4 @@
-//! Static loopback token (M1-06).
+//! `mcpgw-auth` — static loopback token.
 //!
 //! A 256-bit random token stored in a file only the owner can read. Network
 //! front ends (Streamable HTTP, M2) require it as `Authorization: Bearer <token>`.
@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{Error, Result};
+use mcpgw_core::{Error, Result};
 
 /// Token length in bytes (hex-encoded to twice that).
 pub const TOKEN_BYTES: usize = 32;
@@ -186,16 +186,20 @@ mod tests {
         {
             use std::os::unix::fs::PermissionsExt;
             fs::set_permissions(&p, fs::Permissions::from_mode(0o600)).unwrap();
-            assert!(Token::load(&p)
-                .unwrap_err()
-                .to_string()
-                .contains("malformed"));
+            assert!(
+                Token::load(&p)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("malformed")
+            );
             fs::write(&p, "a".repeat(64)).unwrap();
             fs::set_permissions(&p, fs::Permissions::from_mode(0o644)).unwrap();
-            assert!(Token::load(&p)
-                .unwrap_err()
-                .to_string()
-                .contains("insecure"));
+            assert!(
+                Token::load(&p)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("insecure")
+            );
         }
         fs::remove_dir_all(&d).unwrap();
     }

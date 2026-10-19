@@ -5,6 +5,7 @@
 use std::{borrow::Cow, sync::Arc};
 
 use rmcp::{
+    ClientHandler, ErrorData, Peer, RoleClient, RoleServer, ServerHandler, ServiceError,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
         CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, ListToolsResult,
@@ -12,8 +13,7 @@ use rmcp::{
     },
     schemars,
     service::RequestContext,
-    tool, tool_handler, tool_router, ClientHandler, ErrorData, Peer, RoleClient, RoleServer,
-    ServerHandler, ServiceError,
+    tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 

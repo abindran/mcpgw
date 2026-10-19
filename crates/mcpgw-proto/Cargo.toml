@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 
 # NOTE: This is the ONLY crate permitted to depend on `rmcp`.
 # All MCP protocol handling and version bridging lives here so that

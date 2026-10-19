@@ -1,11 +1,11 @@
-//! M1-05: front client ⇄ gateway ⇄ real child-process backend, driven with
+//! Front client ⇄ gateway ⇄ real child-process backend, driven with
 //! raw newline-delimited JSON-RPC (this crate may not use `rmcp`).
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use mcpgw_client::{BackendManager, ManagerOptions};
 use mcpgw_core::{ServerConfig, Transport};
-use serde_json::{json, Value};
+use mcpgw_runtime::{BackendManager, ManagerOptions, ProtoError};
+use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 fn fixture_server(name: &str) -> ServerConfig {
@@ -65,7 +65,7 @@ async fn gateway() -> (Arc<BackendManager>, Rpc) {
     ));
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     let (s, c) = tokio::io::duplex(1 << 16);
-    tokio::spawn(mcpgw_server::serve_io(m.clone(), s));
+    tokio::spawn(mcpgw_router::serve_io(m.clone(), s));
     let (r, w) = tokio::io::split(c);
     let mut rpc = Rpc {
         w,
@@ -111,5 +111,51 @@ async fn lists_and_calls_through_gateway() {
     assert_eq!(r["error"]["code"], -32602, "{r}");
     let r = rpc.request("tools/call", json!({"name":"nope"})).await;
     assert_eq!(r["error"]["code"], -32602, "{r}");
+    m.shutdown().await;
+}
+
+fn fixture_env(name: &str, prefix: &str) -> ServerConfig {
+    let mut s = fixture_server(name);
+    if let Transport::Stdio { env, .. } = &mut s.transport {
+        env.insert("FIXTURE_PREFIX".into(), prefix.into());
+    }
+    s
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn aggregates_two_backends_and_routes_by_prefix() {
+    let m = BackendManager::start(
+        &[fixture_env("one", "1:"), fixture_env("two", "2:")],
+        ManagerOptions::default(),
+    );
+    assert!(m.wait_ready(Duration::from_secs(20)).await);
+    let all = mcpgw_router::list_all_tools(&m).await;
+    let names: Vec<_> = all.iter().map(|t| t["name"].as_str().unwrap()).collect();
+    assert_eq!(
+        names,
+        [
+            "one__add",
+            "one__echo",
+            "one__crash",
+            "one__sleep",
+            "two__add",
+            "two__echo",
+            "two__crash",
+            "two__sleep"
+        ]
+    );
+    assert_eq!(all[0]["description"], "[one] Add two integers");
+    for (who, want) in [("one__echo", "1:x"), ("two__echo", "2:x")] {
+        let r = mcpgw_router::call_public(&m, who, json!({"text": "x"}).as_object().cloned())
+            .await
+            .unwrap();
+        assert_eq!(r["content"][0]["text"], want);
+    }
+    for bad in ["echo", "three__echo"] {
+        assert!(matches!(
+            mcpgw_router::call_public(&m, bad, None).await,
+            Err(ProtoError::Rpc { code: -32602, .. })
+        ));
+    }
     m.shutdown().await;
 }

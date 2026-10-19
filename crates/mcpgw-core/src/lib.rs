@@ -1,18 +1,11 @@
-//! `mcpgw-core` — shared types, errors, and configuration.
+//! `mcpgw-core` — domain types shared by every crate.
 //!
-//! Provides the crate-wide [`Error`] / [`Result`] and the gateway [`Config`],
-//! including the locked defaults:
-//! - agent self-adding of servers is **disabled** by default;
-//! - embeddings-based tool search is **enabled** by default.
+//! Servers, tools, profiles, manifests, policies and the crate-wide
+//! [`Error`] / [`Result`]. Nothing here performs I/O.
 
-pub mod auth;
-pub mod config;
+pub mod server;
 
-pub use auth::Token;
-pub use config::{
-    data_dir, validate_server_name, Config, GatewayConfig, SearchConfig, ServerConfig, Transport,
-    CONFIG_ENV, TOOL_SEPARATOR,
-};
+pub use server::{ServerConfig, TOOL_SEPARATOR, Transport, validate_server_name};
 
 use thiserror::Error;
 

@@ -3,12 +3,12 @@
 use std::sync::Arc;
 
 use mcpgw_proto::{
-    front::{serve_io, BoxFuture, FrontInfo, ToolProvider},
     JsonObject, ProtoError,
+    front::{BoxFuture, FrontInfo, ToolProvider, serve_io},
 };
 use rmcp::{
-    model::{CallToolRequestParams, ProtocolVersion},
     ClientHandler, ClientLifecycleMode, ClientServiceExt, ServiceExt,
+    model::{CallToolRequestParams, ProtocolVersion},
 };
 use serde_json::json;
 

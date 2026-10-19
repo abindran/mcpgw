@@ -7,15 +7,15 @@
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::{AtomicU32, Ordering},
         Arc,
+        atomic::{AtomicU32, Ordering},
     },
     time::Duration,
 };
 
 use mcpgw_core::{ServerConfig, Transport};
 use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StdioSpec};
-use tokio::sync::{watch, Notify, RwLock};
+use tokio::sync::{Notify, RwLock, watch};
 
 /// Tunables for the backend manager.
 #[derive(Debug, Clone)]

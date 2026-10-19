@@ -2,9 +2,10 @@
 //! Throwaway; proves `rmcp` can be the client-facing MCP server.
 
 use rmcp::{
+    ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{CallToolResult, ContentBlock, ServerCapabilities, ServerConfig},
-    schemars, tool, tool_handler, tool_router, ErrorData, ServerHandler,
+    schemars, tool, tool_handler, tool_router,
 };
 use serde::Deserialize;
 

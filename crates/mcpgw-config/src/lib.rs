@@ -1,16 +1,12 @@
-//! Gateway configuration types, loaded from TOML.
+//! `mcpgw-config` — gateway configuration loaded from TOML.
 
-use crate::{Error, Result};
+use mcpgw_core::{Error, Result, ServerConfig};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 /// Environment variable that overrides the config file location.
 pub const CONFIG_ENV: &str = "MCPGW_CONFIG";
-
-/// Separator between server name and tool name in aggregated tool names.
-/// Server names may not contain it (see [`Config::validate`]).
-pub const TOOL_SEPARATOR: &str = "__";
 
 /// Root configuration.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -19,9 +15,6 @@ pub struct Config {
     /// Gateway-wide behaviour.
     #[serde(default)]
     pub gateway: GatewayConfig,
-    /// Tool search behaviour.
-    #[serde(default)]
-    pub search: SearchConfig,
     /// Backend tool servers.
     #[serde(default, rename = "server")]
     pub servers: Vec<ServerConfig>,
@@ -75,83 +68,6 @@ impl GatewayConfig {
     }
 }
 
-/// Tool search settings.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SearchConfig {
-    /// Whether embeddings-based search is enabled. Default: `true`.
-    #[serde(default = "default_true")]
-    pub embeddings: bool,
-}
-
-fn default_true() -> bool {
-    true
-}
-
-impl Default for SearchConfig {
-    fn default() -> Self {
-        Self { embeddings: true }
-    }
-}
-
-/// How to reach a backend server.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "transport", rename_all = "lowercase")]
-pub enum Transport {
-    /// Spawn a local child process speaking MCP over stdio.
-    Stdio {
-        /// Executable to run.
-        command: String,
-        /// Arguments.
-        #[serde(default)]
-        args: Vec<String>,
-        /// Extra environment variables for the child.
-        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-        env: BTreeMap<String, String>,
-    },
-    /// Connect to a remote streamable-HTTP endpoint.
-    Http {
-        /// Endpoint URL.
-        url: String,
-    },
-}
-
-/// One backend tool server.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ServerConfig {
-    /// Unique server name.
-    pub name: String,
-    /// Connection details.
-    #[serde(flatten)]
-    pub transport: Transport,
-    /// Whether the gateway should start this server. Default: `true`.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-}
-
-/// Validate a server name: 1-64 chars of `[A-Za-z0-9_-]`, no `__`.
-pub fn validate_server_name(name: &str) -> Result<()> {
-    if name.is_empty() || name.len() > 64 {
-        return Err(Error::Config(format!(
-            "server name must be 1-64 characters: {name:?}"
-        )));
-    }
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
-        return Err(Error::Config(format!(
-            "server name may only contain [A-Za-z0-9_-]: {name:?}"
-        )));
-    }
-    if name.contains(TOOL_SEPARATOR) || name.starts_with('_') || name.ends_with('_') {
-        return Err(Error::Config(format!(
-            "server name may not contain {TOOL_SEPARATOR:?} or start/end with '_': {name:?}"
-        )));
-    }
-    Ok(())
-}
-
 impl Config {
     /// Parse and validate configuration from TOML text.
     pub fn from_toml_str(s: &str) -> Result<Self> {
@@ -195,31 +111,13 @@ impl Config {
         self.servers.iter().filter(|s| s.enabled)
     }
 
-    /// Check invariants: valid unique names, non-empty commands/URLs, http(s) URLs.
+    /// Check invariants: every server valid, names unique.
     pub fn validate(&self) -> Result<()> {
         let mut seen = HashSet::new();
         for s in &self.servers {
-            validate_server_name(&s.name)?;
+            s.validate()?;
             if !seen.insert(s.name.as_str()) {
                 return Err(Error::Config(format!("duplicate server name: {}", s.name)));
-            }
-            let empty = match &s.transport {
-                Transport::Stdio { command, .. } => command.trim().is_empty(),
-                Transport::Http { url } => url.trim().is_empty(),
-            };
-            if empty {
-                return Err(Error::Config(format!(
-                    "server {} has an empty command/url",
-                    s.name
-                )));
-            }
-            if let Transport::Http { url } = &s.transport {
-                if !(url.starts_with("http://") || url.starts_with("https://")) {
-                    return Err(Error::Config(format!(
-                        "server {} url must start with http:// or https://",
-                        s.name
-                    )));
-                }
             }
         }
         Ok(())
@@ -237,12 +135,13 @@ impl Config {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mcpgw_core::Transport;
+    use std::collections::BTreeMap;
 
     #[test]
     fn locked_defaults() {
         let c = Config::from_toml_str("").unwrap();
         assert!(!c.gateway.allow_agent_add_servers);
-        assert!(c.search.embeddings);
         assert!(c.servers.is_empty());
     }
 
@@ -296,16 +195,6 @@ mod tests {
             command = " "
         "#;
         assert!(matches!(Config::from_toml_str(s), Err(Error::Config(_))));
-    }
-
-    #[test]
-    fn server_name_rules() {
-        for ok in ["fs", "my-server", "a_b", "X1"] {
-            validate_server_name(ok).unwrap();
-        }
-        for bad in ["", "a__b", "_a", "a_", "a b", "a.b", &"x".repeat(65)] {
-            assert!(validate_server_name(bad).is_err(), "{bad:?}");
-        }
     }
 
     #[test]

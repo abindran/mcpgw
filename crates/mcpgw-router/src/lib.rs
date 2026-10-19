@@ -1,12 +1,16 @@
-//! `mcpgw-server` — the MCP server side of the gateway.
+//! `mcpgw-router` — aggregation, namespacing, meta-tools, policy checks and
+//! the result pipeline.
 //!
 //! Exposes the aggregated backend tools to LLM clients. It never imports
 //! `rmcp` directly; all protocol access goes through `mcpgw-proto`.
 
+pub mod aggregate;
+
 use std::sync::Arc;
 
-use mcpgw_client::{BackendManager, JsonObject, ProtoError};
+pub use aggregate::{call_public, list_all_tools, public_name, split_name};
 use mcpgw_proto::front::{self, BoxFuture, FrontInfo, ToolProvider};
+use mcpgw_runtime::{BackendManager, JsonObject, ProtoError};
 
 /// Client-facing protocol version this side presents (via `mcpgw-proto`).
 pub fn client_facing_version() -> &'static str {
@@ -27,7 +31,7 @@ impl GatewayProvider {
 
 impl ToolProvider for GatewayProvider {
     fn list_tools(&self) -> BoxFuture<'_, Vec<JsonObject>> {
-        Box::pin(self.manager.list_all_tools())
+        Box::pin(list_all_tools(&self.manager))
     }
 
     fn call_tool(
@@ -35,7 +39,7 @@ impl ToolProvider for GatewayProvider {
         name: String,
         arguments: Option<JsonObject>,
     ) -> BoxFuture<'_, Result<JsonObject, ProtoError>> {
-        Box::pin(async move { self.manager.call_public(&name, arguments).await })
+        Box::pin(async move { call_public(&self.manager, &name, arguments).await })
     }
 }
 

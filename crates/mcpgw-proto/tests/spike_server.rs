@@ -1,7 +1,7 @@
 use mcpgw_proto::spike_server::EchoServer;
 use rmcp::{
-    model::{CallToolRequestParams, ProtocolVersion},
     ClientHandler, ClientLifecycleMode, ClientServiceExt, ServiceExt,
+    model::{CallToolRequestParams, ProtocolVersion},
 };
 
 #[derive(Clone, Default)]

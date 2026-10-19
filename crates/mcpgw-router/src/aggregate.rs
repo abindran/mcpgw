@@ -1,4 +1,4 @@
-//! Tool aggregation across backends (M1-04).
+//! Tool aggregation across backends.
 //!
 //! Every backend tool is exposed as `<server>__<tool>`. Server names cannot
 //! contain `__` (enforced by config validation), so the first `__` always
@@ -7,7 +7,7 @@
 use mcpgw_core::TOOL_SEPARATOR;
 use serde_json::Value;
 
-use crate::{BackendManager, JsonObject, ProtoError};
+use mcpgw_runtime::{BackendManager, JsonObject, ProtoError};
 
 /// Maximum tool-name length many MCP clients accept.
 pub const MAX_TOOL_NAME: usize = 128;
@@ -65,36 +65,31 @@ where
     out
 }
 
-impl BackendManager {
-    /// Aggregated, prefixed tool list across all connected backends.
-    pub async fn list_all_tools(&self) -> Vec<JsonObject> {
-        let mut per = Vec::new();
-        for name in self.names() {
-            per.push((name, self.tools(name).await));
-        }
-        aggregate(per)
+/// Aggregated, prefixed tool list across all connected backends.
+pub async fn list_all_tools(manager: &BackendManager) -> Vec<JsonObject> {
+    let mut per = Vec::new();
+    for name in manager.names() {
+        per.push((name, manager.tools(name).await));
     }
+    aggregate(per)
+}
 
-    /// Route a call by public name to the owning backend.
-    pub async fn call_public(
-        &self,
-        public: &str,
-        arguments: Option<JsonObject>,
-    ) -> Result<JsonObject, ProtoError> {
-        let (server, tool) = split_name(public).ok_or_else(|| ProtoError::Rpc {
-            code: mcpgw_proto::backend::INVALID_PARAMS,
-            message: format!("tool not found: {public}"),
-            data: None,
-        })?;
-        if !self.names().any(|n| n == server) {
-            return Err(ProtoError::Rpc {
-                code: mcpgw_proto::backend::INVALID_PARAMS,
-                message: format!("tool not found: {public}"),
-                data: None,
-            });
-        }
-        self.call_tool(server, tool, arguments).await
+/// Route a call by public name to the owning backend.
+pub async fn call_public(
+    manager: &BackendManager,
+    public: &str,
+    arguments: Option<JsonObject>,
+) -> Result<JsonObject, ProtoError> {
+    let not_found = || ProtoError::Rpc {
+        code: mcpgw_proto::backend::INVALID_PARAMS,
+        message: format!("tool not found: {public}"),
+        data: None,
+    };
+    let (server, tool) = split_name(public).ok_or_else(not_found)?;
+    if !manager.names().any(|n| n == server) {
+        return Err(not_found());
     }
+    manager.call_tool(server, tool, arguments).await
 }
 
 #[cfg(test)]

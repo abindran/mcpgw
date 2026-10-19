@@ -3,8 +3,8 @@
 
 use std::{collections::BTreeMap, time::Duration};
 
-use mcpgw_client::{BackendManager, BackendState, ManagerOptions, ProtoError};
 use mcpgw_core::{ServerConfig, Transport};
+use mcpgw_runtime::{BackendManager, BackendState, ManagerOptions, ProtoError};
 
 fn fixture() -> String {
     format!(
@@ -39,7 +39,7 @@ fn fast() -> ManagerOptions {
     }
 }
 
-fn args(v: serde_json::Value) -> Option<mcpgw_client::JsonObject> {
+fn args(v: serde_json::Value) -> Option<mcpgw_runtime::JsonObject> {
     v.as_object().cloned()
 }
 
@@ -54,7 +54,7 @@ async fn wait_for<F: Fn(&BackendState) -> bool>(m: &BackendManager, name: &str, 
     false
 }
 
-fn text_of(r: &mcpgw_client::JsonObject) -> String {
+fn text_of(r: &mcpgw_runtime::JsonObject) -> String {
     r["content"][0]["text"]
         .as_str()
         .unwrap_or_default()
@@ -86,48 +86,6 @@ async fn spawns_negotiates_legacy_and_calls() {
     assert_eq!(text_of(&r), "42");
     m.shutdown().await;
     assert_eq!(m.status().await[0].state, BackendState::Stopped);
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn aggregates_two_backends_and_routes_by_prefix() {
-    let m = BackendManager::start(
-        &[
-            server("one", &[("FIXTURE_PREFIX", "1:")]),
-            server("two", &[("FIXTURE_PREFIX", "2:")]),
-        ],
-        fast(),
-    );
-    assert!(m.wait_ready(Duration::from_secs(20)).await);
-    let all = m.list_all_tools().await;
-    let names: Vec<_> = all.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(
-        names,
-        [
-            "one__add",
-            "one__echo",
-            "one__crash",
-            "one__sleep",
-            "two__add",
-            "two__echo",
-            "two__crash",
-            "two__sleep"
-        ]
-    );
-    assert_eq!(all[0]["description"], "[one] Add two integers");
-    for (who, want) in [("one__echo", "1:x"), ("two__echo", "2:x")] {
-        let r = m
-            .call_public(who, args(serde_json::json!({"text": "x"})))
-            .await
-            .unwrap();
-        assert_eq!(text_of(&r), want);
-    }
-    for bad in ["echo", "three__echo"] {
-        assert!(matches!(
-            m.call_public(bad, None).await,
-            Err(ProtoError::Rpc { code: -32602, .. })
-        ));
-    }
-    m.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

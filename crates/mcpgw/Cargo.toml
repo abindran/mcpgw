@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "mcpgw"
@@ -12,10 +13,11 @@ path = "src/main.rs"
 
 [dependencies]
 mcpgw-core.workspace = true
-mcpgw-proto.workspace = true
+mcpgw-config.workspace = true
+mcpgw-auth.workspace = true
 mcpgw-store.workspace = true
-mcpgw-server.workspace = true
-mcpgw-client.workspace = true
+mcpgw-router.workspace = true
+mcpgw-runtime.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 clap.workspace = true

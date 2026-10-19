@@ -1,45 +1,63 @@
 # mcpgw — workspace root
 #
-# Crate layout (M0-01):
-#   mcpgw-proto   -> the ONLY crate allowed to depend on `rmcp` (protocol isolation seam)
-#   mcpgw-core    -> shared types, errors, config
-#   mcpgw-store   -> persistence trait + local implementation
-#   mcpgw-server  -> MCP server side (faces the LLM client)
-#   mcpgw-client  -> MCP client side (faces backend tool servers)
-#   mcpgw         -> the binary that wires everything together
+# Crate layout (plan M0-01):
+#   mcpgw            -> CLI entry and local daemon (the binary)
+#   mcpgw-proto      -> MCP adapter; the ONLY crate allowed to depend on `rmcp`
+#   mcpgw-core       -> domain types: servers, tools, profiles, manifests, policies, errors
+#   mcpgw-config     -> TOML load, validation, hot reload, import from client configs
+#   mcpgw-store      -> local persistence in SQLite behind a trait
+#   mcpgw-vault      -> envelope encryption, key providers, secret injection, redaction
+#   mcpgw-router     -> aggregation, namespacing, meta-tools, policy checks, result pipeline
+#   mcpgw-runtime    -> supervisor, lifecycle state machine, launchers
+#   mcpgw-auth       -> loopback client token, OAuth broker, upstream OAuth
+#   mcpgw-api        -> admin REST API, SSE events, static web UI
+#   mcpgw-telemetry  -> tracing, metrics, audit log writer
+#   xtask            -> build, release, conformance and e2e helpers
 #
-# Dependency rule (enforced in CI, M0-02): no crate other than `mcpgw-proto`
-# may import `rmcp`. This keeps all protocol churn contained to one seam.
+# Dependency rule (enforced in CI): no crate other than `mcpgw-proto` may
+# import `rmcp`. Protocol churn stays inside that one seam.
 
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
+    "crates/mcpgw",
     "crates/mcpgw-proto",
     "crates/mcpgw-core",
+    "crates/mcpgw-config",
     "crates/mcpgw-store",
-    "crates/mcpgw-server",
-    "crates/mcpgw-client",
-    "crates/mcpgw",
+    "crates/mcpgw-vault",
+    "crates/mcpgw-router",
+    "crates/mcpgw-runtime",
+    "crates/mcpgw-auth",
+    "crates/mcpgw-api",
+    "crates/mcpgw-telemetry",
+    "xtask",
 ]
+default-members = ["crates/*"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
-rust-version = "1.85"
-authors = ["zohocode"]
+edition = "2024"
+rust-version = "1.88"
+authors = ["abindran"]
 license = "MIT OR Apache-2.0"
-repository = ""
+repository = "https://github.com/abindran/mcpgw"
 
 [workspace.dependencies]
 # Internal crates
 mcpgw-proto = { path = "crates/mcpgw-proto" }
 mcpgw-core = { path = "crates/mcpgw-core" }
+mcpgw-config = { path = "crates/mcpgw-config" }
 mcpgw-store = { path = "crates/mcpgw-store" }
-mcpgw-server = { path = "crates/mcpgw-server" }
-mcpgw-client = { path = "crates/mcpgw-client" }
+mcpgw-vault = { path = "crates/mcpgw-vault" }
+mcpgw-router = { path = "crates/mcpgw-router" }
+mcpgw-runtime = { path = "crates/mcpgw-runtime" }
+mcpgw-auth = { path = "crates/mcpgw-auth" }
+mcpgw-api = { path = "crates/mcpgw-api" }
+mcpgw-telemetry = { path = "crates/mcpgw-telemetry" }
 
 # Shared third-party crates
-thiserror = "1"
+thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1"

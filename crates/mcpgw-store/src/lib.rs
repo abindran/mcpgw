@@ -7,8 +7,8 @@
 use std::path::Path;
 use std::sync::Mutex;
 
-use mcpgw_core::{validate_server_name, Config, Error, Result, ServerConfig};
-use rusqlite::{params, Connection, OptionalExtension};
+use mcpgw_core::{Error, Result, ServerConfig};
+use rusqlite::{Connection, OptionalExtension, params};
 
 /// Current schema version, stored in `PRAGMA user_version`.
 pub const SCHEMA_VERSION: i64 = 1;
@@ -115,13 +115,7 @@ impl Store for SqliteStore {
     }
 
     fn upsert_server(&self, server: &ServerConfig) -> Result<()> {
-        validate_server_name(&server.name)?;
-        // Reuse the full config validation for transport fields.
-        Config {
-            servers: vec![server.clone()],
-            ..Config::default()
-        }
-        .validate()?;
+        server.validate()?;
         let json = serde_json::to_string(server).map_err(db_err)?;
         self.with(|c| {
             c.execute(
@@ -165,8 +159,8 @@ impl Store for SqliteStore {
 ///
 /// Config-file entries win on name clashes (the file is the operator's
 /// explicit source of truth); the result is ordered by name.
-pub fn effective_servers(config: &Config, store: &dyn Store) -> Result<Vec<ServerConfig>> {
-    let mut out: Vec<ServerConfig> = config.servers.clone();
+pub fn effective_servers(config: &[ServerConfig], store: &dyn Store) -> Result<Vec<ServerConfig>> {
+    let mut out: Vec<ServerConfig> = config.to_vec();
     for s in store.servers()? {
         if !out.iter().any(|c| c.name == s.name) {
             out.push(s);
@@ -252,11 +246,7 @@ mod tests {
         let s = SqliteStore::open_in_memory().unwrap();
         s.upsert_server(&stdio("fs", "from-store")).unwrap();
         s.upsert_server(&stdio("db", "from-store")).unwrap();
-        let cfg = Config {
-            servers: vec![stdio("fs", "from-config")],
-            ..Config::default()
-        };
-        let merged = effective_servers(&cfg, &s).unwrap();
+        let merged = effective_servers(&[stdio("fs", "from-config")], &s).unwrap();
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].name, "db");
         assert_eq!(merged[1], stdio("fs", "from-config"));
