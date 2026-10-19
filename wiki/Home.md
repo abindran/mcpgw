@@ -39,7 +39,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 
 | ID | Item | Status |
 |----|------|--------|
-| M1-01 | Streamable HTTP front door on `127.0.0.1:7777/mcp` | ⏳ |
+| [M1-01](M1-01-HTTP-Front-Door.md) | Streamable HTTP front door on `127.0.0.1:7777/mcp` | ✅ |
 | M1-02 | stdio shim `mcpgw connect` | ⏳ |
 | M1-03 | SQLite store: servers, manifests, profiles, secrets metadata | ⏳ |
 | M1-04 | stdio launcher: process groups / Job Objects, stderr capture | ⏳ |

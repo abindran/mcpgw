@@ -49,7 +49,19 @@ pub struct GatewayConfig {
     /// Default: `<data dir>/mcpgw/token`.
     #[serde(default)]
     pub token_path: Option<PathBuf>,
+    /// Address of the HTTP front door; must be a loopback address.
+    /// Default: `127.0.0.1:7777`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen: Option<std::net::SocketAddr>,
+    /// Extra browser origins allowed to call the daemon, e.g.
+    /// `"http://localhost:5173"`. The daemon's own origin is always allowed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_origins: Vec<String>,
 }
+
+/// Default HTTP front door address.
+pub const DEFAULT_LISTEN: std::net::SocketAddr =
+    std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 7777);
 
 /// Base directory for gateway data: `$XDG_DATA_HOME`, else `$HOME/.local/share`,
 /// else the current directory.
@@ -73,6 +85,11 @@ impl GatewayConfig {
         self.store_path
             .clone()
             .unwrap_or_else(|| data_dir().join("mcpgw.db"))
+    }
+
+    /// Effective listen address (configured or default).
+    pub fn listen(&self) -> std::net::SocketAddr {
+        self.listen.unwrap_or(DEFAULT_LISTEN)
     }
 
     /// Effective token file path (configured or default).

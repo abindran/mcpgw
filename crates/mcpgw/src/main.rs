@@ -1,7 +1,8 @@
 //! `mcpgw` — the gateway binary.
 //!
-//! `serve` runs the gateway on stdio. stdout carries MCP, so all logs go
-//! to stderr.
+//! `serve` runs the daemon: the Streamable HTTP front door on
+//! `127.0.0.1:7777/mcp` (see ADR-0004). `serve --stdio` runs a single-client
+//! gateway on stdin/stdout instead. Logs always go to stderr.
 
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode, sync::Arc, time::Duration};
 
@@ -32,8 +33,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
-    /// Run the gateway on stdin/stdout.
-    Serve,
+    /// Run the gateway daemon in the foreground (HTTP on gateway.listen).
+    Serve {
+        /// Serve one client on stdin/stdout instead of HTTP.
+        #[arg(long)]
+        stdio: bool,
+    },
     /// Register a backend server in the store.
     AddServer {
         /// Server name ([A-Za-z0-9_-], no "__").
@@ -102,7 +107,7 @@ fn run(cli: Cli) -> AnyResult<()> {
     let config = Config::load_or_default(&path)?;
     let store = || SqliteStore::open(config.gateway.store_path());
     match cli.cmd {
-        Cmd::Serve => serve(&config, &store()?),
+        Cmd::Serve { stdio } => serve(&config, &store()?, stdio),
         Cmd::AddServer {
             name,
             command,
@@ -169,21 +174,59 @@ fn runtime() -> std::io::Result<tokio::runtime::Runtime> {
         .build()
 }
 
-fn serve(config: &Config, store: &SqliteStore) -> AnyResult<()> {
-    Token::load_or_create(&config.gateway.token_path())?;
+/// Resolves on Ctrl-C, or SIGTERM on Unix.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+fn serve(config: &Config, store: &SqliteStore, stdio: bool) -> AnyResult<()> {
+    let token = Token::load_or_create(&config.gateway.token_path())?;
     let servers = effective_servers(&config.servers, store)?;
     runtime()?.block_on(async {
         let mgr = Arc::new(BackendManager::start(&servers, ManagerOptions::default()));
         // Give backends a moment so the first tools/list is complete.
         mgr.wait_ready(Duration::from_secs(30)).await;
-        tracing::info!(servers = servers.len(), "mcpgw serving on stdio");
-        let res = tokio::select! {
-            r = mcpgw_router::serve_stdio(mgr.clone()) => r.map_err(|e| e.to_string()),
-            _ = tokio::signal::ctrl_c() => Ok(()),
+        let res: AnyResult<()> = if stdio {
+            tracing::info!(servers = servers.len(), "mcpgw serving on stdio");
+            tokio::select! {
+                r = mcpgw_router::serve_stdio(mgr.clone()) => r.map_err(|e| e.to_string().into()),
+                _ = shutdown_signal() => Ok(()),
+            }
+        } else {
+            serve_http(config, token, mgr.clone()).await
         };
         mgr.shutdown().await;
         res
-    })?;
+    })
+}
+
+async fn serve_http(config: &Config, token: Token, mgr: Arc<BackendManager>) -> AnyResult<()> {
+    let addr = config.gateway.listen();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .map_err(|e| format!("cannot listen on {addr}: {e}"))?;
+    let local = listener.local_addr()?;
+    let app = mcpgw_api::edge(
+        mcpgw_router::http_router(mgr),
+        mcpgw_api::EdgeOptions {
+            token,
+            port: local.port(),
+            allowed_origins: config.gateway.allowed_origins.clone(),
+        },
+    );
+    eprintln!("mcpgw: listening on http://{local}{}", mcpgw_api::MCP_PATH);
+    tracing::info!(%local, "mcpgw serving on http");
+    mcpgw_api::serve(listener, app, shutdown_signal()).await?;
     Ok(())
 }
 

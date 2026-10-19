@@ -61,18 +61,31 @@ mcpgw add-server fs --command npx -- -y @modelcontextprotocol/server-filesystem 
 mcpgw add-server gh --command github-mcp --env GITHUB_TOKEN=...
 
 mcpgw list-servers --check       # start each backend and report status and tool count
-mcpgw serve                      # run the gateway on stdio
-mcpgw token [--rotate]           # loopback token (used by the HTTP front end from M2)
+mcpgw serve                      # run the daemon: http://127.0.0.1:7777/mcp
+mcpgw token [--rotate]           # the loopback bearer token clients must send
 mcpgw remove-server gh
 ```
 
-Point your MCP client at the gateway, for example:
+Point an HTTP-capable MCP client at the daemon with the token, for example
+Claude Code:
 
-```json
-{ "mcpServers": { "mcpgw": { "command": "mcpgw", "args": ["serve"] } } }
+```sh
+claude mcp add --transport http mcpgw http://127.0.0.1:7777/mcp \
+  --header "Authorization: Bearer $(mcpgw token)"
 ```
 
-Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can also be declared in `~/.config/mcpgw/config.toml` (or `$MCPGW_CONFIG`, or `--config`); see [config loading](wiki/history/M1-01-Config-Loading.md). Config-file entries take precedence over stored ones with the same name. Logs go to stderr; `MCPGW_LOG` sets the level (default `warn`) and `--log-format pretty|compact|json` (or `MCPGW_LOG_FORMAT`) the format.
+Clients that can only launch a command can use `mcpgw serve --stdio`, a
+single-client gateway on stdin/stdout:
+
+```json
+{ "mcpServers": { "mcpgw": { "command": "mcpgw", "args": ["serve", "--stdio"] } } }
+```
+
+The daemon only listens on loopback, refuses requests whose `Host` is not a
+loopback name or whose `Origin` is a foreign web page (403), and requires the
+token on `/mcp` (401).
+
+Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can also be declared in `~/.config/mcpgw/config.toml` (or `$MCPGW_CONFIG`, or `--config`); see [examples/config.toml](examples/config.toml). Config-file entries take precedence over stored ones with the same name. Logs go to stderr; `MCPGW_LOG` sets the level (default `warn`) and `--log-format pretty|compact|json` (or `MCPGW_LOG_FORMAT`) the format.
 
 Backends speaking `2025-11-25` or `2026-07-28` are both supported. Crashed or unresponsive backends are restarted with exponential backoff.
 

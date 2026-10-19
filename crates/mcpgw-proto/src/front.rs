@@ -1,8 +1,9 @@
-//! The client-facing MCP server (M1-05).
+//! The client-facing MCP server.
 //!
 //! Other crates implement [`ToolProvider`] with plain JSON; this module adapts
 //! it to an `rmcp` server that answers both `server/discover` (2026-07-28)
-//! and legacy `initialize` (2025-11-25) clients.
+//! and legacy `initialize` (2025-11-25) clients, over stdio or Streamable
+//! HTTP ([`http_service`]).
 
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -150,4 +151,22 @@ pub async fn serve_stdio<P: ToolProvider>(
         tokio::io::join(tokio::io::stdin(), tokio::io::stdout()),
     )
     .await
+}
+
+/// The Streamable HTTP endpoint as an `axum` router (mount it with
+/// `Router::nest_service`). 2026-07-28 requests are stateless; legacy clients
+/// get sessions. Authentication, `Host` and `Origin` checks belong to the
+/// caller's middleware; rmcp's own loopback-only `Host` check stays on as a
+/// second line of defence.
+pub fn http_service<P: ToolProvider>(provider: Arc<P>, info: FrontInfo) -> axum::Router {
+    use rmcp::transport::streamable_http_server::{
+        StreamableHttpServerConfig, StreamableHttpService, session::local::LocalSessionManager,
+    };
+    let front = Front { provider, info };
+    let service = StreamableHttpService::new(
+        move || Ok(front.clone()),
+        Arc::new(LocalSessionManager::default()),
+        StreamableHttpServerConfig::default(),
+    );
+    axum::Router::new().fallback_service(service)
 }

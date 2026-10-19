@@ -22,6 +22,20 @@
           "description": "Whether the agent may add new backend servers itself. Default: `false`.",
           "type": "boolean"
         },
+        "allowed_origins": {
+          "description": "Extra browser origins allowed to call the daemon, e.g.\n`\"http://localhost:5173\"`. The daemon's own origin is always allowed.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "listen": {
+          "description": "Address of the HTTP front door; must be a loopback address.\nDefault: `127.0.0.1:7777`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "store_path": {
           "default": null,
           "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",

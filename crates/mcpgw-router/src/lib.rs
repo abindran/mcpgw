@@ -76,6 +76,11 @@ where
     front::serve_io(Arc::new(GatewayProvider::new(manager)), front_info(), io).await
 }
 
+/// The gateway's Streamable HTTP endpoint (mount under `/mcp`).
+pub fn http_router(manager: Arc<BackendManager>) -> axum::Router {
+    front::http_service(Arc::new(GatewayProvider::new(manager)), front_info())
+}
+
 /// Serve the gateway on stdin/stdout until the client disconnects.
 pub async fn serve_stdio(manager: Arc<BackendManager>) -> Result<(), ProtoError> {
     front::serve_stdio(Arc::new(GatewayProvider::new(manager)), front_info()).await

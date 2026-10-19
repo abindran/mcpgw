@@ -3,6 +3,8 @@
 //! [`fake_mcp`] locates the `fake-mcp` binary (building it on first use),
 //! [`stdio`] makes a `ServerSpec` that launches it, and [`HttpFake`] runs
 //! it as a Streamable HTTP server. See `src/bin/fake-mcp.rs` for the knobs.
+//! [`McpClient`] is a real MCP client (rmcp) for driving the gateway itself,
+//! the way Claude Code or Cursor would.
 
 use std::{
     collections::BTreeMap,
@@ -118,5 +120,110 @@ impl Drop for HttpFake {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+/// An MCP client for tests: rmcp with the same lifecycle real clients use
+/// (2026-07-28 preferred, 2025-11-25 accepted).
+pub struct McpClient {
+    svc: rmcp::service::RunningService<rmcp::RoleClient, ()>,
+}
+
+fn lifecycle() -> rmcp::ClientLifecycleMode {
+    use rmcp::model::ProtocolVersion;
+    rmcp::ClientLifecycleMode::Auto {
+        preferred_versions: vec![ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25],
+        legacy_version: Some(ProtocolVersion::V_2025_11_25),
+    }
+}
+
+impl McpClient {
+    /// Connect over Streamable HTTP, sending `Authorization: Bearer <token>`.
+    pub async fn http(url: &str, token: Option<&str>) -> Result<Self, String> {
+        Self::http_with(url, token, lifecycle()).await
+    }
+
+    /// Like [`McpClient::http`] but as a 2025-11-25 client (`initialize`,
+    /// HTTP sessions).
+    pub async fn http_legacy(url: &str, token: Option<&str>) -> Result<Self, String> {
+        Self::http_with(url, token, rmcp::ClientLifecycleMode::Initialize).await
+    }
+
+    async fn http_with(
+        url: &str,
+        token: Option<&str>,
+        lifecycle: rmcp::ClientLifecycleMode,
+    ) -> Result<Self, String> {
+        use rmcp::{
+            ClientServiceExt,
+            transport::{
+                StreamableHttpClientTransport,
+                streamable_http_client::StreamableHttpClientTransportConfig,
+            },
+        };
+        let mut cfg = StreamableHttpClientTransportConfig::with_uri(url.to_string());
+        if let Some(t) = token {
+            cfg = cfg.auth_header(t.to_string());
+        }
+        let t = StreamableHttpClientTransport::from_config(cfg);
+        let svc = ().serve_with_lifecycle(t, lifecycle).await.map_err(|e| e.to_string())?;
+        Ok(Self { svc })
+    }
+
+    /// Spawn `cmd` and speak MCP over its stdio (e.g. `mcpgw connect`).
+    pub async fn stdio(cmd: tokio::process::Command) -> Result<Self, String> {
+        use rmcp::{ClientServiceExt, transport::TokioChildProcess};
+        let t = TokioChildProcess::new(cmd).map_err(|e| e.to_string())?;
+        let svc = ().serve_with_lifecycle(t, lifecycle()).await.map_err(|e| e.to_string())?;
+        Ok(Self { svc })
+    }
+
+    /// Negotiated protocol version.
+    pub fn protocol_version(&self) -> String {
+        self.svc
+            .peer_info()
+            .map(|i| i.protocol_version.to_string())
+            .unwrap_or_default()
+    }
+
+    /// Names of all tools.
+    pub async fn tool_names(&self) -> Result<Vec<String>, String> {
+        let tools = self.svc.list_all_tools().await.map_err(|e| e.to_string())?;
+        Ok(tools.iter().map(|t| t.name.to_string()).collect())
+    }
+
+    /// All tools as JSON.
+    pub async fn tools(&self) -> Result<Vec<serde_json::Value>, String> {
+        let tools = self.svc.list_all_tools().await.map_err(|e| e.to_string())?;
+        Ok(tools
+            .into_iter()
+            .map(|t| serde_json::to_value(t).expect("tool json"))
+            .collect())
+    }
+
+    /// Call a tool; `Ok` is the `CallToolResult` JSON, `Err` a protocol error.
+    pub async fn call(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let mut p = rmcp::model::CallToolRequestParams::new(name.to_string());
+        p.arguments = args.as_object().cloned();
+        let r = self.svc.call_tool(p).await.map_err(|e| e.to_string())?;
+        Ok(serde_json::to_value(r).expect("result json"))
+    }
+
+    /// The first text content of a tool call, for brevity in assertions.
+    pub async fn call_text(&self, name: &str, args: serde_json::Value) -> Result<String, String> {
+        let v = self.call(name, args).await?;
+        Ok(v["content"][0]["text"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string())
+    }
+
+    /// Hang up.
+    pub async fn close(self) {
+        let _ = self.svc.cancel().await;
     }
 }

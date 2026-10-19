@@ -27,7 +27,7 @@ fn serve_lists_and_calls_and_logs_one_line_per_request() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_mcpgw"))
         .args(["--config"])
         .arg(dir.join("config.toml"))
-        .args(["--log-format", "json", "serve"])
+        .args(["--log-format", "json", "serve", "--stdio"])
         .env("MCPGW_LOG", "info")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

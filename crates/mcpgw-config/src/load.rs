@@ -191,6 +191,29 @@ struct Issue {
 }
 
 fn validate(cfg: &Config) -> Result<(), Issue> {
+    if let Some(addr) = cfg.gateway.listen
+        && !addr.ip().is_loopback()
+    {
+        return Err(Issue {
+            server: None,
+            field: "listen",
+            message: format!("gateway.listen {addr} is not a loopback address"),
+            hint: Some("mcpgw only listens locally; use 127.0.0.1:<port> or [::1]:<port>".into()),
+        });
+    }
+    for o in &cfg.gateway.allowed_origins {
+        if !(o.starts_with("http://") || o.starts_with("https://")) || o.ends_with('/') {
+            return Err(Issue {
+                server: None,
+                field: "allowed_origins",
+                message: format!("allowed origin {o:?} is not an origin"),
+                hint: Some(
+                    "write scheme://host[:port] with no path, e.g. \"http://localhost:5173\""
+                        .into(),
+                ),
+            });
+        }
+    }
     let mut seen = HashSet::new();
     for (i, s) in cfg.servers.iter().enumerate() {
         let issue = |field, message: String, hint: &str| Issue {
@@ -387,6 +410,25 @@ mod tests {
         assert!(e.message.contains("duplicate"));
         let e = parse_err("[[server]]\nname = \"w\"\ntransport = \"http\"\nurl = \"ftp://x\"\n");
         assert_eq!(e.position, Some((4, 7)));
+    }
+
+    #[test]
+    fn listen_must_be_loopback() {
+        let e = parse_err("[gateway]\nlisten = \"0.0.0.0:7777\"\n");
+        assert!(e.message.contains("not a loopback"), "{e}");
+        let c = parse(
+            "[gateway]\nlisten = \"127.0.0.1:9000\"\n",
+            Path::new("c"),
+            vec![],
+        )
+        .unwrap();
+        assert_eq!(c.gateway.listen().port(), 9000);
+        assert_eq!(
+            Config::default().gateway.listen().to_string(),
+            "127.0.0.1:7777"
+        );
+        let e = parse_err("[gateway]\nallowed_origins = [\"localhost:5173\"]\n");
+        assert!(e.message.contains("not an origin"), "{e}");
     }
 
     #[test]
