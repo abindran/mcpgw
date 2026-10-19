@@ -875,11 +875,11 @@ dependencies = [
  "mcpgw-router",
  "mcpgw-runtime",
  "mcpgw-store",
+ "mcpgw-telemetry",
  "mcpgw-testkit",
  "serde_json",
  "tokio",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -939,6 +939,7 @@ dependencies = [
  "mcpgw-core",
  "mcpgw-proto",
  "mcpgw-runtime",
+ "mcpgw-telemetry",
  "mcpgw-testkit",
  "serde_json",
  "tokio",
@@ -970,7 +971,11 @@ dependencies = [
 name = "mcpgw-telemetry"
 version = "0.1.0"
 dependencies = [
- "mcpgw-core",
+ "getrandom",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1740,6 +1745,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1749,12 +1764,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

@@ -31,7 +31,14 @@ impl GatewayProvider {
 
 impl ToolProvider for GatewayProvider {
     fn list_tools(&self) -> BoxFuture<'_, Vec<JsonObject>> {
-        Box::pin(list_all_tools(&self.manager))
+        Box::pin(async move {
+            let r: Result<_, std::convert::Infallible> =
+                mcpgw_telemetry::instrument_request("tools/list", None, async {
+                    Ok(list_all_tools(&self.manager).await)
+                })
+                .await;
+            r.unwrap_or_else(|never| match never {})
+        })
     }
 
     fn call_tool(
@@ -39,7 +46,14 @@ impl ToolProvider for GatewayProvider {
         name: String,
         arguments: Option<JsonObject>,
     ) -> BoxFuture<'_, Result<JsonObject, ProtoError>> {
-        Box::pin(async move { call_public(&self.manager, &name, arguments).await })
+        Box::pin(async move {
+            mcpgw_telemetry::instrument_request(
+                "tools/call",
+                Some(&name),
+                call_public(&self.manager, &name, arguments),
+            )
+            .await
+        })
     }
 }
 

@@ -18,8 +18,8 @@ mcpgw-auth.workspace = true
 mcpgw-store.workspace = true
 mcpgw-router.workspace = true
 mcpgw-runtime.workspace = true
+mcpgw-telemetry.workspace = true
 tracing.workspace = true
-tracing-subscriber.workspace = true
 clap.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time"] }
 

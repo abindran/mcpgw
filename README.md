@@ -72,7 +72,7 @@ Point your MCP client at the gateway, for example:
 { "mcpServers": { "mcpgw": { "command": "mcpgw", "args": ["serve"] } } }
 ```
 
-Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can also be declared in `~/.config/mcpgw/config.toml` (or `$MCPGW_CONFIG`, or `--config`); see [config loading](wiki/history/M1-01-Config-Loading.md). Config-file entries take precedence over stored ones with the same name. Logs go to stderr and are controlled by `MCPGW_LOG` (default `warn`).
+Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can also be declared in `~/.config/mcpgw/config.toml` (or `$MCPGW_CONFIG`, or `--config`); see [config loading](wiki/history/M1-01-Config-Loading.md). Config-file entries take precedence over stored ones with the same name. Logs go to stderr; `MCPGW_LOG` sets the level (default `warn`) and `--log-format pretty|compact|json` (or `MCPGW_LOG_FORMAT`) the format.
 
 Backends speaking `2025-11-25` or `2026-07-28` are both supported. Crashed or unresponsive backends are restarted with exponential backoff.
 

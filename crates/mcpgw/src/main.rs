@@ -22,6 +22,10 @@ struct Cli {
     /// Config file (default: $MCPGW_CONFIG or ~/.config/mcpgw/config.toml).
     #[arg(long, global = true)]
     config: Option<PathBuf>,
+    /// Log format on stderr: pretty, compact or json (default: $MCPGW_LOG_FORMAT
+    /// or compact). The level comes from $MCPGW_LOG (default: warn).
+    #[arg(long, global = true, value_name = "FORMAT")]
+    log_format: Option<mcpgw_telemetry::LogFormat>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -76,18 +80,12 @@ fn parse_kv(s: &str) -> Result<(String, String), String> {
     }
 }
 
-fn init_logging() {
-    let filter = tracing_subscriber::EnvFilter::try_from_env("MCPGW_LOG")
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("warn"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_writer(std::io::stderr)
-        .init();
-}
-
 fn main() -> ExitCode {
-    init_logging();
     let cli = Cli::parse();
+    if let Err(e) = mcpgw_telemetry::init(cli.log_format, "warn") {
+        eprintln!("mcpgw: {e}");
+        return ExitCode::FAILURE;
+    }
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

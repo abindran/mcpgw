@@ -11,6 +11,7 @@ repository.workspace = true
 mcpgw-core.workspace = true
 mcpgw-proto.workspace = true
 mcpgw-runtime.workspace = true
+mcpgw-telemetry.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
