@@ -17,9 +17,9 @@ client to backend tool servers, bridging between them.
 |----|------|--------|
 | [M0-01](M0-01-Workspace-and-Crate-Skeleton) | Cargo workspace + crate skeleton | ✅ Done |
 | [M0-02](M0-02-CI-and-Dependency-Rule) | CI pipeline + rmcp dependency-rule enforcement | ✅ Implemented (remote proof pending) |
-| M0-03 | Core error + config types (incl. locked decisions) | ⏳ Pending |
-| M0-04 | Spike: rmcp as MCP **server** to a client | ⏳ Pending |
-| M0-05 | Spike: rmcp as MCP **client** + version bridging | ⏳ Pending |
+| M0-03 | Core error + config types (incl. locked decisions) | ✅ Done |
+| [M0-04](M0-04-rmcp-Server-Spike) | Spike: rmcp as MCP **server** to a client | ✅ Done |
+| [M0-05](M0-05-rmcp-Client-and-Bridging-Spike) | Spike: rmcp as MCP **client** + version bridging | ✅ Done |
 
 ### Later milestones
 

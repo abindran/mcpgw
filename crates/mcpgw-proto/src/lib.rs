@@ -6,6 +6,9 @@
 //! sole consumer of `rmcp` contains protocol churn to a single crate
 //! (enforced in CI, see M0-02).
 
+pub mod spike_bridge;
+pub mod spike_server;
+
 /// Protocol versions the gateway bridges between.
 ///
 /// The gateway speaks a newer protocol to LLM clients and may need to talk an
