@@ -379,6 +379,12 @@
               "null"
             ]
           },
+          "prewarms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "protocol_version": {
             "type": [
               "string",

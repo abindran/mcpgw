@@ -13,6 +13,9 @@
 //! otherwise `401` with `WWW-Authenticate: Bearer`. `/healthz` does not, so
 //! the stdio shim can find a running daemon.
 
+// the OpenAPI document is one large `json!` literal
+#![recursion_limit = "256"]
+
 pub mod admin;
 pub mod oauth;
 pub mod profiles;

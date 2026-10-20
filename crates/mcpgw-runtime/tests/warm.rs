@@ -105,3 +105,30 @@ fn only_one_warm_instance() {
     .unwrap();
     assert!(t.warm());
 }
+
+/// M3-07: prewarming is speculative, so it never pushes a server out.
+#[tokio::test(flavor = "multi_thread")]
+async fn prewarm_only_with_room() {
+    let m = BackendManager::with_catalog(
+        &[
+            mcpgw_testkit::stdio("a", &[]),
+            mcpgw_testkit::stdio("b", &[]),
+        ],
+        ManagerOptions {
+            max_running: 1,
+            health_interval: Duration::from_secs(60),
+            ..ManagerOptions::default()
+        },
+        Arc::new(Catalog::default()),
+    );
+    timed_echo(&m, "a").await;
+    assert!(!m.prewarm("b", None), "no room: a is running");
+    assert_eq!(m.status_of("b").unwrap().state, State::Cold);
+    m.stop("a").await.unwrap();
+    assert!(m.prewarm("b", None));
+    assert!(until(|| m.status_of("b").unwrap().state.is_connected(), 10).await);
+    assert!(!m.prewarm("b", None), "already running");
+    assert_eq!(m.status_of("b").unwrap().prewarms, 1);
+    assert!(!m.prewarm("nope", None));
+    m.shutdown().await;
+}

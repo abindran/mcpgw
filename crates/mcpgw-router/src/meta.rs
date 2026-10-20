@@ -157,6 +157,30 @@ fn tool_error(msg: impl Into<String>) -> JsonObject {
     text_result(msg.into(), Value::Null, true)
 }
 
+/// How many of the best search hits get their servers prewarmed.
+pub const PREWARM_TOP: usize = 3;
+
+/// Start, in the background, the cold servers behind the best hits: the
+/// model's next step is usually to call one of them (M3-07). The manager
+/// only does so when there's room under `max_running`.
+fn prewarm(manager: &BackendManager, hits: &[JsonObject], scope: &Scope) {
+    let mut seen = Vec::new();
+    for t in hits.iter().take(PREWARM_TOP) {
+        let Some(server) = t["name"]
+            .as_str()
+            .and_then(|n| crate::aggregate::server_of(manager, n))
+        else {
+            continue;
+        };
+        if seen.contains(&server) {
+            continue;
+        }
+        let account = scope.accounts.get(&server).map(String::as_str);
+        manager.prewarm(&server, account);
+        seen.push(server);
+    }
+}
+
 /// Run a meta-tool. Problems the model can fix (unknown tool, a failing
 /// backend) come back as tool errors (`isError`), so the model sees them.
 pub async fn call(
@@ -181,6 +205,9 @@ pub async fn call(
                 .unwrap_or(DEFAULT_LIMIT);
             let query = str_arg("query");
             let hits = search(&list_tools_in(manager, scope).await, &query, limit);
+            if !scope.no_prewarm {
+                prewarm(manager, &hits, scope);
+            }
             let summary: Vec<Value> = hits
                 .iter()
                 .map(|t| json!({"name": t["name"], "description": t.get("description").cloned().unwrap_or(Value::Null)}))

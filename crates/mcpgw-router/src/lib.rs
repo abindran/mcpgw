@@ -53,6 +53,8 @@ pub struct GatewayOptions {
     /// The audit log (M2-13): every finished tool call, with a digest of its
     /// arguments.
     pub audit: Option<mcpgw_core::audit::Auditor>,
+    /// Don't prewarm the servers behind `search_tools` results (M3-07).
+    pub no_prewarm: bool,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -84,6 +86,7 @@ impl GatewayProvider {
             accounts: self.opts.accounts.clone(),
             policy: self.opts.policy.clone(),
             label: self.opts.label.clone(),
+            no_prewarm: self.opts.no_prewarm,
         }
     }
 

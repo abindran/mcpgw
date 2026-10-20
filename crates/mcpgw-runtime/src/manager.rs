@@ -121,6 +121,8 @@ pub struct BackendStatus {
     pub cold_starts: u64,
     /// How long the last start took (spawn or connect through tools/list).
     pub last_start_ms: Option<u64>,
+    /// Background starts requested because a call looked likely (M3-07).
+    pub prewarms: u64,
 }
 
 struct Shared {
@@ -478,6 +480,7 @@ impl BackendManager {
                 warm: cfg.warm(),
                 cold_starts: 0,
                 last_start_ms: None,
+                prewarms: 0,
             }),
             tools: RwLock::new(Vec::new()),
             stderr: Arc::default(),
@@ -710,6 +713,41 @@ impl BackendManager {
             Some(why) => ProtoError::Unavailable(format!("server {server} is {why}")),
             None => ProtoError::Unavailable(format!("server {server} is shut down")),
         }
+    }
+
+    /// Start `server` (as `account`) in the background if it is cold, as a
+    /// hint that a call is likely soon (M3-07: `search_tools` just returned
+    /// its tools). Speculative, so it never pushes another server out: it
+    /// only starts when there is room under `max_running`. Returns whether
+    /// a start was requested.
+    pub fn prewarm(&self, server: &str, account: Option<&str>) -> bool {
+        let Ok(key) = self.instance(server, account) else {
+            return false;
+        };
+        let Ok(h) = self.handle(&key) else {
+            return false;
+        };
+        if h.shared.snapshot().state != State::Cold {
+            return false;
+        }
+        let running = self
+            .read()
+            .values()
+            .filter(|o| {
+                let s = o.shared.snapshot().state;
+                s.is_connected() || s == State::Starting
+            })
+            .count();
+        if running >= self.opts.max_running {
+            return false;
+        }
+        let (reply, _) = oneshot::channel();
+        if h.tx.send(Cmd::Ensure(reply)).is_err() {
+            return false;
+        }
+        h.shared.update(|s| s.prewarms += 1);
+        tracing::debug!(server = %key, "prewarming");
+        true
     }
 
     /// Start a server (if needed) and wait until it is connected.

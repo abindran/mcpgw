@@ -121,6 +121,13 @@
           "$ref": "#/$defs/Policy",
           "description": "Tool policy for the default endpoint (profiles have their own):\n`policy = { deny = [\"*__delete_*\"], approve = [\"gh__merge_*\"] }`."
         },
+        "prewarm": {
+          "description": "Start servers in the background when `search_tools` returns their\ntools, hiding their cold start from the call that usually follows.\nDefault: `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "registry_url": {
           "description": "MCP Registry used by `mcpgw add <name>` and `mcpgw registry search`.\nDefault: `https://registry.modelcontextprotocol.io`.",
           "type": [

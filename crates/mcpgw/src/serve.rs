@@ -46,6 +46,7 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         approval_timeout: approval_timeout(config),
         calls: Some(call_log()),
         audit: auditor(),
+        no_prewarm: config.gateway.prewarm == Some(false),
     }
 }
 
@@ -117,6 +118,7 @@ fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::Ga
         approval_timeout: approval_timeout(config),
         calls: Some(call_log()),
         audit: auditor(),
+        no_prewarm: config.gateway.prewarm == Some(false),
     }
 }
 

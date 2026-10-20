@@ -75,6 +75,9 @@ pub struct ServerInfo {
     /// How long the last start took.
     #[serde(default)]
     pub last_start_ms: Option<u64>,
+    /// Background starts after `search_tools` returned its tools.
+    #[serde(default)]
+    pub prewarms: u64,
     /// Tools in its pinned manifest.
     pub tools: usize,
 }
@@ -133,6 +136,7 @@ async fn status(State(s): State<AdminState>) -> Json<StatusReport> {
             warm: st.warm,
             cold_starts: st.cold_starts,
             last_start_ms: st.last_start_ms,
+            prewarms: st.prewarms,
             tools,
             name: st.name,
         });

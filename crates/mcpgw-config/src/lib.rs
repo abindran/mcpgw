@@ -105,6 +105,11 @@ pub struct GatewayConfig {
     /// `"http://localhost:5173"`. The daemon's own origin is always allowed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub allowed_origins: Vec<String>,
+    /// Start servers in the background when `search_tools` returns their
+    /// tools, hiding their cold start from the call that usually follows.
+    /// Default: `true`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prewarm: Option<bool>,
     /// MCP Registry used by `mcpgw add <name>` and `mcpgw registry search`.
     /// Default: `https://registry.modelcontextprotocol.io`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

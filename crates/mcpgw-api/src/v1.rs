@@ -111,6 +111,7 @@ impl ApiState {
             "warm": spec.warm(),
             "cold_starts": st.as_ref().map(|s| s.cold_starts),
             "last_start_ms": st.as_ref().and_then(|s| s.last_start_ms),
+            "prewarms": st.as_ref().map(|s| s.prewarms),
             "restarts": st.as_ref().map(|s| s.restarts),
             "protocol_version": st.as_ref().and_then(|s| s.protocol_version.clone()),
             "last_error": st.as_ref().and_then(|s| s.last_error.clone()),
@@ -318,6 +319,7 @@ async fn list_tools(State(s): State<ApiState>, Query(q): Query<ToolsQuery>) -> R
                 accounts: p.accounts.clone(),
                 policy: p.policy.clone(),
                 label: format!("profile {}", p.name),
+                ..Default::default()
             }
         }
     };
@@ -678,7 +680,7 @@ pub fn openapi() -> Value {
                     "source": {"enum": ["config", "store"]}, "state": {"type": ["string", "null"]},
                     "pid": {"type": ["integer", "null"]}, "restarts": {"type": ["integer", "null"]},
                     "warm": {"type": "boolean"}, "cold_starts": {"type": ["integer", "null"]},
-                    "last_start_ms": {"type": ["integer", "null"]},
+                    "last_start_ms": {"type": ["integer", "null"]}, "prewarms": {"type": ["integer", "null"]},
                     "container": {"oneOf": [{"type": "null"}, {"type": "object", "properties": {
                         "runtime": {"type": "string"}, "name": {"type": "string"}, "image": {"type": "string"},
                         "rootless": {"type": "boolean"}}}]},

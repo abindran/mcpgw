@@ -101,6 +101,8 @@ pub struct Scope {
     pub policy: mcpgw_core::Policy,
     /// Where this scope applies, for messages: `profile frontend`.
     pub label: String,
+    /// Don't start servers whose tools `search_tools` returns (M3-07).
+    pub no_prewarm: bool,
 }
 
 impl Scope {
@@ -179,6 +181,12 @@ pub async fn resolve_in(
     }
     // Not in the manifest (yet): pass the plain tool part through.
     (public_name(prefix, part) == public).then(|| (server, part.to_string()))
+}
+
+/// The server behind a public tool name, if it is one.
+pub fn server_of(manager: &BackendManager, public: &str) -> Option<String> {
+    let (prefix, _) = split_name(public)?;
+    manager.server_for_prefix(prefix)
 }
 
 /// Route a call by public name to the owning backend (default accounts).
