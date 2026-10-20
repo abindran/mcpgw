@@ -113,6 +113,12 @@ enum Cmd {
         /// Server name.
         name: String,
     },
+    /// Open the web UI in a browser (starts the daemon if needed).
+    Ui {
+        /// Print the address instead of opening a browser.
+        #[arg(long)]
+        print: bool,
+    },
     /// List tool calls waiting for approval.
     Approvals,
     /// Approve a waiting tool call (id from `mcpgw approvals`).
@@ -328,6 +334,21 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Logs { name, lines } => servers::logs(&config, name.as_deref(), lines),
         Cmd::Pin { name } => servers::pin(&config, &name),
         Cmd::Restart { name } => servers::restart(&config, &name),
+        Cmd::Ui { print } => {
+            let info = match daemon::running(&config) {
+                Some(i) => i,
+                None => daemon::start(&config, &path, std::time::Duration::from_secs(60))?,
+            };
+            let token = Token::load_or_create(&config.gateway.token_path())?;
+            let base = info.url.trim_end_matches(mcpgw_api::MCP_PATH);
+            let url = format!("{base}/ui#token={}", token.expose());
+            if print || !auth::open_browser(&url) {
+                println!("{url}");
+            } else {
+                println!("opened {base}/ui");
+            }
+            Ok(())
+        }
         Cmd::Approvals => {
             let c = control::Control::connect(&config)?.ok_or("the daemon is not running")?;
             let list = c.approvals()?;

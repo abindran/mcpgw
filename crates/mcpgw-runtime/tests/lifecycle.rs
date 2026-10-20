@@ -811,3 +811,13 @@ async fn missing_secret_fails_the_start_with_a_hint() {
     assert!(err.contains("no vault is configured"), "{err}");
     m.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_enabled_updates_the_spec() {
+    let m = BackendManager::start(&[server("fx", &[])], lazy());
+    m.set_enabled("fx", false).await.unwrap();
+    assert!(!m.spec("fx").unwrap().enabled);
+    m.set_enabled("fx", true).await.unwrap();
+    assert!(m.spec("fx").unwrap().enabled);
+    m.shutdown().await;
+}

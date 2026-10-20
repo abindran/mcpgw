@@ -17,8 +17,8 @@ struct Api {
 }
 
 impl Api {
-    fn start() -> Self {
-        let dir = std::env::temp_dir().join(format!("mcpgw-api-{}", std::process::id()));
+    fn start(tag: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("mcpgw-api-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(
@@ -119,7 +119,7 @@ fn names(v: &Value, key: &str) -> Vec<String> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_endpoint_works_and_is_documented() {
-    let a = Api::start();
+    let a = Api::start("all");
     let fake = mcpgw_testkit::fake_mcp().to_string_lossy().into_owned();
     use StatusCode as S;
 
@@ -479,6 +479,25 @@ async fn every_endpoint_works_and_is_documented() {
         .await;
     assert_eq!(s, S::NOT_FOUND);
 
+    // recent calls, newest first: the denied echo is last
+    let (s, v) = a
+        .call("GET", "/api/v1/calls", "/api/v1/calls?limit=10", None)
+        .await;
+    assert_eq!(s, S::OK);
+    let calls = v["calls"].as_array().unwrap();
+    assert_eq!(calls[0]["tool"], "fx__echo");
+    assert_eq!(calls[0]["outcome"], "tool_error");
+    assert!(
+        calls
+            .iter()
+            .any(|c| c["tool"] == "extra__add" && c["outcome"] == "ok"),
+        "{v}"
+    );
+    assert!(
+        !v.to_string().contains("hello"),
+        "arguments must not be logged"
+    );
+
     // removing servers
     let (s, _) = a
         .call(
@@ -530,4 +549,62 @@ async fn every_endpoint_works_and_is_documented() {
         .collect();
     let seen = a.seen.lock().unwrap().clone();
     assert_eq!(seen, documented);
+}
+
+/// M2-12: the UI is three static files, served without the token under a
+/// strict CSP, and still only to loopback hosts.
+#[tokio::test(flavor = "multi_thread")]
+async fn web_ui_is_served_with_a_strict_csp() {
+    let a = Api::start("ui");
+    for (path, kind) in [
+        ("/ui", "text/html"),
+        ("/ui/app.js", "text/javascript"),
+        ("/ui/app.css", "text/css"),
+    ] {
+        let r = a
+            .http
+            .get(format!("{}{path}", a.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), StatusCode::OK, "{path}");
+        let h = r.headers();
+        assert!(
+            h["content-type"].to_str().unwrap().starts_with(kind),
+            "{path}"
+        );
+        let csp = h["content-security-policy"].to_str().unwrap();
+        assert!(
+            csp.contains("default-src 'none'") && csp.contains("frame-ancestors 'none'"),
+            "{csp}"
+        );
+        assert_eq!(h["x-frame-options"], "DENY");
+        assert_eq!(h["referrer-policy"], "no-referrer");
+    }
+    let page = a
+        .http
+        .get(format!("{}/ui", a.base))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains("/ui/app.js") && !page.contains(&a.token),
+        "the page must not embed the token"
+    );
+    let r = a
+        .http
+        .get(format!("{}/ui", a.base))
+        .header("host", "evil.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(r.status(), StatusCode::FORBIDDEN, "DNS rebinding");
+    let url = a.mcpgw(&["ui", "--print"]);
+    assert!(
+        url.trim().ends_with(&format!("/ui#token={}", a.token)),
+        "{url}"
+    );
 }

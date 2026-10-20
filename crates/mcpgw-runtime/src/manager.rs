@@ -549,6 +549,11 @@ impl BackendManager {
         let r = rx
             .await
             .map_err(|_| ProtoError::Unavailable(format!("server {server} is shut down")))?;
+        if r.is_ok()
+            && let Some(spec) = self.specs.write().expect("specs lock").get_mut(server)
+        {
+            spec.enabled = enabled;
+        }
         self.catalog.bump();
         r
     }

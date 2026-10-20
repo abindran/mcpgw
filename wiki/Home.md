@@ -71,7 +71,7 @@ M1 exit check: [M1-Exit](M1-Exit.md).
 | [M2-09](M2-09-Approvals.md) | Approvals | ✅ |
 | [M2-10](M2-10-Change-Propagation.md) | Direct-mode change propagation | ✅ |
 | [M2-11](M2-11-Admin-REST-API.md) | Admin REST API v1 with OpenAPI | ✅ |
-| M2-12 | Minimal web UI | ⏳ |
+| [M2-12](M2-12-Web-UI.md) | Minimal web UI | ✅ |
 | M2-13 | Hash-chained audit log | ⏳ |
 | M2-14 | MCP Registry integration | ⏳ |
 

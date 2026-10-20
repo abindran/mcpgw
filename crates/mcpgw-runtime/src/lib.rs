@@ -5,11 +5,13 @@
 //! through `mcpgw-proto`.
 
 pub mod approvals;
+pub mod calls;
 pub mod catalog;
 pub mod manager;
 pub mod state;
 
 pub use approvals::{ApprovalView, Approvals};
+pub use calls::{CallLog, CallRecord};
 pub use catalog::{Catalog, Persist, introspect, introspect_with_secrets};
 pub use manager::{BackendManager, BackendStatus, ManagerOptions, SecretResolver};
 pub use mcpgw_proto::{JsonObject, ProtoError};

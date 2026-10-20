@@ -6,7 +6,8 @@ use mcpgw_config::Config;
 
 use crate::{AnyResult, control::Control, daemon};
 
-fn open_browser(url: &str) -> bool {
+/// Open `url` in the default browser; false if that failed.
+pub fn open_browser(url: &str) -> bool {
     let mut cmd = if cfg!(target_os = "macos") {
         std::process::Command::new("open")
     } else if cfg!(windows) {

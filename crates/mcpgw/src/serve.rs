@@ -44,7 +44,14 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         label: "the default endpoint".into(),
         approvals: Some(approvals()),
         approval_timeout: approval_timeout(config),
+        calls: Some(call_log()),
     }
+}
+
+/// Recent calls on every endpoint (M2-12).
+pub fn call_log() -> Arc<mcpgw_runtime::CallLog> {
+    static L: std::sync::OnceLock<Arc<mcpgw_runtime::CallLog>> = std::sync::OnceLock::new();
+    L.get_or_init(Default::default).clone()
 }
 
 /// The daemon's pending approvals, shared by every endpoint (M2-09).
@@ -88,6 +95,7 @@ fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::Ga
         label: format!("profile {}", p.name),
         approvals: Some(approvals()),
         approval_timeout: approval_timeout(config),
+        calls: Some(call_log()),
     }
 }
 
@@ -409,6 +417,7 @@ async fn serve_http(
         profiles,
         secrets: Arc::new(secrets::ApiSecrets::new(vault, store.clone())),
         approvals: approvals(),
+        calls: call_log(),
         started_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -420,7 +429,7 @@ async fn serve_http(
         admin
             .merge(mcpgw_api::oauth::admin_routes(oauth.clone()))
             .merge(api),
-        mcpgw_api::oauth::public_routes(oauth),
+        mcpgw_api::oauth::public_routes(oauth).merge(mcpgw_api::ui::routes()),
         mcpgw_api::EdgeOptions {
             token,
             port: local.port(),

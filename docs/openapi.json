@@ -34,6 +34,36 @@
         },
         "type": "object"
       },
+      "Call": {
+        "properties": {
+          "at_ms": {
+            "type": "integer"
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "tool_error",
+              "error"
+            ]
+          },
+          "tool": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "Error": {
         "properties": {
           "error": {
@@ -614,6 +644,76 @@
         "summary": "Refuse a waiting call",
         "tags": [
           "approvals"
+        ]
+      }
+    },
+    "/api/v1/calls": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "calls": {
+                      "items": {
+                        "$ref": "#/components/schemas/Call"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Calls"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Recent tool calls, newest first (names and outcomes only)",
+        "tags": [
+          "runtime"
         ]
       }
     },

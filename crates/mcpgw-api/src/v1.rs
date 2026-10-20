@@ -47,6 +47,8 @@ pub struct ApiState {
     pub secrets: Arc<dyn SecretBackend>,
     /// Pending approvals.
     pub approvals: Arc<Approvals>,
+    /// Recent calls.
+    pub calls: Arc<mcpgw_runtime::CallLog>,
     /// Daemon start, Unix seconds.
     pub started_at: u64,
     /// MCP endpoint base, e.g. `http://127.0.0.1:7777/mcp`.
@@ -452,6 +454,17 @@ async fn runtime(State(s): State<ApiState>) -> R {
     }))
 }
 
+#[derive(Deserialize)]
+struct Limit {
+    limit: Option<usize>,
+}
+
+async fn recent_calls(State(s): State<ApiState>, Query(q): Query<Limit>) -> R {
+    ok(
+        json!({ "calls": s.calls.recent(q.limit.unwrap_or(50).min(mcpgw_runtime::calls::CALL_LOG_LEN)) }),
+    )
+}
+
 async fn list_approvals(State(s): State<ApiState>) -> R {
     ok(json!({ "approvals": s.approvals.list() }))
 }
@@ -501,6 +514,7 @@ pub fn router(state: ApiState) -> Router {
             "/api/v1/secrets/{name}",
             axum::routing::put(put_secret).delete(delete_secret),
         )
+        .route("/api/v1/calls", get(recent_calls))
         .route("/api/v1/approvals", get(list_approvals))
         .route("/api/v1/approvals/{id}/approve", post(approve))
         .route("/api/v1/approvals/{id}/deny", post(deny))
@@ -590,6 +604,7 @@ pub fn openapi() -> Value {
                 "put": op("secrets", "Store a secret", name.clone(), Some(body(json!({"type": "object", "required": ["value"], "properties": {"value": {"type": "string", "writeOnly": true}, "description": {"type": "string"}}}))), "204", empty.clone()),
                 "delete": op("secrets", "Delete a secret", name.clone(), None, "204", empty.clone())
             },
+            "/api/v1/calls": {"get": op("runtime", "Recent tool calls, newest first (names and outcomes only)", json!([{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 200}}]), None, "200", resp("Calls", list("calls", r("Call"))))},
             "/api/v1/approvals": {"get": op("approvals", "Tool calls waiting for approval", none, None, "200", resp("Approvals", list("approvals", r("Approval"))))},
             "/api/v1/approvals/{id}/approve": {"post": op("approvals", "Approve a waiting call", id.clone(), None, "204", empty.clone())},
             "/api/v1/approvals/{id}/deny": {"post": op("approvals", "Refuse a waiting call", id, None, "204", empty)}
@@ -614,6 +629,11 @@ pub fn openapi() -> Value {
                     "uptime_secs": {"type": "integer"}, "approvals_pending": {"type": "integer"},
                     "servers": {"type": "object", "properties": {"total": {"type": "integer"}, "running": {"type": "integer"}}},
                     "endpoints": {"type": "array", "items": {"type": "string"}}
+                }},
+                "Call": {"type": "object", "properties": {
+                    "at_ms": {"type": "integer"}, "endpoint": {"type": "string"}, "tool": {"type": "string"},
+                    "outcome": {"enum": ["ok", "tool_error", "error"]}, "duration_ms": {"type": "integer"},
+                    "client": {"type": ["string", "null"]}
                 }},
                 "Approval": {"type": "object", "properties": {
                     "id": {"type": "string"}, "tool": {"type": "string"}, "arguments": {"type": "string"},

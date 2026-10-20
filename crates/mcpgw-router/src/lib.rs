@@ -48,6 +48,8 @@ pub struct GatewayOptions {
     /// How long a call waits for `mcpgw approve` when the client can't be
     /// asked. Zero means the default of two minutes.
     pub approval_timeout: std::time::Duration,
+    /// Where finished calls are recorded (M2-12).
+    pub calls: Option<Arc<mcpgw_runtime::CallLog>>,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -247,7 +249,9 @@ impl ToolProvider for GatewayProvider {
                     .to_string(),
                 _ => name.clone(),
             };
-            mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
+            let started = std::time::Instant::now();
+            let client = ctx.client_name.clone();
+            let out = mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
                 // the tool actually being run: the name, or call_tool's target
                 let target = match (meta, name.as_str()) {
                     (false, _) => Some((name.clone(), arguments.clone())),
@@ -275,7 +279,28 @@ impl ToolProvider for GatewayProvider {
                     (res, _) => res,
                 }
             })
-            .await
+            .await;
+            // the question of an approval round isn't a finished call
+            if let Some(log) = &self.opts.calls
+                && !matches!(out, Err(ProtoError::Elicit { .. }))
+                && !(meta && name != meta::CALL)
+            {
+                let outcome = match &out {
+                    Ok(r) if r.get("isError").and_then(|v| v.as_bool()) == Some(true) => {
+                        "tool_error"
+                    }
+                    Ok(_) => "ok",
+                    Err(_) => "error",
+                };
+                log.record(
+                    &self.opts.label,
+                    &label,
+                    outcome,
+                    started.elapsed().as_millis() as u64,
+                    client,
+                );
+            }
+            out
         })
     }
 }

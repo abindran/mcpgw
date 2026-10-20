@@ -71,6 +71,7 @@ mcpgw logs gh                    # a server's recent stderr (`mcpgw logs` = daem
 mcpgw disable gh / enable gh     # live, no client restart
 mcpgw pin gh                     # trust a quarantined server's changed tools
 mcpgw restart gh                 # clear a failed server
+mcpgw ui                         # web UI: servers, approvals, recent calls
 mcpgw token [--rotate]           # the loopback bearer token for HTTP clients
 mcpgw down
 ```
