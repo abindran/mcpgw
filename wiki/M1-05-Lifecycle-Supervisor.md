@@ -81,3 +81,8 @@ for the wrong reason. rmcp answers `ping` before any handler runs, so
 `FAKE_HANG_PING` hung nothing; the restart came from the -32601 above. The fake now
 drops `ping` requests on its stdin, so the gateway's health check really times out.
 
+Then 2026-07-28 servers got a probe they implement. A health check sends
+`server/discover` to them, and `ping` only to 2025-11-25 sessions. Before, every
+check of a 2026 server earned a -32601 and a WARN line in the daemon log. The test
+is `lifecycle.rs::health_checks_leave_a_healthy_2026_server_alone`.
+

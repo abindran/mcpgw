@@ -497,16 +497,24 @@ async fn main() {
         serve_http(fake, addr).await;
         return;
     }
-    // FAKE_HANG_PING: the server never sees a `ping` (rmcp answers it before
-    // any handler would run), so the gateway's health check times out
+    // FAKE_HANG_PING: the server never sees a health probe, a `ping` or a
+    // `server/discover` after the handshake's (rmcp answers both before any
+    // handler would run), so the gateway's health check times out
     let stdin: std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>> = if fake.s.hang_ping {
         let (mut tx, rx) = tokio::io::duplex(1 << 16);
         tokio::spawn(async move {
             use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
             let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+            let mut discovered = false;
             while let Ok(Some(line)) = lines.next_line().await {
                 if line.contains("\"method\":\"ping\"") {
                     continue;
+                }
+                if line.contains("\"method\":\"server/discover\"") {
+                    if discovered {
+                        continue;
+                    }
+                    discovered = true;
                 }
                 if tx.write_all(format!("{line}\n").as_bytes()).await.is_err() {
                     break;

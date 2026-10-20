@@ -249,11 +249,12 @@ async fn failed_health_check_triggers_restart() {
     m.shutdown().await;
 }
 
-/// A server that answers `ping` with an error is alive: 2026-07-28 servers
-/// may not implement it (-32601), and health checks restarted them, even in
-/// the middle of a call.
+/// Health checks leave a healthy 2026-07-28 server alone: they used `ping`,
+/// which such servers answer with -32601, and restarted them every check,
+/// even in the middle of a call. They now probe with `server/discover` (and
+/// any answer, even an error, counts as alive).
 #[tokio::test(flavor = "multi_thread")]
-async fn a_ping_answered_with_an_error_is_alive() {
+async fn health_checks_leave_a_healthy_2026_server_alone() {
     let m = BackendManager::start(&[server("fx", &[("FAKE_PROTOCOL", "modern")])], fast());
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     // about ten health checks

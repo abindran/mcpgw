@@ -765,7 +765,17 @@ impl BackendConn {
         if self.is_closed() {
             return Err(ProtoError::Closed);
         }
-        let req = ClientRequest::PingRequest(PingRequest::default());
+        // 2026-07-28 has no `ping`: `server/discover` is the cheap request
+        // every such server answers (a ping only earns a -32601 and a warning
+        // in the log every health check)
+        let modern = self
+            .protocol_version()
+            .is_some_and(|v| v.as_str() >= ProtocolVersion::V_2026_07_28.as_str());
+        let req = if modern {
+            ClientRequest::DiscoverRequest(rmcp::model::DiscoverRequest::new(Default::default()))
+        } else {
+            ClientRequest::PingRequest(PingRequest::default())
+        };
         let handle = self
             .service
             .send_request_with_option(req, PeerRequestOptions::with_timeout(timeout))
@@ -774,9 +784,9 @@ impl BackendConn {
             Ok(ServerResult::EmptyResult(_)) => Ok(()),
             // Some servers answer ping with a non-empty object; still alive.
             Ok(_) => Ok(()),
-            // An error *reply* is an answer too: 2026-07-28 servers may not
-            // implement `ping` (-32601), and that must not get them restarted
-            // in the middle of a long call (found by M4-09's 10-minute test).
+            // An error *reply* is an answer too: a server that doesn't
+            // implement the probe (-32601) is alive, and must not be
+            // restarted in the middle of a long call (found by M4-09).
             Err(ServiceError::McpError(_)) => Ok(()),
             Err(e) => Err(e.into()),
         }
