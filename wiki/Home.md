@@ -54,6 +54,8 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | [M1-13](M1-13-CLI.md) | CLI: up, down, status, add, enable, disable, secret, logs | ✅ |
 | [M1-14](M1-14-Client-Install-and-Import.md) | `client install` and `import` | ✅ |
 
+M1 exit check: [M1-Exit](M1-Exit.md).
+
 ### M2 — Auth and control
 
 | ID | Item | Status |
