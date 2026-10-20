@@ -118,7 +118,8 @@ pub async fn introspect_with_secrets(
     } else {
         spec
     };
-    let launch = crate::manager::Launch::new(spec, secrets);
+    let launch =
+        crate::manager::Launch::new(spec, secrets, &spec.name, mcpgw_core::DEFAULT_ACCOUNT);
     let (target, _) = tokio::task::spawn_blocking(move || launch.resolve())
         .await
         .map_err(|e| ProtoError::Other(e.to_string()))?

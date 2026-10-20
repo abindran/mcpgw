@@ -472,7 +472,13 @@ impl BackendManager {
             };
             let actor = Actor::new(
                 shared.clone(),
-                Launch::new(cfg, self.secrets.clone()),
+                Launch::new(
+                    cfg,
+                    self.secrets.clone(),
+                    instance_of.unwrap_or(key),
+                    key.split_once('@')
+                        .map_or(mcpgw_core::DEFAULT_ACCOUNT, |(_, a)| a),
+                ),
                 self.opts.clone(),
                 limits,
                 state,
@@ -539,6 +545,11 @@ impl BackendManager {
         })?;
         rx.await
             .map_err(|_| ProtoError::Unavailable(format!("server {server} is shut down")))?
+    }
+
+    /// A server's spec as configured.
+    pub fn spec(&self, server: &str) -> Option<ServerSpec> {
+        self.specs.read().expect("specs lock").get(server).cloned()
     }
 
     /// The tool catalog.
@@ -753,6 +764,9 @@ impl BackendManager {
 /// bindings, and where secrets come from.
 pub(crate) struct Launch {
     pub(crate) template: Template,
+    /// For HTTP servers without an `Authorization` header: the vault name of
+    /// its OAuth login (`oauth/<server>@<account>`), injected when present.
+    pub(crate) oauth: Option<String>,
     pub(crate) bindings: BTreeMap<String, String>,
     pub(crate) refs: std::collections::BTreeSet<String>,
     pub(crate) resolver: Option<Arc<dyn SecretResolver>>,
@@ -781,7 +795,12 @@ impl Template {
 
 impl Launch {
     /// How to launch `cfg`, with secrets from `resolver`.
-    pub(crate) fn new(cfg: &ServerSpec, resolver: Option<Arc<dyn SecretResolver>>) -> Self {
+    pub(crate) fn new(
+        cfg: &ServerSpec,
+        resolver: Option<Arc<dyn SecretResolver>>,
+        server: &str,
+        account: &str,
+    ) -> Self {
         let template = match &cfg.transport {
             Transport::Stdio {
                 command,
@@ -799,8 +818,24 @@ impl Launch {
                 headers: headers.clone(),
             }),
         };
+        let oauth = match &template {
+            Template::Http(h)
+                if !h
+                    .headers
+                    .keys()
+                    .any(|k| k.eq_ignore_ascii_case("authorization"))
+                    && !cfg
+                        .secrets
+                        .keys()
+                        .any(|k| k.eq_ignore_ascii_case("authorization")) =>
+            {
+                Some(mcpgw_core::oauth_secret_name(server, account))
+            }
+            _ => None,
+        };
         Self {
             template,
+            oauth,
             bindings: cfg.secrets.clone(),
             refs: cfg.secret_refs(),
             resolver,
@@ -810,7 +845,13 @@ impl Launch {
     /// The concrete backend plus a redactor for the injected values.
     /// For HTTP servers, `secrets` bindings become headers.
     pub(crate) fn resolve(&self) -> Result<(Template, Redactor), String> {
-        if self.refs.is_empty() {
+        // An OAuth login for a remote server is optional: without one the
+        // server answers 401 and the start fails with a hint.
+        let login = match (&self.oauth, &self.resolver) {
+            (Some(name), Some(r)) => r.resolve(name)?.map(|t| (name.clone(), t)),
+            _ => None,
+        };
+        if self.refs.is_empty() && login.is_none() {
             return Ok((self.template.clone(), Redactor::default()));
         }
         let Some(r) = &self.resolver else {
@@ -851,7 +892,16 @@ impl Launch {
                     h.headers
                         .insert(header.clone(), lookup(name).unwrap_or_default());
                 }
+                if let Some((_, token)) = &login {
+                    h.headers.insert(
+                        "Authorization".into(),
+                        format!("Bearer {}", token.expose_secret()),
+                    );
+                }
             }
+        }
+        if let Some((name, token)) = login {
+            values.insert(name, token);
         }
         let redactor = Redactor::new(values.iter().map(|(n, v)| (n.as_str(), v.expose_secret())));
         Ok((spec, redactor))
@@ -1327,7 +1377,19 @@ impl Actor {
                     }
                 }
             }
-            Internal::Started(Err(e)) => {
+            Internal::Started(Err(mut e)) => {
+                if e.contains("requires authentication") {
+                    let account = self
+                        .shared
+                        .name
+                        .split_once('@')
+                        .map(|(_, a)| format!(" --account {a}"))
+                        .unwrap_or_default();
+                    e.push_str(&format!(
+                        "; sign in with `mcpgw auth connect {}{account}`",
+                        self.shared.catalog_key
+                    ));
+                }
                 tracing::warn!(server = %self.shared.name, error = %e, attempt = self.failures + 1, "backend start failed");
                 self.shared.update(|s| s.last_error = Some(e.clone()));
                 self.apply(Event::StartErr);

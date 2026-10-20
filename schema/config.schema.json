@@ -36,6 +36,13 @@
           },
           "type": "array"
         },
+        "client_metadata_url": {
+          "description": "HTTPS URL of a client ID metadata document describing mcpgw, used as\nthe OAuth client id for remote MCP servers that accept them\n(otherwise mcpgw registers itself dynamically).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "idle_timeout": {
           "anyOf": [
             {

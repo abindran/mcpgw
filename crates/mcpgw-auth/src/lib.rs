@@ -5,6 +5,7 @@
 //! The HTTP front door requires it as `Authorization: Bearer <token>`. The
 //! stdio front needs none: only the parent process can reach the pipe.
 
+pub mod discovery;
 pub mod oauth;
 
 use std::{

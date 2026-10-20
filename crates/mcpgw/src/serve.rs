@@ -56,6 +56,7 @@ pub fn resolver(config: &Config) -> Arc<dyn mcpgw_runtime::SecretResolver> {
 
 /// The OAuth broker for `config`'s `[[oauth]]` apps, storing tokens in `vault`.
 pub fn broker(config: &Config, vault: Arc<secrets::SharedVault>) -> Arc<mcpgw_auth::oauth::Broker> {
+    let saved = saved_clients(&vault);
     let tokens = Arc::new(secrets::VaultTokens::new(vault.clone()));
     let lookup: mcpgw_auth::oauth::SecretLookup = Arc::new(move |name: &str| {
         use secrecy::ExposeSecret;
@@ -68,11 +69,83 @@ pub fn broker(config: &Config, vault: Arc<secrets::SharedVault>) -> Arc<mcpgw_au
             .flatten()
             .map(|s| s.expose_secret().to_string())
     });
-    Arc::new(mcpgw_auth::oauth::Broker::new(
+    let b = Arc::new(mcpgw_auth::oauth::Broker::new(
         config.oauth.clone(),
         tokens,
         lookup,
-    ))
+    ));
+    for p in saved {
+        if b.provider(&p.name).is_none() {
+            b.add_provider(p);
+        }
+    }
+    b
+}
+
+/// Vault prefix for OAuth clients registered with remote MCP servers.
+const CLIENT_PREFIX: &str = "oauth-client/";
+
+/// Clients registered with remote MCP servers in earlier runs (M2-05).
+fn saved_clients(vault: &secrets::SharedVault) -> Vec<mcpgw_core::OAuthProvider> {
+    use secrecy::ExposeSecret;
+    vault
+        .with(false, |v| {
+            let Some(v) = v else { return Ok(Vec::new()) };
+            let mut out = Vec::new();
+            for (name, ..) in v.list() {
+                let Some(server) = name.strip_prefix(CLIENT_PREFIX) else {
+                    continue;
+                };
+                if server.contains('/') {
+                    continue; // a client secret
+                }
+                if let Some(json) = v.get(&name).map_err(|e| e.to_string())?
+                    && let Ok(p) = serde_json::from_str(json.expose_secret())
+                {
+                    out.push(p);
+                }
+            }
+            Ok(out)
+        })
+        .unwrap_or_default()
+}
+
+/// Discovery and registration for the remote MCP servers in `mgr`.
+fn remote_login(
+    config: &Config,
+    mgr: &Arc<BackendManager>,
+    vault: Arc<secrets::SharedVault>,
+) -> mcpgw_api::oauth::RemoteLogin {
+    let m = mgr.clone();
+    let server_url: mcpgw_api::oauth::ServerUrl =
+        Arc::new(move |name: &str| match m.spec(name)?.transport {
+            mcpgw_core::Transport::Http { url, .. } => Some(url),
+            _ => None,
+        });
+    let save_client: mcpgw_api::oauth::SaveClient = Arc::new(move |p, secret| {
+        let json = serde_json::to_string(p).map_err(|e| e.to_string())?;
+        vault.with(true, |v| {
+            let v = v.expect("created");
+            v.set(
+                &format!("{CLIENT_PREFIX}{}", p.name),
+                &secrecy::SecretString::from(json),
+            )
+            .map_err(|e| e.to_string())?;
+            if let Some(s) = secret {
+                v.set(
+                    &format!("{CLIENT_PREFIX}{}/secret", p.name),
+                    &secrecy::SecretString::from(s.to_string()),
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })
+    });
+    mcpgw_api::oauth::RemoteLogin {
+        server_url,
+        save_client,
+        client_metadata_url: config.gateway.client_metadata_url.clone(),
+    }
 }
 
 /// A catalog seeded from the store that saves new manifests back to it.
@@ -147,7 +220,8 @@ pub fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult
                 _ = shutdown_signal() => Ok(()),
             }
         } else {
-            serve_http(config, token, mgr.clone(), broker).await
+            let login = remote_login(config, &mgr, vault.clone());
+            serve_http(config, token, mgr.clone(), broker, login).await
         };
         refresher.abort();
         mgr.shutdown().await;
@@ -179,6 +253,7 @@ async fn serve_http(
     token: Token,
     mgr: Arc<BackendManager>,
     broker: Arc<mcpgw_auth::oauth::Broker>,
+    login: mcpgw_api::oauth::RemoteLogin,
 ) -> AnyResult<()> {
     let addr = config.gateway.listen();
     let listener = tokio::net::TcpListener::bind(addr)
@@ -193,6 +268,7 @@ async fn serve_http(
     let oauth = mcpgw_api::oauth::OAuthState {
         broker,
         base_url: format!("http://127.0.0.1:{}", local.port()),
+        remote: Some(login),
     };
     let app = mcpgw_api::edge_full(
         mcpgw_router::http_router(mgr, gateway_options(config)),

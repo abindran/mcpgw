@@ -59,6 +59,9 @@ pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> 
                 s.put_manifest(&m)?;
                 manifest = Some(m);
             }
+            Err(e) if e.to_string().contains("requires authentication") => eprintln!(
+                "mcpgw: {name} requires a login; sign in with `mcpgw auth connect {name}` (its tools are captured on its first start)"
+            ),
             Err(e) => eprintln!(
                 "mcpgw: could not read the tools of {name}: {e}; they will be captured on its first start"
             ),

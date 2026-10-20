@@ -21,6 +21,25 @@ use mcpgw_auth::oauth::{Broker, FlowStatus};
 use serde::Deserialize;
 use serde_json::json;
 
+/// Saves a discovered client registration (and its secret, if any).
+pub type SaveClient =
+    Arc<dyn Fn(&mcpgw_core::OAuthProvider, Option<&str>) -> Result<(), String> + Send + Sync>;
+
+/// Finds the URL of a remote MCP server by name.
+pub type ServerUrl = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
+
+/// Logging in to remote MCP servers that have no `[[oauth]]` app (M2-05).
+#[derive(Clone)]
+pub struct RemoteLogin {
+    /// Server name → its URL, for HTTP servers.
+    pub server_url: ServerUrl,
+    /// Persist a registration.
+    pub save_client: SaveClient,
+    /// `gateway.client_metadata_url`, used when the server accepts client
+    /// ID metadata documents.
+    pub client_metadata_url: Option<String>,
+}
+
 /// What the OAuth endpoints need.
 #[derive(Clone)]
 pub struct OAuthState {
@@ -29,6 +48,34 @@ pub struct OAuthState {
     /// `http://127.0.0.1:<port>`: the redirect URI is this plus
     /// `/oauth/callback`.
     pub base_url: String,
+    /// Discovery for remote MCP servers.
+    pub remote: Option<RemoteLogin>,
+}
+
+/// Discover, register and add a provider for remote server `name`.
+async fn discover_provider(s: &OAuthState, name: &str, redirect: &str) -> Result<(), String> {
+    let Some(remote) = &s.remote else {
+        return Err(format!(
+            "no OAuth app named {name:?}; add an [[oauth]] entry to the config"
+        ));
+    };
+    let Some(url) = (remote.server_url)(name) else {
+        return Err(format!(
+            "no OAuth app or remote server named {name:?}; add an [[oauth]] entry, or `mcpgw add {name} --url …`"
+        ));
+    };
+    use mcpgw_auth::discovery;
+    let d = discovery::discover(&url).await?;
+    let reg = discovery::register(&d, redirect, remote.client_metadata_url.as_deref()).await?;
+    let secret_name = reg
+        .client_secret
+        .as_ref()
+        .map(|_| format!("oauth-client/{name}/secret"));
+    let p = discovery::provider(name, &d, &reg, secret_name);
+    (remote.save_client)(&p, reg.client_secret.as_deref())?;
+    tracing::info!(server = name, issuer = %d.issuer, method = reg.method, "registered OAuth client for remote server");
+    s.broker.add_provider(p);
+    Ok(())
 }
 
 #[derive(Deserialize, Default)]
@@ -46,6 +93,11 @@ async fn start(
         .and_then(|b| b.0.account)
         .unwrap_or_else(|| "default".into());
     let redirect = format!("{}/oauth/callback", s.base_url);
+    if s.broker.provider(&provider).is_none()
+        && let Err(e) = discover_provider(&s, &provider, &redirect).await
+    {
+        return (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response();
+    }
     match s.broker.start(&provider, &account, &redirect) {
         Ok((state, url)) => {
             Json(json!({"state": state, "url": url, "account": account})).into_response()

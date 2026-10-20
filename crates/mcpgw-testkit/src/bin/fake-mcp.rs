@@ -17,6 +17,7 @@
 //! | `FAKE_STDERR` | line written to stderr at startup |
 //! | `FAKE_SPAWN_LOG` | file; the process appends its pid on start |
 //! | `FAKE_REQUIRE_HEADER` | `--http` only: `Name=value` every request must carry, else 401 |
+//! | `FAKE_AUTH_SERVER` | `--http` only: OAuth-protected. Requests need `Authorization: Bearer at-…`, else 401 with `resource_metadata`; serves protected resource metadata naming this issuer |
 //!
 //! Built-in tools: `add`, `echo`, `crash`, `sleep`, `env`, `spawn`, `stderr`.
 //! `fake-mcp --idle` just sleeps (used as a grandchild by `spawn`);
@@ -250,7 +251,45 @@ async fn serve_http(fake: Fake, addr: &str) {
         Arc::new(LocalSessionManager::default()),
         StreamableHttpServerConfig::default(),
     );
+    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
+    let local = listener.local_addr().expect("local addr");
     let mut app = axum::Router::new().nest_service("/mcp", service);
+    if let Some(issuer) = env("FAKE_AUTH_SERVER") {
+        let metadata = format!("http://{local}/.well-known/oauth-protected-resource/mcp");
+        app = app.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let ok = req
+                    .headers()
+                    .get("authorization")
+                    .and_then(|h| h.to_str().ok())
+                    .is_some_and(|h| h.starts_with("Bearer at-"));
+                let challenge = format!("Bearer resource_metadata=\"{metadata}\"");
+                async move {
+                    if ok {
+                        next.run(req).await
+                    } else {
+                        axum::response::IntoResponse::into_response((
+                            axum::http::StatusCode::UNAUTHORIZED,
+                            [("www-authenticate", challenge)],
+                            "unauthorized",
+                        ))
+                    }
+                }
+            },
+        ));
+        let prm = serde_json::json!({
+            "resource": format!("http://{local}/mcp"),
+            "authorization_servers": [issuer],
+            "scopes_supported": ["mcp:tools"],
+        });
+        app = app.route(
+            "/.well-known/oauth-protected-resource/mcp",
+            axum::routing::get(move || {
+                let prm = prm.clone();
+                async move { axum::Json(prm) }
+            }),
+        );
+    }
     if let Some((name, value)) = env("FAKE_REQUIRE_HEADER").and_then(|v| {
         v.split_once('=')
             .map(|(n, v)| (n.to_ascii_lowercase(), v.to_string()))
@@ -276,8 +315,6 @@ async fn serve_http(fake: Fake, addr: &str) {
             },
         ));
     }
-    let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
-    let local = listener.local_addr().expect("local addr");
     println!("listening http://{local}/mcp");
     std::io::stdout().flush().ok();
     axum::serve(listener, app).await.expect("serve");

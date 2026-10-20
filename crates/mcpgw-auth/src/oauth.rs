@@ -139,7 +139,7 @@ pub const REFRESH_LEAD: Duration = Duration::from_secs(300);
 
 /// Runs OAuth flows for the daemon.
 pub struct Broker {
-    providers: Vec<OAuthProvider>,
+    providers: std::sync::RwLock<Vec<OAuthProvider>>,
     flows: Mutex<HashMap<String, Flow>>,
     /// One lock per connection, so concurrent refreshes don't race.
     refreshing: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
@@ -193,7 +193,7 @@ impl Broker {
     ) -> Self {
         mcpgw_core::tls::install();
         Self {
-            providers,
+            providers: std::sync::RwLock::new(providers),
             flows: Mutex::new(HashMap::new()),
             refreshing: Mutex::new(HashMap::new()),
             store,
@@ -210,14 +210,31 @@ impl Broker {
         &self.store
     }
 
-    /// A configured provider.
-    pub fn provider(&self, name: &str) -> Option<&OAuthProvider> {
-        self.providers.iter().find(|p| p.name == name)
+    /// A configured or discovered provider.
+    pub fn provider(&self, name: &str) -> Option<OAuthProvider> {
+        self.providers
+            .read()
+            .expect("providers")
+            .iter()
+            .find(|p| p.name == name)
+            .cloned()
     }
 
-    /// Names of configured providers.
+    /// Names of known providers.
     pub fn provider_names(&self) -> Vec<String> {
-        self.providers.iter().map(|p| p.name.clone()).collect()
+        self.providers
+            .read()
+            .expect("providers")
+            .iter()
+            .map(|p| p.name.clone())
+            .collect()
+    }
+
+    /// Add or replace a provider (one discovered for an MCP server).
+    pub fn add_provider(&self, p: OAuthProvider) {
+        let mut ps = self.providers.write().expect("providers");
+        ps.retain(|x| x.name != p.name);
+        ps.push(p);
     }
 
     /// Start a flow; returns `(state, authorization URL)`.
@@ -442,6 +459,10 @@ impl Broker {
             .endpoints()
             .map_err(|e| TokenError::Other(e.to_string()))?;
         form.push(("client_id", p.client_id.clone()));
+        // RFC 8707: the token is for this resource (MCP servers, M2-05)
+        if let Some(r) = e.extra_params.get("resource") {
+            form.push(("resource", r.clone()));
+        }
         if let Some(name) = &p.client_secret {
             let secret = (self.secrets)(name).ok_or_else(|| {
                 TokenError::Other(format!("client secret {name:?} is not in the vault"))

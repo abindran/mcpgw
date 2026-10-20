@@ -56,6 +56,11 @@ pub struct GatewayConfig {
     /// Path of the secret vault. Default: `vault.json` next to the store.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vault_path: Option<PathBuf>,
+    /// HTTPS URL of a client ID metadata document describing mcpgw, used as
+    /// the OAuth client id for remote MCP servers that accept them
+    /// (otherwise mcpgw registers itself dynamically).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_metadata_url: Option<String>,
     /// Address of the HTTP front door; must be a loopback address.
     /// Default: `127.0.0.1:7777`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

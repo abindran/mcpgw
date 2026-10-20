@@ -181,7 +181,10 @@ async fn refused_and_forged_logins_fail_clearly() {
 
     // unknown provider
     let (ok, _, err) = e.run(&["auth", "connect", "nope", "--no-browser"]);
-    assert!(!ok && err.contains("no OAuth app named \"nope\""), "{err}");
+    assert!(
+        !ok && err.contains("no OAuth app or remote server named \"nope\""),
+        "{err}"
+    );
     assert!(e.ok(&["auth", "ls"]).contains("no connected accounts"));
 }
 
