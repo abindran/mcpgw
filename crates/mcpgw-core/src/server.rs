@@ -85,6 +85,11 @@ pub enum Transport {
         /// Default: none; the host's environment never leaks in.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         env: BTreeMap<String, String>,
+        /// Longest one call may run before it's stopped (M4-03). Default:
+        /// 30s. The memory cap is `limits.memory` (default and maximum
+        /// 256MiB).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        time_budget: Option<Duration>,
     },
 }
 
@@ -210,6 +215,7 @@ impl Transport {
             allow_network: Vec::new(),
             allow_dirs: Vec::new(),
             env: BTreeMap::new(),
+            time_budget: None,
         }
     }
 
@@ -552,6 +558,12 @@ impl ServerSpec {
                     self.name
                 )));
             }
+            Transport::Wasm { .. } if self.limits.cpus.is_some() || self.limits.pids.is_some() => {
+                return Err(Error::Config(format!(
+                    "server {}: Wasm servers take a memory limit (and time_budget); cpus and pids don't apply",
+                    self.name
+                )));
+            }
             _ => {}
         }
         if !self.files.is_empty() && !matches!(self.transport, Transport::Container { .. }) {
@@ -828,6 +840,17 @@ mod tests {
         assert_eq!(
             toml::from_str::<ServerSpec>(&toml::to_string(&s).unwrap()).unwrap(),
             s
+        );
+        let mut capped = s.clone();
+        capped.limits.memory = Some(crate::ByteSize::mib(64));
+        capped.validate().unwrap();
+        capped.limits.cpus = Some(1.0);
+        assert!(
+            capped
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("don't apply")
         );
         for bad in ["api.example.com", "1.2.3.4:0", "*.example.com:443"] {
             let mut t = s.clone();

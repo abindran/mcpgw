@@ -998,11 +998,23 @@ impl Launch {
                 allow_network,
                 allow_dirs,
                 env,
+                time_budget,
             } => Template::Wasm(crate::wasm::WasmTemplate {
                 path: path.clone(),
                 allow_network: allow_network.clone(),
                 allow_dirs: allow_dirs.clone(),
                 env: env.clone(),
+                limits: {
+                    let d = mcpgw_wasm::Limits::default();
+                    mcpgw_wasm::Limits {
+                        time: time_budget.map(|t| t.get()).unwrap_or(d.time),
+                        memory: cfg
+                            .limits
+                            .memory
+                            .map(|m| m.get() as usize)
+                            .unwrap_or(d.memory),
+                    }
+                },
             }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),

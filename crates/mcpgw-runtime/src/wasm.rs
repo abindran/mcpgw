@@ -22,6 +22,8 @@ pub struct WasmTemplate {
     pub allow_dirs: Vec<mcpgw_core::DirAccess>,
     /// Environment (secrets filled in).
     pub env: BTreeMap<String, String>,
+    /// Per-call time and memory limits.
+    pub limits: mcpgw_wasm::Limits,
 }
 
 impl std::fmt::Debug for WasmTemplate {
@@ -32,6 +34,7 @@ impl std::fmt::Debug for WasmTemplate {
             .field("allow_network", &self.allow_network)
             .field("allow_dirs", &self.allow_dirs)
             .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("limits", &self.limits)
             .finish()
     }
 }
@@ -107,7 +110,7 @@ impl WasmTemplate {
             .map_err(ProtoError::Connect)?;
         let started = std::time::Instant::now();
         let running = tools
-            .instantiate_with(&grants)
+            .instantiate_limited(&grants, self.limits)
             .await
             .map_err(ProtoError::Connect)?;
         tracing::debug!(path = %self.path.display(), us = started.elapsed().as_micros() as u64, "wasm instance ready");

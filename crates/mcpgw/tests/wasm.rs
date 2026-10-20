@@ -55,8 +55,15 @@ async fn wasm_tool_through_the_daemon() {
     let e = Env(dir.clone());
     let wasm = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../mcpgw-wasm/tests/fixtures/echo-tool.wasm");
-    let added = e.ok(&["add", "wt", "--wasm", wasm.to_str().unwrap()]);
-    assert!(added.contains("added server wt (3 tools, pin "), "{added}");
+    let added = e.ok(&[
+        "add",
+        "wt",
+        "--wasm",
+        wasm.to_str().unwrap(),
+        "--time-budget",
+        "300ms",
+    ]);
+    assert!(added.contains("added server wt (4 tools, pin "), "{added}");
     let list = e.ok(&["list"]);
     assert!(
         list.contains("wt\twasm\tstore\t") && list.contains("echo-tool.wasm"),
@@ -81,8 +88,17 @@ async fn wasm_tool_through_the_daemon() {
             .unwrap(),
         "via the daemon"
     );
+    let spun = c.call("wt__spin", json!({})).await.unwrap();
+    assert_eq!(spun["isError"], true, "{spun}");
+    assert!(
+        spun["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("300ms time budget"),
+        "{spun}"
+    );
     let st = e.ok(&["status"]);
-    assert!(st.contains("wt\tidle\t3 tools\t-"), "{st}");
+    assert!(st.contains("wt\tidle\t4 tools\t-"), "{st}");
 }
 
 /// M4-02 end to end: grants given on the command line, a secret bound into

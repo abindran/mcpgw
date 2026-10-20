@@ -205,6 +205,9 @@ struct AddArgs {
     /// Let a Wasm server read and write this directory (repeatable).
     #[arg(long, value_name = "DIR", requires = "wasm")]
     allow_dir_rw: Vec<PathBuf>,
+    /// Stop a Wasm server's call after this long (e.g. 5s; default 30s).
+    #[arg(long, value_name = "DURATION", requires = "wasm")]
+    time_budget: Option<mcpgw_core::Duration>,
     /// Container runtime for --image: docker or podman (default: whichever
     /// is installed, Docker first).
     #[arg(long, requires = "image")]
@@ -563,6 +566,7 @@ fn run(cli: Cli) -> AnyResult<()> {
                         allow_network: a.allow_network.clone(),
                         allow_dirs,
                         env: a.env.iter().cloned().collect(),
+                        time_budget: a.time_budget,
                     }
                 }
                 (None, None) => Transport::Container {

@@ -589,6 +589,17 @@
               "description": "The component file (`.wasm`).",
               "type": "string"
             },
+            "time_budget": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Longest one call may run before it's stopped (M4-03). Default:\n30s. The memory cap is `limits.memory` (default and maximum\n256MiB)."
+            },
             "transport": {
               "const": "wasm",
               "type": "string"

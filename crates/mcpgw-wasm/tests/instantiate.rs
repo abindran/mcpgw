@@ -43,7 +43,7 @@ async fn instantiates_in_under_10ms_and_answers() {
     let r = &keep[0];
     let listed = r.list_tools().await.unwrap();
     let names: Vec<&str> = listed.iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert_eq!(names, ["echo", "reverse", "spin"]);
+    assert_eq!(names, ["echo", "reverse", "spin", "alloc"]);
     assert_eq!(
         listed[0]["inputSchema"]["properties"]["text"]["type"],
         "string"

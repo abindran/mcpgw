@@ -37,7 +37,7 @@ async fn wasm_server_lifecycle() {
             .iter()
             .map(|t| t.name.as_str())
             .collect::<Vec<_>>(),
-        ["echo", "reverse", "spin"]
+        ["alloc", "echo", "reverse", "spin"]
     );
     let m = BackendManager::with_catalog(
         &[spec],
@@ -49,7 +49,7 @@ async fn wasm_server_lifecycle() {
         Arc::new(Catalog::new(vec![pinned], None)),
     );
     assert_eq!(m.status_of("wecho").unwrap().state, State::Cold);
-    assert_eq!(m.tools("wecho").await.len(), 3);
+    assert_eq!(m.tools("wecho").await.len(), 4);
     let r = m
         .call_tool(
             "wecho",
@@ -81,6 +81,59 @@ async fn wasm_server_lifecycle() {
     // a guest error is a tool error, not a crash
     let e = m.call_tool("wecho", "nope", None).await.unwrap_err();
     assert!(e.to_string().contains("unknown tool"), "{e}");
+    assert!(m.status_of("wecho").unwrap().state.is_connected());
+    m.shutdown().await;
+}
+
+/// M4-03 through the manager: `time_budget` and `limits.memory` apply; a
+/// stopped call is a tool error and the server keeps serving.
+#[tokio::test(flavor = "multi_thread")]
+async fn wasm_limits_under_the_manager() {
+    let mut spec = echo_tool();
+    if let Transport::Wasm { time_budget, .. } = &mut spec.transport {
+        *time_budget = Some(mcpgw_core::Duration::from_millis(300));
+    }
+    spec.limits.memory = Some(mcpgw_core::ByteSize::mib(32));
+    spec.validate().unwrap();
+    let m = BackendManager::with_catalog(
+        &[spec],
+        ManagerOptions {
+            health_interval: Duration::from_secs(60),
+            ..ManagerOptions::default()
+        },
+        Arc::new(Catalog::default()),
+    );
+    let t = std::time::Instant::now();
+    let r = m.call_tool("wecho", "spin", None).await.unwrap();
+    assert_eq!(r["isError"], true, "{r:?}");
+    assert!(
+        r["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("300ms time budget"),
+        "{r:?}"
+    );
+    assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+    let r = m
+        .call_tool("wecho", "alloc", json!({"mib": 64}).as_object().cloned())
+        .await
+        .unwrap();
+    assert!(
+        r["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("32MiB limit"),
+        "{r:?}"
+    );
+    let r = m
+        .call_tool(
+            "wecho",
+            "echo",
+            json!({"text": "still serving"}).as_object().cloned(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r["content"][0]["text"], "still serving");
     assert!(m.status_of("wecho").unwrap().state.is_connected());
     m.shutdown().await;
 }
