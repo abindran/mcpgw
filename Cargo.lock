@@ -1525,6 +1525,7 @@ dependencies = [
  "mcpgw-config",
  "mcpgw-core",
  "mcpgw-proto",
+ "mcpgw-registry",
  "mcpgw-router",
  "mcpgw-runtime",
  "mcpgw-store",
@@ -1616,6 +1617,17 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "mcpgw-registry"
+version = "0.1.0"
+dependencies = [
+ "mcpgw-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

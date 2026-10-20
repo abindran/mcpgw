@@ -12,6 +12,7 @@
 #   mcpgw-auth       -> loopback client token, OAuth broker, upstream OAuth
 #   mcpgw-api        -> admin REST API, SSE events, static web UI
 #   mcpgw-telemetry  -> tracing, metrics, audit log writer
+#   mcpgw-registry   -> official MCP Registry search and install plans
 #   xtask            -> build, release, conformance and e2e helpers
 #
 # Dependency rule (enforced in CI): no crate other than `mcpgw-proto` may
@@ -32,6 +33,7 @@ members = [
     "crates/mcpgw-api",
     "crates/mcpgw-telemetry",
     "crates/mcpgw-testkit",
+    "crates/mcpgw-registry",
     "xtask",
 ]
 default-members = ["crates/*"]
@@ -57,6 +59,7 @@ mcpgw-auth = { path = "crates/mcpgw-auth", version = "0.1.0" }
 mcpgw-api = { path = "crates/mcpgw-api", version = "0.1.0" }
 mcpgw-telemetry = { path = "crates/mcpgw-telemetry", version = "0.1.0" }
 mcpgw-testkit = { path = "crates/mcpgw-testkit", version = "0.1.0" }
+mcpgw-registry = { path = "crates/mcpgw-registry", version = "0.1.0" }
 
 # Shared third-party crates
 thiserror = "2"

@@ -4,7 +4,7 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
 use mcpgw_config::Config;
-use mcpgw_core::{ServerSpec, Transport};
+use mcpgw_core::{ServerSpec, ToolManifest, Transport};
 use mcpgw_runtime::{BackendManager, ManagerOptions, State};
 use mcpgw_store::{SqliteStore, Store, effective_servers};
 
@@ -21,6 +21,31 @@ fn in_config(config: &Config, name: &str) -> bool {
 /// `mcpgw add`: register (or update) a server, pin its tools, and tell a
 /// running daemon.
 pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> AnyResult<()> {
+    add_reviewed(
+        config,
+        path,
+        spec,
+        introspect,
+        Duration::from_secs(60),
+        None,
+    )
+    .map(|_| ())
+}
+
+/// Shown the tools read from a new server (`None`: they couldn't be read
+/// now); returns whether to add it.
+pub type Review<'a> = &'a dyn Fn(Option<&ToolManifest>) -> AnyResult<bool>;
+
+/// [`add`], reading the tools within `timeout` and asking `review` before
+/// anything is stored. Returns whether the server was added.
+pub fn add_reviewed(
+    config: &Config,
+    path: &Path,
+    spec: ServerSpec,
+    introspect: bool,
+    timeout: Duration,
+    review: Option<Review>,
+) -> AnyResult<bool> {
     let name = spec.name.clone();
     if in_config(config, &name) {
         return Err(format!(
@@ -43,22 +68,13 @@ pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> 
     }
     spec.validate()?;
     let existed = s.server(&name)?.is_some();
-    s.upsert_server(&spec)?;
     let verb = if existed { "updated" } else { "added" };
-    // A changed spec may expose different tools: drop the old pin.
-    s.remove_manifest(&name)?;
     let mut manifest = None;
     if spec.enabled && introspect {
-        let capture = mcpgw_runtime::introspect_with_secrets(
-            &spec,
-            Duration::from_secs(60),
-            Some(serve::resolver(config)),
-        );
+        let capture =
+            mcpgw_runtime::introspect_with_secrets(&spec, timeout, Some(serve::resolver(config)));
         match serve::runtime()?.block_on(capture) {
-            Ok(m) => {
-                s.put_manifest(&m)?;
-                manifest = Some(m);
-            }
+            Ok(m) => manifest = Some(m),
             Err(e) if e.to_string().contains("requires authentication") => eprintln!(
                 "mcpgw: {name} requires a login; sign in with `mcpgw auth connect {name}` (its tools are captured on its first start)"
             ),
@@ -66,6 +82,18 @@ pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> 
                 "mcpgw: could not read the tools of {name}: {e}; they will be captured on its first start"
             ),
         }
+    }
+    if let Some(review) = review
+        && !review(manifest.as_ref())?
+    {
+        println!("not added: {name}");
+        return Ok(false);
+    }
+    s.upsert_server(&spec)?;
+    // A changed spec may expose different tools: drop the old pin.
+    s.remove_manifest(&name)?;
+    if let Some(m) = &manifest {
+        s.put_manifest(m)?;
     }
     crate::audit::record(
         config,
@@ -75,7 +103,11 @@ pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> 
             "server.add"
         },
         &name,
-        serde_json::json!({"transport": spec.transport.kind(), "pin": manifest.as_ref().map(|m| m.sha256.clone())}),
+        serde_json::json!({
+            "transport": spec.transport.kind(),
+            "pin": manifest.as_ref().map(|m| m.sha256.clone()),
+            "registry": spec.registry,
+        }),
     );
     match &manifest {
         Some(m) => println!(
@@ -89,7 +121,7 @@ pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> 
         c.add(&spec, manifest)?;
         println!("the running daemon now serves {name}");
     }
-    Ok(())
+    Ok(true)
 }
 
 /// `mcpgw remove`.
@@ -142,7 +174,8 @@ pub fn set_enabled(config: &Config, path: &Path, name: &str, on: bool) -> AnyRes
     Ok(())
 }
 
-fn describe(s: &ServerSpec) -> String {
+/// One-line form of how a server is reached.
+pub fn describe(s: &ServerSpec) -> String {
     match &s.transport {
         Transport::Stdio { command, args, .. } => std::iter::once(command.as_str())
             .chain(args.iter().map(String::as_str))
@@ -171,8 +204,13 @@ pub fn list(config: &Config, check: bool) -> AnyResult<()> {
             "store"
         };
         let enabled = if s.enabled { "" } else { " [disabled]" };
+        let from = s
+            .registry
+            .as_ref()
+            .map(|r| format!(" [{}@{}]", r.name, r.version))
+            .unwrap_or_default();
         print!(
-            "{}\t{}\t{source}\t{}{enabled}",
+            "{}\t{}\t{source}\t{}{enabled}{from}",
             s.name,
             s.transport.kind(),
             describe(s)

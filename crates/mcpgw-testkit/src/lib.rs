@@ -7,6 +7,7 @@
 //! the way Claude Code or Cursor would.
 
 pub mod oauth;
+pub mod registry;
 pub mod sse;
 
 use std::{

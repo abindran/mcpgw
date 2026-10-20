@@ -96,6 +96,19 @@ pub struct ServerSpec {
     /// everything the server sends back.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<String, String>,
+    /// Where it was installed from, when `mcpgw add` took it from the MCP
+    /// Registry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry: Option<RegistryRef>,
+}
+
+/// A pinned MCP Registry entry.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct RegistryRef {
+    /// Registry name, e.g. `io.github.github/github-mcp-server`.
+    pub name: String,
+    /// Installed version.
+    pub version: String,
 }
 
 /// Stands for the caller's account in secret names:
@@ -188,6 +201,7 @@ impl ServerSpec {
             stateful: false,
             startup_timeout: None,
             secrets: BTreeMap::new(),
+            registry: None,
         }
     }
 

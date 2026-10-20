@@ -22,6 +22,7 @@ mcpgw-telemetry.workspace = true
 mcpgw-api.workspace = true
 mcpgw-proto.workspace = true
 mcpgw-vault.workspace = true
+mcpgw-registry.workspace = true
 secrecy = "0.10"
 rpassword = "7"
 reqwest.workspace = true

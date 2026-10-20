@@ -209,6 +209,16 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
             hint: Some("remove it for the default of 16".into()),
         });
     }
+    if let Some(u) = &cfg.gateway.registry_url
+        && !(u.starts_with("http://") || u.starts_with("https://"))
+    {
+        return Err(Issue {
+            server: None,
+            field: "registry_url",
+            message: format!("registry url {u:?} is not an http(s) URL"),
+            hint: Some("remove it for the official registry".into()),
+        });
+    }
     for o in &cfg.gateway.allowed_origins {
         if !(o.starts_with("http://") || o.starts_with("https://")) || o.ends_with('/') {
             return Err(Issue {
@@ -519,6 +529,8 @@ mod tests {
         );
         let e = parse_err("[gateway]\nallowed_origins = [\"localhost:5173\"]\n");
         assert!(e.message.contains("not an origin"), "{e}");
+        let e = parse_err("[gateway]\nregistry_url = \"registry.example\"\n");
+        assert!(e.message.contains("not an http(s) URL"), "{e}");
     }
 
     #[test]

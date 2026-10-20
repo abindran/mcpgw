@@ -73,7 +73,7 @@ M1 exit check: [M1-Exit](M1-Exit.md).
 | [M2-11](M2-11-Admin-REST-API.md) | Admin REST API v1 with OpenAPI | ✅ |
 | [M2-12](M2-12-Web-UI.md) | Minimal web UI | ✅ |
 | [M2-13](M2-13-Audit-Log.md) | Hash-chained audit log | ✅ |
-| M2-14 | MCP Registry integration | ⏳ |
+| [M2-14](M2-14-Registry.md) | MCP Registry integration | ✅ |
 
 ### M3 — Isolation and performance
 

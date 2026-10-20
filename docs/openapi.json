@@ -402,6 +402,24 @@
               }
             ],
             "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds."
+          },
+          "RegistryRef": {
+            "description": "A pinned MCP Registry entry.",
+            "properties": {
+              "name": {
+                "description": "Registry name, e.g. `io.github.github/github-mcp-server`.",
+                "type": "string"
+              },
+              "version": {
+                "description": "Installed version.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "version"
+            ],
+            "type": "object"
           }
         },
         "description": "One backend tool server (`[[server]]` in the config file).",
@@ -497,6 +515,17 @@
           "name": {
             "description": "Unique server name.",
             "type": "string"
+          },
+          "registry": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RegistryRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where it was installed from, when `mcpgw add` took it from the MCP\nRegistry."
           },
           "secrets": {
             "additionalProperties": {

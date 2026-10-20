@@ -13,6 +13,7 @@ mod auth;
 mod clients;
 mod control;
 mod daemon;
+mod registry;
 mod secrets;
 mod serve;
 mod servers;
@@ -71,6 +72,9 @@ enum Cmd {
     /// List profiles and their endpoints.
     Profiles,
     /// Register or update a server, pin its tools, and tell the daemon.
+    /// With a registry name (`mcpgw add io.github.github/github-mcp-server`)
+    /// it installs that entry from the MCP Registry at a pinned version,
+    /// shows its tools and asks before adding.
     #[command(alias = "add-server")]
     Add(AddArgs),
     /// Remove a server.
@@ -135,6 +139,9 @@ enum Cmd {
     /// Inspect the hash-chained audit log.
     #[command(subcommand)]
     Audit(AuditCmd),
+    /// Search the MCP Registry (gateway.registry_url).
+    #[command(subcommand)]
+    Registry(RegistryCmd),
     /// Manage secrets in the vault.
     #[command(subcommand)]
     Secret(SecretCmd),
@@ -154,10 +161,11 @@ enum Cmd {
 
 #[derive(clap::Args)]
 struct AddArgs {
-    /// Server name ([A-Za-z0-9_-], no "__").
+    /// Server name ([A-Za-z0-9_-], no "__"), or an MCP Registry entry
+    /// (`io.github.github/github-mcp-server`, optionally `@<version>`).
     name: String,
     /// Stdio command to launch.
-    #[arg(long, conflicts_with = "url", required_unless_present = "url")]
+    #[arg(long, conflicts_with = "url")]
     command: Option<String>,
     /// Remote MCP URL: Streamable HTTP, or a legacy `…/sse` endpoint.
     #[arg(long)]
@@ -185,9 +193,40 @@ struct AddArgs {
     /// captured on its first start instead.
     #[arg(long)]
     no_introspect: bool,
+    /// Registry installs: the server name to use (default: the entry's
+    /// last path segment).
+    #[arg(long = "as", value_name = "NAME", conflicts_with_all = ["command", "url"])]
+    server_name: Option<String>,
+    /// Registry installs: use the entry's hosted remote, not a package.
+    #[arg(long, conflicts_with_all = ["command", "url", "package"])]
+    remote: bool,
+    /// Registry installs: use this package type (npm, pypi or oci).
+    #[arg(long, value_name = "TYPE", conflicts_with_all = ["command", "url"])]
+    package: Option<String>,
+    /// Registry installs: add without asking after showing the tools.
+    #[arg(short = 'y', long)]
+    yes: bool,
     /// Arguments for the command (after `--`).
     #[arg(last = true)]
     args: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum RegistryCmd {
+    /// Find servers by name or description.
+    Search {
+        /// Search text.
+        #[arg(required = true)]
+        query: Vec<String>,
+        /// Most results.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+    },
+    /// Show an entry's packages, remotes and inputs.
+    Show {
+        /// Entry name, optionally `@<version>`.
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -328,6 +367,40 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Down => servers::down(&config),
         Cmd::Status => servers::status(&config),
         Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
+        Cmd::Add(a) if a.command.is_none() && a.url.is_none() => {
+            if !a.name.contains('/') {
+                return Err(format!(
+                    "give --command or --url for {:?}, or a registry name such as io.github.github/github-mcp-server",
+                    a.name
+                )
+                .into());
+            }
+            if !a.secrets.is_empty() || !a.args.is_empty() {
+                return Err(
+                    "--secret and command arguments don't apply to registry installs".into(),
+                );
+            }
+            registry::add(
+                &config,
+                &path,
+                registry::Install {
+                    entry: a.name,
+                    server_name: a.server_name,
+                    remote: a.remote,
+                    package: a.package,
+                    values: a.env.into_iter().collect(),
+                    yes: a.yes,
+                    alias: a.alias,
+                    stateful: a.stateful,
+                    disabled: a.disabled,
+                    no_introspect: a.no_introspect,
+                },
+            )
+        }
+        Cmd::Registry(RegistryCmd::Search { query, limit }) => {
+            registry::search(&config, &query.join(" "), limit)
+        }
+        Cmd::Registry(RegistryCmd::Show { name }) => registry::show(&config, &name),
         Cmd::Add(a) => {
             let transport = match (a.command, a.url) {
                 (Some(command), None) => Transport::Stdio {

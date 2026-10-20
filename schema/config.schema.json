@@ -108,6 +108,13 @@
           "$ref": "#/$defs/Policy",
           "description": "Tool policy for the default endpoint (profiles have their own):\n`policy = { deny = [\"*__delete_*\"], approve = [\"gh__merge_*\"] }`."
         },
+        "registry_url": {
+          "description": "MCP Registry used by `mcpgw add <name>` and `mcpgw registry search`.\nDefault: `https://registry.modelcontextprotocol.io`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "store_path": {
           "default": null,
           "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",
@@ -288,6 +295,24 @@
       ],
       "type": "object"
     },
+    "RegistryRef": {
+      "description": "A pinned MCP Registry entry.",
+      "properties": {
+        "name": {
+          "description": "Registry name, e.g. `io.github.github/github-mcp-server`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Installed version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    },
     "ServerSpec": {
       "description": "One backend tool server (`[[server]]` in the config file).",
       "oneOf": [
@@ -382,6 +407,17 @@
         "name": {
           "description": "Unique server name.",
           "type": "string"
+        },
+        "registry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegistryRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where it was installed from, when `mcpgw add` took it from the MCP\nRegistry."
         },
         "secrets": {
           "additionalProperties": {

@@ -1,0 +1,104 @@
+# M2-14 — MCP Registry integration
+
+**Story:** US1 · **Estimate:** 2 days · **Depends on:** M1-07
+**Done when:** `mcpgw add io.github.github/github-mcp-server` installs and shows the tool list for approval.
+**Status:** ✅ Done (the real GitHub server needs a person to check it; see below)
+
+## Using it
+
+```sh
+mcpgw registry search github             # name  version  kinds  title
+mcpgw registry show io.github.github/github-mcp-server
+mcpgw add io.github.github/github-mcp-server          # latest, pinned
+mcpgw add io.github.github/github-mcp-server@2.0.2    # a given version
+mcpgw add io.example/notes --as notes --env DIR=/data # name it; fill an input
+mcpgw add io.github.github/github-mcp-server --remote # the hosted endpoint
+mcpgw add io.example/x --package pypi -y              # a package type; don't ask
+```
+
+`mcpgw add <name with a />` fetches the entry (`GET
+/v0/servers/{name}/versions/{version|latest}`), prints how it will run,
+starts it once to read its tools, lists them, and asks `add <server>? [y/N]`
+(`-y` skips the question; a declined or unanswered question stores nothing).
+An approved server is stored with its tools pinned, exactly like a manual
+`mcpgw add`. `mcpgw list` shows where it came from:
+`… ghcr.io/github/github-mcp-server:2.0.2 [io.github.github/github-mcp-server@2.0.2]`.
+
+The registry is `gateway.registry_url` (default
+`https://registry.modelcontextprotocol.io`).
+
+## Install plans (`mcpgw-registry` crate)
+
+| Entry | Runs as |
+|-------|---------|
+| npm | `npx -y <pkg>@<version> <package args>` |
+| pypi | `uvx <pkg>==<version> <package args>` |
+| oci | `docker run -i --rm <runtime args> [-e VAR…] <image>:<version> <package args>` (a tag already in the identifier is kept) |
+| remote (`streamable-http`, `sse`) | an HTTP server with the entry's headers |
+
+- `runtimeHint` replaces the default command.
+- **Choice:** npm, then pypi, then oci, using the first one whose runtime
+  (`npx`, `uvx`, `docker`) is on `PATH`. If none is, the remote is used, with
+  a note saying so. `--package` and `--remote` override this.
+- **Versions are always pinned**, from the entry's package version and the
+  entry's own version (kept as `registry = {name, version}` on the server).
+- **Inputs:** fixed values have their `{variables}` filled in. Non-secret
+  inputs take `--env NAME=value`, then their default; a required one
+  without a value is an error that names the flag to pass.
+- **Secrets** are never written into the config. A secret input becomes the
+  vault secret `<server>_<input>` (`github-mcp-server_token`). Env vars are
+  injected at spawn; for docker, `-e NAME={secret}` becomes `-e NAME` plus an
+  injected `NAME`, so the value is not in the process list. A bare secret
+  `Authorization` header becomes `Bearer ${secret:…}`.
+- **Optional secrets** that aren't in the vault are left out, with a hint
+  (`mcpgw secret set github-mcp-server_token`, then add again). For a
+  **required** secret that is missing, a terminal asks for it (hidden);
+  otherwise the command stops and says what to set.
+- The first start may download a package or image, so reading the tools is
+  allowed 300 s. If they can't be read (a login is needed, or Docker isn't
+  running) the question is still asked, and the tools are pinned on the
+  server's first start.
+
+## GitHub (`io.github.github/github-mcp-server` 2.0.2)
+
+The real entry is in `crates/mcpgw-registry/tests/fixtures/`. It has an OCI
+package and a remote.
+
+- With Docker it runs `docker run -i --rm -p 127.0.0.1:8085:8085 -e
+  GITHUB_OAUTH_CALLBACK_PORT=8085 ghcr.io/github/github-mcp-server:2.0.2`.
+  The optional token is added once `github-mcp-server_token` is set;
+  otherwise the server logs in with OAuth on first use.
+- Without Docker, or with `--remote`, it uses
+  `https://api.githubcopilot.com/mcp/`. That endpoint answers 401 with
+  OAuth resource metadata, and `mcpgw add` says to run `mcpgw auth connect
+  github-mcp-server`. With `github-mcp-server_authorization` set, the PAT is
+  sent as a bearer token.
+
+**Checked here:** the fixture served by a local registry gives the docker
+plan above. With the Docker daemon stopped the tools can't be read, and the
+question still comes up. The remote plan reached the real endpoint and got
+its 401 and login hint.
+
+**Needs a person:** with Docker running (or a PAT stored as
+`github-mcp-server_authorization`), run `mcpgw add
+io.github.github/github-mcp-server`, see the tool list, and answer `y`.
+
+## Tests
+
+- `crates/mcpgw-registry/tests/plan.rs`: the real GitHub entry gives the
+  pinned docker plan without the unset optional token. Once the token is set
+  it is injected and not in argv. Without docker it falls back to the
+  remote (header left out, with a note). `--remote` with the secret set
+  gives a `Bearer` header. npm and pypi plans are pinned, fill
+  `{variables}`, apply defaults and bind secrets. Missing required inputs,
+  unrunnable types (`nuget`) and missing runtimes are explained. Default
+  names are valid server names.
+- `crates/mcpgw/tests/registry.rs` uses `testkit::registry::FakeRegistry`
+  and fake-mcp as the npm runtime. It covers search and show; declining on
+  stdin stores nothing; a pinned older version under `--as` is approved
+  with `y`, listed with its provenance, and requested at
+  `/versions/1.0.0`; `-y` installs the latest; unknown entries and bare
+  names give clear errors. A remote entry with a required secret header
+  fails with "store it with `mcpgw secret set …`", then installs once the
+  secret is set (the fake only answers with that bearer), and the token is
+  never printed.
