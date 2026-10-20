@@ -80,3 +80,14 @@ incremental = false
 
 [profile.dev.package."*"]
 debug = false
+
+# Key derivation and AEAD are unbearably slow unoptimised (Argon2id with
+# 64 MiB takes seconds); optimise them even in debug builds.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
+[profile.dev.package.chacha20poly1305]
+opt-level = 3

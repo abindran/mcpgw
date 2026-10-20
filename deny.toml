@@ -8,7 +8,15 @@ all-features = true
 # fails the build unless listed in `ignore` with a reason.
 version = 2
 yanked = "deny"
-ignore = []
+ignore = [
+    # zvariant, zvariant_derive and zbus_names were merged into zbus 6.
+    # They come in through keyring's Linux Secret Service store
+    # (secret-service on zbus 5); "unmaintained" only, no vulnerability.
+    # Drop these once secret-service moves to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant merged into zbus 6; via keyring/secret-service" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names merged into zbus 6; via keyring/secret-service" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive merged into zbus 6; via keyring/secret-service" },
+]
 
 [licenses]
 version = 2

@@ -74,9 +74,11 @@ jobs:
           - name: macOS arm64
             os: macos-14
             target: aarch64-apple-darwin
+            keychain: "1"
           - name: macOS x86_64
             os: macos-15-intel
             target: x86_64-apple-darwin
+            keychain: "1"
           - name: Linux glibc
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -86,6 +88,7 @@ jobs:
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
+            keychain: "1"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -98,6 +101,8 @@ jobs:
           key: ${{ matrix.target }}
       - run: cargo build --workspace --locked --target ${{ matrix.target }}
       - run: cargo test --workspace --locked --target ${{ matrix.target }}
+        env:
+          MCPGW_TEST_KEYCHAIN: ${{ matrix.keychain }}
       - uses: actions/upload-artifact@v4
         with:
           name: mcpgw-${{ matrix.target }}
