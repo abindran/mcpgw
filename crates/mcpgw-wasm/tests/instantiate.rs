@@ -79,3 +79,27 @@ fn rejects_files_that_are_not_tool_servers() {
     assert!(mcpgw_wasm::load(&dir.join("missing.wasm")).is_err());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `cargo build` output for a guest is a core module: loading it makes the
+/// component on the fly.
+#[tokio::test(flavor = "multi_thread")]
+async fn core_modules_are_componentized() {
+    let core = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../wasm/echo-tool/target/wasm32-unknown-unknown/release/echo_tool.wasm");
+    if !core.is_file() {
+        eprintln!("core_modules_are_componentized: skipped (run `cargo xtask wasm` first)");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("mcpgw-wasm-core-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let copy = dir.join("echo_core.wasm");
+    std::fs::copy(&core, &copy).unwrap();
+    let tools = mcpgw_wasm::load(&copy).unwrap();
+    let r = tools.instantiate().await.unwrap();
+    let out = r
+        .call_tool("echo", &args(json!({"text": "from a core module"})))
+        .await
+        .unwrap();
+    assert_eq!(out["content"][0]["text"], "from a core module");
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -103,7 +103,7 @@ M3 exit check: [M3-Exit](M3-Exit.md).
 | [M4-01](M4-01-Wasm-Launcher.md) | Wasm launcher | ✅ |
 | [M4-02](M4-02-Wasm-Grants.md) | Wasm capability grants | ✅ |
 | [M4-03](M4-03-Wasm-Limits.md) | Wasm limits | ✅ |
-| M4-04 | Wasm tool SDK and template | ⏳ |
+| [M4-04](M4-04-Wasm-SDK.md) | Wasm tool SDK and template | ✅ |
 | M4-05 | OpenAPI-to-MCP adapter | ⏳ |
 | M4-06 | Adapter auth mapping | ⏳ |
 | M4-07 | Cedar policies | ⏳ |

@@ -1,0 +1,18 @@
+[package]
+name = "{{project-name}}"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# once published: mcpgw-tool = "0.1"
+mcpgw-tool = { git = "https://github.com/abindran/mcpgw" }
+serde = { version = "1", features = ["derive"] }
+schemars = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

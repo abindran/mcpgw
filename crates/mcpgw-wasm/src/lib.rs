@@ -235,7 +235,26 @@ pub fn set_cache_dir(dir: PathBuf) {
     let _ = CACHE_DIR.set(dir);
 }
 
+/// A core module (what `cargo build --target wasm32-unknown-unknown` makes
+/// from a wit-bindgen guest) as a component, using the WIT it embeds.
+/// Components pass through.
+pub fn componentize(bytes: &[u8]) -> Result<std::borrow::Cow<'_, [u8]>, String> {
+    // module: \0asm version 1; component: \0asm layer 1 (0x0d 0x00 0x01 0x00)
+    let is_module = bytes.len() >= 8 && &bytes[..4] == b"\0asm" && bytes[4..8] == [1, 0, 0, 0];
+    if !is_module {
+        return Ok(std::borrow::Cow::Borrowed(bytes));
+    }
+    wit_component::ComponentEncoder::default()
+        .module(bytes)
+        .and_then(|e| e.validate(true).encode())
+        .map(std::borrow::Cow::Owned)
+        .map_err(|e| {
+            format!("a core module, but not an mcpgw tool guest (no embedded WIT?): {e:#}")
+        })
+}
+
 fn compile(bytes: &[u8]) -> Result<Component, String> {
+    let bytes = &*componentize(bytes)?;
     let engine = engine();
     let Some(dir) = CACHE_DIR.get() else {
         return Component::new(engine, bytes).map_err(|e| format!("not a valid component: {e:#}"));

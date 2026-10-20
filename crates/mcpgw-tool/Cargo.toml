@@ -1,0 +1,18 @@
+[package]
+name = "mcpgw-tool"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Write mcpgw Wasm tool servers in Rust: typed tools, generated schemas, one export macro"
+readme = "README.md"
+keywords = ["mcp", "wasm", "component-model", "tools", "mcpgw"]
+categories = ["wasm", "development-tools"]
+
+[dependencies]
+wit-bindgen = { version = "0.63", default-features = false, features = ["macros", "realloc"] }
+serde = { workspace = true }
+serde_json.workspace = true
+schemars.workspace = true

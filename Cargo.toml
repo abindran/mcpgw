@@ -14,6 +14,7 @@
 #   mcpgw-telemetry  -> tracing, metrics, audit log writer
 #   mcpgw-registry   -> official MCP Registry search and install plans
 #   mcpgw-wasm       -> Wasm tool servers (wasmtime, component model, WASI p2)
+#   mcpgw-tool       -> SDK for writing Wasm tool servers in Rust (guest side)
 #   xtask            -> build, release, conformance and e2e helpers
 #
 # Dependency rule (enforced in CI): no crate other than `mcpgw-proto` may
@@ -36,6 +37,7 @@ members = [
     "crates/mcpgw-testkit",
     "crates/mcpgw-registry",
     "crates/mcpgw-wasm",
+    "crates/mcpgw-tool",
     "xtask",
 ]
 default-members = ["crates/*"]
