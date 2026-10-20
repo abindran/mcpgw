@@ -120,6 +120,9 @@ Profiles (`[[profile]]` in the config) are separate endpoints with their
 own servers, mode and accounts: `http://127.0.0.1:7777/mcp/p/<name>`, or
 `mcpgw connect --profile <name>` over stdio.
 
+An admin REST API lives at `http://127.0.0.1:7777/api/v1` (same bearer
+token); see [docs/openapi.json](docs/openapi.json).
+
 Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can also be declared in `~/.config/mcpgw/config.toml` (or `$MCPGW_CONFIG`, or `--config`); see [examples/config.toml](examples/config.toml). Config-file entries take precedence over stored ones with the same name. Logs go to stderr; `MCPGW_LOG` sets the level (default `warn`) and `--log-format pretty|compact|json` (or `MCPGW_LOG_FORMAT`) the format.
 
 Backends speaking `2025-11-25` or `2026-07-28` are both supported. Crashed or unresponsive backends are restarted with exponential backoff.

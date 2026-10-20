@@ -5,7 +5,7 @@ use std::process::{Command, ExitCode};
 const USAGE: &str = "usage: cargo xtask <ci|schema>
 
   ci      run the local CI gates (fmt, clippy, test, dependency rule, canary scan)
-  schema  regenerate the JSON Schemas in schema/";
+  schema  regenerate the JSON Schemas in schema/ and docs/openapi.json";
 
 fn run(cmd: &str, args: &[&str]) -> bool {
     eprintln!("$ {cmd} {}", args.join(" "));
@@ -35,13 +35,16 @@ fn ci() -> bool {
 }
 
 fn schema() -> bool {
-    let ok = Command::new("cargo")
-        .args(["test", "-q", "-p", "mcpgw-config", "--test", "schema"])
-        .env("MCPGW_UPDATE_SCHEMA", "1")
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    ok && run("git", &["status", "--short", "schema"])
+    let regen = |pkg: &str, test: &str| {
+        Command::new("cargo")
+            .args(["test", "-q", "-p", pkg, "--test", test])
+            .env("MCPGW_UPDATE_SCHEMA", "1")
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
+    let ok = regen("mcpgw-config", "schema") && regen("mcpgw-api", "openapi");
+    ok && run("git", &["status", "--short", "schema", "docs/openapi.json"])
 }
 
 fn main() -> ExitCode {

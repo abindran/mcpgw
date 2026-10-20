@@ -11,6 +11,10 @@ repository.workspace = true
 mcpgw-core.workspace = true
 mcpgw-auth.workspace = true
 mcpgw-runtime.workspace = true
+mcpgw-router.workspace = true
+mcpgw-store.workspace = true
+schemars.workspace = true
+tower = { version = "0.5", default-features = false, features = ["util"] }
 serde.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }
 tokio = { workspace = true, features = ["net", "sync"] }

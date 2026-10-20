@@ -207,6 +207,75 @@ impl TokenStore for VaultTokens {
     }
 }
 
+/// Secrets for the admin API: values into the vault, metadata in the store.
+pub struct ApiSecrets {
+    vault: Arc<SharedVault>,
+    store: Arc<mcpgw_store::SqliteStore>,
+}
+
+impl ApiSecrets {
+    /// Over `vault` and `store`.
+    pub fn new(vault: Arc<SharedVault>, store: Arc<mcpgw_store::SqliteStore>) -> Self {
+        Self { vault, store }
+    }
+}
+
+impl mcpgw_api::v1::SecretBackend for ApiSecrets {
+    fn list(&self) -> Result<Vec<mcpgw_core::SecretMeta>, String> {
+        use mcpgw_store::Store;
+        let names = self
+            .vault
+            .with(false, |v| Ok(v.map(|v| v.list()).unwrap_or_default()))?;
+        Ok(names
+            .into_iter()
+            .map(|(name, created_at, updated_at)| {
+                let stored = self.store.secret_meta(&name).ok().flatten();
+                mcpgw_core::SecretMeta {
+                    description: stored.as_ref().and_then(|m| m.description.clone()),
+                    last_used_at: stored.and_then(|m| m.last_used_at),
+                    name,
+                    created_at,
+                    updated_at,
+                }
+            })
+            .collect())
+    }
+
+    fn set(&self, name: &str, value: &str, description: Option<String>) -> Result<(), String> {
+        use mcpgw_store::Store;
+        let (created_at, updated_at) = self.vault.with(true, |v| {
+            let v = v.expect("created");
+            v.set(name, &SecretString::from(value.to_string()))
+                .map_err(|e| e.to_string())?;
+            Ok(v.list()
+                .into_iter()
+                .find(|(n, ..)| n == name)
+                .map(|(_, c, u)| (c, u))
+                .unwrap_or_default())
+        })?;
+        let prev = self.store.secret_meta(name).map_err(|e| e.to_string())?;
+        self.store
+            .upsert_secret_meta(&mcpgw_core::SecretMeta {
+                name: name.to_string(),
+                description: description.or(prev.and_then(|p| p.description)),
+                created_at,
+                updated_at,
+                last_used_at: None,
+            })
+            .map_err(|e| e.to_string())
+    }
+
+    fn remove(&self, name: &str) -> Result<bool, String> {
+        use mcpgw_store::Store;
+        let existed = self.vault.with(false, |v| match v {
+            Some(v) => v.remove(name).map_err(|e| e.to_string()),
+            None => Ok(false),
+        })?;
+        let _ = self.store.remove_secret_meta(name);
+        Ok(existed)
+    }
+}
+
 /// `mcpgw secret set|ls|rm`.
 pub mod cmd {
     use std::io::{IsTerminal, Read};

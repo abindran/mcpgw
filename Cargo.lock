@@ -1548,11 +1548,15 @@ dependencies = [
  "axum",
  "mcpgw-auth",
  "mcpgw-core",
+ "mcpgw-router",
  "mcpgw-runtime",
+ "mcpgw-store",
  "reqwest",
+ "schemars",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tracing",
 ]
 

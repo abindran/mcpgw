@@ -296,7 +296,7 @@ pub fn serve(
             }
         } else {
             let login = remote_login(config, &mgr, vault.clone());
-            serve_http(config, token, mgr.clone(), broker, login, &profiles).await
+            serve_http(config, token, mgr.clone(), broker, login, store.clone(), vault.clone()).await
         };
         refresher.abort();
         mgr.shutdown().await;
@@ -355,7 +355,8 @@ async fn serve_http(
     mgr: Arc<BackendManager>,
     broker: Arc<mcpgw_auth::oauth::Broker>,
     login: mcpgw_api::oauth::RemoteLogin,
-    profiles: &[mcpgw_core::Profile],
+    store: Arc<SqliteStore>,
+    vault: Arc<secrets::SharedVault>,
 ) -> AnyResult<()> {
     let addr = config.gateway.listen();
     let listener = tokio::net::TcpListener::bind(addr)
@@ -386,31 +387,39 @@ async fn serve_http(
         login: Some(link.clone()),
         ..gateway_options(config)
     };
-    // /mcp is the default endpoint; /mcp/p/<name> one per profile
-    let mut mcp = mcpgw_router::http_router(mgr.clone(), opts);
-    for p in profiles {
-        let o = mcpgw_router::GatewayOptions {
-            login: Some(link.clone()),
-            ..profile_options(config, p)
-        };
-        mcp = mcp.nest_service(
-            &format!("/p/{}", p.name),
-            mcpgw_router::http_router(mgr.clone(), o),
-        );
-        tracing::info!(profile = %p.name, "serving profile at /mcp/p/{}", p.name);
-    }
-    let mcp = mcp.route(
-        "/p/{*rest}",
-        axum::routing::any(|| async {
-            (
-                axum::http::StatusCode::NOT_FOUND,
-                axum::Json(serde_json::json!({"error": "no such profile"})),
-            )
-        }),
-    );
+    // /mcp is the default endpoint; /mcp/p/<name> resolves profiles per
+    // request, so profiles added through the API work at once
+    let build: mcpgw_api::profiles::ProfileService = {
+        let (cfg, mgr, link) = (config.clone(), mgr.clone(), link.clone());
+        Arc::new(move |p: &mcpgw_core::Profile| {
+            let o = mcpgw_router::GatewayOptions {
+                login: Some(link.clone()),
+                ..profile_options(&cfg, p)
+            };
+            mcpgw_router::http_router(mgr.clone(), o)
+        })
+    };
+    let profiles =
+        mcpgw_api::profiles::Profiles::new(config.profiles.clone(), store.profiles()?, build);
+    let mcp = mcpgw_router::http_router(mgr.clone(), opts).merge(profiles.routes());
+    let api = mcpgw_api::v1::router(mcpgw_api::v1::ApiState {
+        manager: mgr.clone(),
+        store: store.clone(),
+        config_servers: Arc::new(config.servers.iter().map(|s| s.name.clone()).collect()),
+        profiles,
+        secrets: Arc::new(secrets::ApiSecrets::new(vault, store.clone())),
+        approvals: approvals(),
+        started_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        mcp_url: format!("http://{local}{}", mcpgw_api::MCP_PATH),
+    });
     let app = mcpgw_api::edge_full(
         mcp,
-        admin.merge(mcpgw_api::oauth::admin_routes(oauth.clone())),
+        admin
+            .merge(mcpgw_api::oauth::admin_routes(oauth.clone()))
+            .merge(api),
         mcpgw_api::oauth::public_routes(oauth),
         mcpgw_api::EdgeOptions {
             token,
