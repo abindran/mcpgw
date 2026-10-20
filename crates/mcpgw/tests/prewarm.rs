@@ -13,9 +13,10 @@ use mcpgw_testkit::McpClient;
 use serde_json::{Value, json};
 
 /// Start delay of every server, and the model's "think time" between a
-/// search and the call.
+/// search and the call (real models usually take seconds; 1.5 s leaves
+/// room for slower process creation, as on Windows).
 const START_MS: u64 = 700;
-const THINK_MS: u64 = 1000;
+const THINK_MS: u64 = 1500;
 
 const TOPICS: [&str; 10] = [
     "weather",

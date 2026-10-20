@@ -36,8 +36,10 @@ prewarm = false
 
 There were ten fake servers, each taking 700 ms to start and each with one
 tool on its own topic. Through the daemon in meta mode, each sequence ran
-`search_tools {query: <topic>}`, waited a 1 s think time, then ran
-`call_tool` on the hit.
+`search_tools {query: <topic>}`, waited a think time, then ran
+`call_tool` on the hit. The think time was 1 s here; the test uses 1.5 s
+because Windows CI, with its slower process creation plus the 700 ms
+start, hid only 8/10 at 1 s.
 
 | | Cold start hidden | Call latency |
 |---|---|---|
