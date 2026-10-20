@@ -62,7 +62,10 @@ fn add_list_remove_servers() {
         "-v",
     ]);
     assert!(ok, "{err}");
-    assert_eq!(out.trim(), "added server extra");
+    assert!(
+        out.starts_with("added server extra (7 tools, pin "),
+        "{out}"
+    );
     assert!(
         e.run(&[
             "add-server",

@@ -127,7 +127,7 @@ fn legacy_lifecycle() -> ClientLifecycleMode {
 /// any member is alive, and the job outlives its first process.
 struct TreeGuard {
     pid: Option<u32>,
-    child: Option<Box<dyn process_wrap::tokio::ChildWrapper>>,
+    child: Option<std::sync::Mutex<Box<dyn process_wrap::tokio::ChildWrapper>>>,
 }
 
 impl TreeGuard {
@@ -138,9 +138,18 @@ impl TreeGuard {
         }
     }
 
+    /// Whether the server process has exited (crashed or quit).
+    fn exited(&self) -> bool {
+        self.child.as_ref().is_some_and(|c| {
+            c.lock()
+                .map(|mut c| matches!(c.try_wait(), Ok(Some(_)) | Err(_)))
+                .unwrap_or(true)
+        })
+    }
+
     /// Wait up to `grace` for the server to exit on its own.
     async fn wait_exit(&mut self, grace: Duration) {
-        if let Some(c) = self.child.as_mut() {
+        if let Some(c) = self.child.as_mut().and_then(|c| c.get_mut().ok()) {
             let _ = tokio::time::timeout(grace, c.wait()).await;
         }
     }
@@ -148,7 +157,7 @@ impl TreeGuard {
 
 impl Drop for TreeGuard {
     fn drop(&mut self) {
-        if let Some(mut c) = self.child.take() {
+        if let Some(mut c) = self.child.take().and_then(|c| c.into_inner().ok()) {
             let _ = c.start_kill();
             // Reap, so no zombie is left behind on Unix.
             if let Ok(rt) = tokio::runtime::Handle::try_current() {
@@ -245,7 +254,7 @@ impl BackendConn {
         }
         let tree = TreeGuard {
             pid: child.id(),
-            child: Some(child),
+            child: Some(std::sync::Mutex::new(child)),
         };
         // If the handshake fails, dropping `tree` kills the process tree.
         let mut conn = Self::connect_transport((stdout, stdin), timeout, lifecycle).await?;
@@ -293,9 +302,11 @@ impl BackendConn {
             .map(|i| i.protocol_version.to_string())
     }
 
-    /// True once the underlying transport has closed.
+    /// True once the transport has closed or the server process has exited.
+    /// (On Windows a crashed server's pipes can be reported closed only
+    /// after a call has already failed, so the process is checked too.)
     pub fn is_closed(&self) -> bool {
-        self.service.is_closed() || self.service.is_transport_closed()
+        self.service.is_closed() || self.service.is_transport_closed() || self._tree.exited()
     }
 
     /// All tools (following pagination), each as its JSON object.

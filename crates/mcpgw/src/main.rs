@@ -60,6 +60,10 @@ enum Cmd {
         /// Register but do not start it.
         #[arg(long)]
         disabled: bool,
+        /// Don't start the server now to read and pin its tools; they are
+        /// captured on its first start instead.
+        #[arg(long)]
+        no_introspect: bool,
         /// Arguments for the command (after `--`).
         #[arg(last = true)]
         args: Vec<String>,
@@ -112,7 +116,7 @@ fn run(cli: Cli) -> AnyResult<()> {
     let config = Config::load_or_default(&path)?;
     let store = || SqliteStore::open(config.gateway.store_path());
     match cli.cmd {
-        Cmd::Serve { stdio } => serve(&config, &store()?, stdio),
+        Cmd::Serve { stdio } => serve(&config, Arc::new(store()?), stdio),
         Cmd::Connect => connect(&config, &path),
         Cmd::AddServer {
             name,
@@ -120,6 +124,7 @@ fn run(cli: Cli) -> AnyResult<()> {
             url,
             env,
             disabled,
+            no_introspect,
             args,
         } => {
             if config.servers.iter().any(|s| s.name == name) {
@@ -144,14 +149,33 @@ fn run(cli: Cli) -> AnyResult<()> {
             let mut spec = ServerSpec::new(name.clone(), transport);
             spec.enabled = !disabled;
             s.upsert_server(&spec)?;
-            println!(
-                "{} server {name}",
-                if existed { "updated" } else { "added" }
-            );
+            let verb = if existed { "updated" } else { "added" };
+            // A changed spec may expose different tools: drop the old pin.
+            s.remove_manifest(&name)?;
+            if spec.enabled && !no_introspect && matches!(spec.transport, Transport::Stdio { .. }) {
+                match runtime()?.block_on(mcpgw_runtime::introspect(&spec, Duration::from_secs(60)))
+                {
+                    Ok(m) => {
+                        s.put_manifest(&m)?;
+                        println!(
+                            "{verb} server {name} ({} tools, pin {})",
+                            m.tools.len(),
+                            &m.sha256[..12]
+                        );
+                        return Ok(());
+                    }
+                    Err(e) => eprintln!(
+                        "mcpgw: could not read the tools of {name}: {e}; they will be captured on its first start"
+                    ),
+                }
+            }
+            println!("{verb} server {name}");
             Ok(())
         }
         Cmd::RemoveServer { name } => {
-            if store()?.remove_server(&name)? {
+            let s = store()?;
+            s.remove_manifest(&name)?;
+            if s.remove_server(&name)? {
                 println!("removed server {name}");
                 Ok(())
             } else if config.servers.iter().any(|s| s.name == name) {
@@ -195,13 +219,59 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
-fn serve(config: &Config, store: &SqliteStore, stdio: bool) -> AnyResult<()> {
+/// A catalog seeded from the store that saves new manifests back to it.
+fn catalog(store: &Arc<SqliteStore>) -> AnyResult<Arc<mcpgw_runtime::Catalog>> {
+    let s = store.clone();
+    let persist: mcpgw_runtime::Persist = Arc::new(move |m| {
+        if let Err(e) = s.put_manifest(m) {
+            tracing::warn!(server = %m.server, error = %e, "could not save manifest");
+        }
+    });
+    Ok(Arc::new(mcpgw_runtime::Catalog::new(
+        store.manifests()?,
+        Some(persist),
+    )))
+}
+
+/// Start and stop each enabled server that has no manifest yet, so its
+/// tools can be listed. Bounded by `timeout`.
+async fn capture_missing(mgr: &Arc<BackendManager>, servers: &[ServerSpec], timeout: Duration) {
+    let missing: Vec<_> = servers
+        .iter()
+        .filter(|s| s.enabled && !mgr.catalog().contains(&s.name))
+        .map(|s| {
+            let mgr = mgr.clone();
+            let name = s.name.clone();
+            tokio::spawn(async move {
+                if mgr.ensure(&name).await.is_ok() {
+                    let _ = mgr.stop(&name).await;
+                }
+            })
+        })
+        .collect();
+    if !missing.is_empty() {
+        tracing::info!(servers = missing.len(), "capturing tool manifests");
+    }
+    let _ = tokio::time::timeout(timeout, async {
+        for t in missing {
+            let _ = t.await;
+        }
+    })
+    .await;
+}
+
+fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult<()> {
     let token = Token::load_or_create(&config.gateway.token_path())?;
-    let servers = effective_servers(&config.servers, store)?;
+    let servers = effective_servers(&config.servers, store.as_ref())?;
+    let catalog = catalog(&store)?;
     runtime()?.block_on(async {
-        let mgr = Arc::new(BackendManager::start(&servers, ManagerOptions::default()));
-        // Give backends a moment so the first tools/list is complete.
-        mgr.wait_ready(Duration::from_secs(30)).await;
+        let mgr = Arc::new(BackendManager::with_catalog(
+            &servers,
+            ManagerOptions::default(),
+            catalog,
+        ));
+        // Servers start on first use; only those never seen are started now.
+        capture_missing(&mgr, &servers, Duration::from_secs(30)).await;
         let res: AnyResult<()> = if stdio {
             tracing::info!(servers = servers.len(), "mcpgw serving on stdio");
             tokio::select! {
@@ -279,22 +349,35 @@ fn list_servers(config: &Config, store: &SqliteStore, check: bool) -> AnyResult<
                 connect_timeout: Duration::from_secs(15),
                 ..Default::default()
             };
-            let mgr = BackendManager::start(&servers, opts);
-            mgr.wait_ready(Duration::from_secs(20)).await;
+            let mgr = Arc::new(BackendManager::start(&servers, opts));
+            let checks: Vec<_> = servers
+                .iter()
+                .map(|s| {
+                    let (mgr, name) = (mgr.clone(), s.name.clone());
+                    tokio::spawn(async move {
+                        let r =
+                            tokio::time::timeout(Duration::from_secs(20), mgr.ensure(&name)).await;
+                        (name, r)
+                    })
+                })
+                .collect();
             let mut out = BTreeMap::new();
-            for st in mgr.status().await {
-                let n = mgr.tools(&st.name).await.len();
-                let err = st.last_error.clone().unwrap_or_default();
-                let text = match st.state {
-                    s if s.is_connected() => format!(
-                        "ok ({n} tools, {})",
+            for c in checks {
+                let Ok((name, r)) = c.await else { continue };
+                let st = mgr.status_of(&name).expect("configured server");
+                let text = match r {
+                    Ok(Ok(())) => format!(
+                        "ok ({} tools, {})",
+                        mgr.live_tools(&name).await.len(),
                         st.protocol_version.as_deref().unwrap_or("?")
                     ),
-                    State::Disabled => format!("skipped: {err}"),
-                    State::Backoff { .. } | State::Failed => format!("error: {err}"),
-                    other => other.name().to_string(),
+                    _ if st.state == State::Disabled => {
+                        format!("skipped: {}", st.last_error.unwrap_or_default())
+                    }
+                    Ok(Err(e)) => format!("error: {e}"),
+                    Err(_) => "error: timed out".to_string(),
                 };
-                out.insert(st.name, text);
+                out.insert(name, text);
             }
             mgr.shutdown().await;
             out

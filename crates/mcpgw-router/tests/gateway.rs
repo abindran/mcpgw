@@ -47,7 +47,10 @@ impl Rpc {
 async fn gateway() -> (Arc<BackendManager>, Rpc) {
     let m = Arc::new(BackendManager::start(
         &[fixture_server("fx")],
-        ManagerOptions::default(),
+        ManagerOptions {
+            eager: true,
+            ..ManagerOptions::default()
+        },
     ));
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     let (s, c) = tokio::io::duplex(1 << 16);
@@ -81,10 +84,7 @@ async fn lists_and_calls_through_gateway() {
         .iter()
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(
-        names[..4],
-        ["fx__add", "fx__echo", "fx__crash", "fx__sleep"]
-    );
+    assert_eq!(names[..4], ["fx__add", "fx__crash", "fx__echo", "fx__env"]);
 
     let r = rpc
         .request(
@@ -111,7 +111,10 @@ fn fixture_env(name: &str, prefix: &str) -> ServerSpec {
 async fn aggregates_two_backends_and_routes_by_prefix() {
     let m = BackendManager::start(
         &[fixture_env("one", "1:"), fixture_env("two", "2:")],
-        ManagerOptions::default(),
+        ManagerOptions {
+            eager: true,
+            ..ManagerOptions::default()
+        },
     );
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     let all = mcpgw_router::list_all_tools(&m).await;

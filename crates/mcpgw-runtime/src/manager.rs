@@ -16,7 +16,10 @@ use mcpgw_core::{ServerSpec, Transport};
 use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
 use tokio::sync::{RwLock, mpsc, oneshot};
 
-use crate::state::{Action, Event, State, step};
+use crate::{
+    catalog::{Catalog, manifest_from},
+    state::{Action, Event, State, step},
+};
 
 /// Lines of stderr kept per server.
 pub const STDERR_LINES: usize = 200;
@@ -39,7 +42,7 @@ pub struct ManagerOptions {
     /// Consecutive failed starts before a server is marked `Failed`.
     pub max_failures: u32,
     /// Start every enabled server at once and restart it after a crash,
-    /// instead of starting on first use.
+    /// instead of starting on first use (the default).
     pub eager: bool,
 }
 
@@ -53,7 +56,7 @@ impl Default for ManagerOptions {
             backoff_initial: Duration::from_millis(500),
             backoff_max: Duration::from_secs(30),
             max_failures: 5,
-            eager: true,
+            eager: false,
         }
     }
 }
@@ -92,6 +95,7 @@ struct Shared {
     status: std::sync::RwLock<BackendStatus>,
     tools: RwLock<Vec<JsonObject>>,
     stderr: Arc<Mutex<VecDeque<String>>>,
+    catalog: Arc<Catalog>,
 }
 
 impl Shared {
@@ -142,8 +146,9 @@ enum Waiter {
 
 enum Internal {
     Started(Result<(BackendConn, Vec<JsonObject>), String>),
-    CallDone { lost: bool },
+    CallDone { lost: bool, failed: bool },
     Ping(Result<(), String>),
+    Recheck,
 }
 
 struct Handle {
@@ -155,6 +160,7 @@ struct Handle {
 pub struct BackendManager {
     backends: BTreeMap<String, Handle>,
     opts: ManagerOptions,
+    catalog: Arc<Catalog>,
     tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
@@ -163,6 +169,15 @@ impl BackendManager {
     /// `opts.eager`, enabled servers start in the background (see
     /// [`BackendManager::wait_ready`]).
     pub fn start(servers: &[ServerSpec], opts: ManagerOptions) -> Self {
+        Self::with_catalog(servers, opts, Arc::new(Catalog::default()))
+    }
+
+    /// Like [`BackendManager::start`], with tool manifests from `catalog`.
+    pub fn with_catalog(
+        servers: &[ServerSpec],
+        opts: ManagerOptions,
+        catalog: Arc<Catalog>,
+    ) -> Self {
         let mut backends = BTreeMap::new();
         let mut tasks = Vec::new();
         for cfg in servers {
@@ -187,6 +202,7 @@ impl BackendManager {
                 }),
                 tools: RwLock::new(Vec::new()),
                 stderr: Arc::default(),
+                catalog: catalog.clone(),
             });
             let (tx, rx) = mpsc::unbounded_channel();
             if let Transport::Stdio {
@@ -225,8 +241,14 @@ impl BackendManager {
         Self {
             backends,
             opts,
+            catalog,
             tasks: std::sync::Mutex::new(tasks),
         }
+    }
+
+    /// The tool catalog.
+    pub fn catalog(&self) -> &Arc<Catalog> {
+        &self.catalog
     }
 
     /// Names of all configured backends.
@@ -266,8 +288,17 @@ impl BackendManager {
         }
     }
 
-    /// Cached tool list of one backend (refreshed on every start).
+    /// A server's tools from its pinned manifest, without starting it.
+    /// Disabled and unknown servers have none.
     pub async fn tools(&self, server: &str) -> Vec<JsonObject> {
+        match self.backends.get(server) {
+            Some(h) if h.shared.snapshot().state != State::Disabled => self.catalog.tools(server),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The tools the running server reported on its last start.
+    pub async fn live_tools(&self, server: &str) -> Vec<JsonObject> {
         match self.backends.get(server) {
             Some(h) => h.shared.tools.read().await.clone(),
             None => Vec::new(),
@@ -623,8 +654,11 @@ impl Actor {
         tokio::spawn(async move {
             let res = conn.call_tool(&tool, args, timeout).await;
             let lost = matches!(res, Err(ProtoError::Closed)) || conn.is_closed();
+            // A transport error (not a tool's own JSON-RPC error) may mean the
+            // server died a moment before its pipes report it.
+            let failed = matches!(&res, Err(e) if !matches!(e, ProtoError::Rpc { .. }));
             let _ = reply.send(res);
-            let _ = itx.send(Internal::CallDone { lost });
+            let _ = itx.send(Internal::CallDone { lost, failed });
         });
     }
 
@@ -659,6 +693,11 @@ impl Actor {
                     }
                     self.ever_connected = true;
                     self.failures = 0;
+                    if !self.shared.catalog.contains(&self.shared.name) {
+                        let m = manifest_from(&self.shared.name, pv.clone(), &tools);
+                        tracing::info!(server = %self.shared.name, pin = %m.sha256, tools = m.tools.len(), "captured manifest");
+                        self.shared.catalog.record(m);
+                    }
                     self.shared.update(|s| {
                         s.protocol_version = pv;
                         s.last_error = None;
@@ -686,9 +725,20 @@ impl Actor {
                 self.failures += 1;
                 self.fail_waiters(&ProtoError::Connect(e));
             }
-            Internal::CallDone { lost } => {
+            Internal::CallDone { lost, failed } => {
                 self.apply(Event::CallEnd);
                 if lost {
+                    self.lost("connection closed".into());
+                } else if failed {
+                    let itx = self.itx.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(Duration::from_millis(250)).await;
+                        let _ = itx.send(Internal::Recheck);
+                    });
+                }
+            }
+            Internal::Recheck => {
+                if self.conn.as_ref().is_some_and(|c| c.is_closed()) {
                     self.lost("connection closed".into());
                 }
             }

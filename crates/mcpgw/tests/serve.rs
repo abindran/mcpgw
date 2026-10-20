@@ -115,3 +115,67 @@ fn serve_lists_and_calls_and_logs_one_line_per_request() {
     );
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `add-server` pins the tools once; afterwards the gateway lists them
+/// without starting the server, and starts it only for a call.
+#[tokio::test(flavor = "multi_thread")]
+async fn tools_list_after_install_spawns_nothing() {
+    let dir = std::env::temp_dir().join(format!("mcpgw-pinned-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let log = dir.join("spawns.log");
+    std::fs::write(
+        dir.join("config.toml"),
+        format!(
+            "[gateway]\nstore_path = {:?}\ntoken_path = {:?}\n",
+            dir.join("db.sqlite"),
+            dir.join("token")
+        ),
+    )
+    .unwrap();
+    let mcpgw = |args: &[&str]| {
+        let mut c = Command::new(env!("CARGO_BIN_EXE_mcpgw"));
+        c.arg("--config").arg(dir.join("config.toml")).args(args);
+        c
+    };
+    let spawns = || {
+        std::fs::read_to_string(&log)
+            .unwrap_or_default()
+            .lines()
+            .count()
+    };
+
+    let out = mcpgw(&[
+        "add-server",
+        "fx",
+        "--command",
+        &mcpgw_testkit::fake_mcp().to_string_lossy(),
+        "--env",
+        &format!("FAKE_SPAWN_LOG={}", log.display()),
+    ])
+    .output()
+    .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("(7 tools, pin "));
+    assert_eq!(spawns(), 1, "introspection spawns once");
+
+    let mut serve = tokio::process::Command::from(mcpgw(&["serve", "--stdio"]));
+    serve.stderr(Stdio::null());
+    let c = mcpgw_testkit::McpClient::stdio(serve).await.unwrap();
+    let names = c.tool_names().await.unwrap();
+    assert_eq!(names.len(), 7, "{names:?}");
+    assert_eq!(spawns(), 1, "tools/list must not start the server");
+    assert_eq!(
+        c.call_text("fx__add", json!({"a": 1, "b": 1}))
+            .await
+            .unwrap(),
+        "2"
+    );
+    assert_eq!(spawns(), 2, "the call starts it");
+    c.close().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

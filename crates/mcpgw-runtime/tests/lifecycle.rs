@@ -76,22 +76,30 @@ async fn spawns_negotiates_legacy_and_calls() {
     assert_eq!(st.state, State::Ready);
     assert_eq!(st.protocol_version.as_deref(), Some("2025-11-25"));
     assert!(st.pid.is_some());
-    let names: Vec<_> = m
-        .tools("fx")
-        .await
-        .iter()
-        .map(|t| t["name"].as_str().unwrap().to_string())
-        .collect();
+    let names = |tools: Vec<mcpgw_runtime::JsonObject>| -> Vec<String> {
+        tools
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+    // live order from the server; the captured manifest is sorted by name
     assert_eq!(
-        names,
+        names(m.live_tools("fx").await),
         ["add", "echo", "crash", "sleep", "env", "spawn", "stderr"]
     );
+    assert_eq!(
+        names(m.tools("fx").await),
+        ["add", "crash", "echo", "env", "sleep", "spawn", "stderr"]
+    );
+    let pin = m.catalog().get("fx").unwrap();
+    assert!(pin.verify() && pin.sha256.len() == 64);
     let r = m
         .call_tool("fx", "add", args(json!({"a": 2, "b": 40})))
         .await
         .unwrap();
     assert_eq!(text_of(&r), "42");
-    assert_eq!(state(&m, "fx"), State::Idle);
+    // the reply reaches the caller just before the actor sees CallEnd
+    assert!(wait_for(&m, "fx", |s| *s == State::Idle).await);
     assert!(m.status_of("fx").unwrap().last_used.is_some());
     m.shutdown().await;
     assert_eq!(state(&m, "fx"), State::Cold);
@@ -108,9 +116,8 @@ async fn lazy_server_starts_on_first_call() {
         .await
         .unwrap();
     assert_eq!(text_of(&r), "2");
-    let st = m.status_of("fx").unwrap();
-    assert_eq!(st.state, State::Idle);
-    assert!(st.pid.is_some());
+    assert!(wait_for(&m, "fx", |s| *s == State::Idle).await);
+    assert!(m.status_of("fx").unwrap().pid.is_some());
     m.shutdown().await;
 }
 
@@ -423,4 +430,35 @@ async fn captures_stderr_lines() {
     assert_eq!(tail, ["booting fx", "warn: disk"]);
     assert!(m.stderr_tail("nope").is_empty());
     m.shutdown().await;
+}
+
+/// With a pinned manifest, tools are listed without starting anything.
+#[tokio::test(flavor = "multi_thread")]
+async fn catalog_lists_tools_without_spawning() {
+    let log = temp_file("catalog-spawns");
+    let log_s = log.to_string_lossy().into_owned();
+    let spec = server("fx", &[("FAKE_SPAWN_LOG", &log_s)]);
+    // install time: one spawn to read and pin the tools
+    let manifest = mcpgw_runtime::introspect(&spec, Duration::from_secs(20))
+        .await
+        .unwrap();
+    assert_eq!(manifest.tools.len(), 7);
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
+
+    let catalog = std::sync::Arc::new(mcpgw_runtime::Catalog::new(vec![manifest], None));
+    let m = BackendManager::with_catalog(&[spec], lazy(), catalog);
+    assert_eq!(m.tools("fx").await.len(), 7);
+    assert_eq!(state(&m, "fx"), State::Cold);
+    assert_eq!(
+        std::fs::read_to_string(&log).unwrap().lines().count(),
+        1,
+        "listing spawned"
+    );
+
+    m.call_tool("fx", "add", args(json!({"a": 1, "b": 2})))
+        .await
+        .unwrap();
+    assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
+    m.shutdown().await;
+    let _ = std::fs::remove_file(&log);
 }
