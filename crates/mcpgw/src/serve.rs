@@ -39,6 +39,33 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         pinned: config.gateway.pinned_tools.clone(),
         accounts: config.gateway.accounts.clone(),
         login: None,
+        servers: None,
+    }
+}
+
+/// Profiles from the config file and the store (the file wins on a clash).
+pub fn profiles(config: &Config, store: &dyn Store) -> AnyResult<Vec<mcpgw_core::Profile>> {
+    let mut out = config.profiles.clone();
+    for p in store.profiles()? {
+        if !out.iter().any(|c| c.name == p.name) {
+            out.push(p);
+        }
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
+/// Options for a profile's endpoint: its servers, mode, pinned tools, and
+/// accounts (over the gateway's).
+fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::GatewayOptions {
+    let mut accounts = config.gateway.accounts.clone();
+    accounts.extend(p.accounts.clone());
+    mcpgw_router::GatewayOptions {
+        mode: p.mode,
+        pinned: p.pinned_tools.clone(),
+        accounts,
+        servers: (!p.servers.is_empty()).then(|| p.servers.iter().cloned().collect()),
+        login: None,
     }
 }
 
@@ -191,9 +218,34 @@ async fn capture_missing(mgr: &Arc<BackendManager>, servers: &[ServerSpec], time
 }
 
 /// Run the gateway until a signal (or `mcpgw down`) stops it.
-pub fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult<()> {
+pub fn serve(
+    config: &Config,
+    store: Arc<SqliteStore>,
+    stdio: bool,
+    profile: Option<&str>,
+) -> AnyResult<()> {
     let token = Token::load_or_create(&config.gateway.token_path())?;
     let servers = effective_servers(&config.servers, store.as_ref())?;
+    let profiles = profiles(config, store.as_ref())?;
+    for p in &profiles {
+        for s in p
+            .servers
+            .iter()
+            .filter(|s| !servers.iter().any(|x| &x.name == *s))
+        {
+            tracing::warn!(profile = %p.name, server = %s, "profile names a server that does not exist");
+        }
+    }
+    let stdio_opts = match profile {
+        None => gateway_options(config),
+        Some(name) => {
+            let p = profiles
+                .iter()
+                .find(|p| p.name == name)
+                .ok_or_else(|| format!("no profile named {name:?}"))?;
+            profile_options(config, p)
+        }
+    };
     let catalog = catalog(&store)?;
     runtime()?.block_on(async {
         let opts = ManagerOptions {
@@ -217,12 +269,12 @@ pub fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult
         let res: AnyResult<()> = if stdio {
             tracing::info!(servers = servers.len(), "mcpgw serving on stdio");
             tokio::select! {
-                r = mcpgw_router::serve_stdio(mgr.clone(), gateway_options(config)) => r.map_err(|e| e.to_string().into()),
+                r = mcpgw_router::serve_stdio(mgr.clone(), stdio_opts) => r.map_err(|e| e.to_string().into()),
                 _ = shutdown_signal() => Ok(()),
             }
         } else {
             let login = remote_login(config, &mgr, vault.clone());
-            serve_http(config, token, mgr.clone(), broker, login).await
+            serve_http(config, token, mgr.clone(), broker, login, &profiles).await
         };
         refresher.abort();
         mgr.shutdown().await;
@@ -281,6 +333,7 @@ async fn serve_http(
     mgr: Arc<BackendManager>,
     broker: Arc<mcpgw_auth::oauth::Broker>,
     login: mcpgw_api::oauth::RemoteLogin,
+    profiles: &[mcpgw_core::Profile],
 ) -> AnyResult<()> {
     let addr = config.gateway.listen();
     let listener = tokio::net::TcpListener::bind(addr)
@@ -307,11 +360,33 @@ async fn serve_http(
         Box::pin(async move { mcpgw_api::oauth::begin_login(&s, &p, &a).await })
     });
     let opts = mcpgw_router::GatewayOptions {
-        login: Some(link),
+        login: Some(link.clone()),
         ..gateway_options(config)
     };
+    // /mcp is the default endpoint; /mcp/p/<name> one per profile
+    let mut mcp = mcpgw_router::http_router(mgr.clone(), opts);
+    for p in profiles {
+        let o = mcpgw_router::GatewayOptions {
+            login: Some(link.clone()),
+            ..profile_options(config, p)
+        };
+        mcp = mcp.nest_service(
+            &format!("/p/{}", p.name),
+            mcpgw_router::http_router(mgr.clone(), o),
+        );
+        tracing::info!(profile = %p.name, "serving profile at /mcp/p/{}", p.name);
+    }
+    let mcp = mcp.route(
+        "/p/{*rest}",
+        axum::routing::any(|| async {
+            (
+                axum::http::StatusCode::NOT_FOUND,
+                axum::Json(serde_json::json!({"error": "no such profile"})),
+            )
+        }),
+    );
     let app = mcpgw_api::edge_full(
-        mcpgw_router::http_router(mgr, opts),
+        mcp,
         admin.merge(mcpgw_api::oauth::admin_routes(oauth.clone())),
         mcpgw_api::oauth::public_routes(oauth),
         mcpgw_api::EdgeOptions {

@@ -25,6 +25,7 @@ mcpgw-vault.workspace = true
 secrecy = "0.10"
 rpassword = "7"
 reqwest.workspace = true
+axum = { version = "0.8", default-features = false, features = ["json"] }
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true

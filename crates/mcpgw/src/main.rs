@@ -50,6 +50,9 @@ enum Cmd {
         /// Serve one client on stdin/stdout instead of HTTP.
         #[arg(long)]
         stdio: bool,
+        /// With --stdio: serve this profile's view.
+        #[arg(long, requires = "stdio")]
+        profile: Option<String>,
     },
     /// Start the daemon in the background.
     Up,
@@ -59,7 +62,13 @@ enum Cmd {
     Status,
     /// Relay stdin/stdout to the daemon, starting it if needed. Use this as
     /// the command in clients that only launch stdio servers.
-    Connect,
+    Connect {
+        /// Use this profile's endpoint (/mcp/p/<name>).
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// List profiles and their endpoints.
+    Profiles,
     /// Register or update a server, pin its tools, and tell the daemon.
     #[command(alias = "add-server")]
     Add(AddArgs),
@@ -196,6 +205,9 @@ enum ClientCmd {
         /// Print the result instead of writing it.
         #[arg(long)]
         dry_run: bool,
+        /// Point the entry at this profile.
+        #[arg(long)]
+        profile: Option<String>,
     },
     /// Move a client's servers into mcpgw and replace them with one mcpgw
     /// entry. Credentials in their env move to the vault. The original file
@@ -265,15 +277,17 @@ fn run(cli: Cli) -> AnyResult<()> {
     let path = cli.config.unwrap_or_else(Config::default_path);
     let config = Config::load_or_default(&path)?;
     match cli.cmd {
-        Cmd::Serve { stdio } => serve::serve(
+        Cmd::Serve { stdio, profile } => serve::serve(
             &config,
             std::sync::Arc::new(SqliteStore::open(config.gateway.store_path())?),
             stdio,
+            profile.as_deref(),
         ),
+        Cmd::Profiles => list_profiles(&config),
         Cmd::Up => servers::up(&config, &path),
         Cmd::Down => servers::down(&config),
         Cmd::Status => servers::status(&config),
-        Cmd::Connect => connect(&config, &path),
+        Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
         Cmd::Add(a) => {
             let transport = match (a.command, a.url) {
                 (Some(command), None) => Transport::Stdio {
@@ -317,7 +331,14 @@ fn run(cli: Cli) -> AnyResult<()> {
             client,
             path,
             dry_run,
-        }) => clients::install(client, path, explicit_config.as_deref(), dry_run),
+            profile,
+        }) => clients::install(
+            client,
+            path,
+            explicit_config.as_deref(),
+            dry_run,
+            profile.as_deref(),
+        ),
         Cmd::Client(ClientCmd::Import {
             client,
             path,
@@ -345,7 +366,29 @@ fn run(cli: Cli) -> AnyResult<()> {
     }
 }
 
-fn connect(config: &Config, config_path: &std::path::Path) -> AnyResult<()> {
+fn list_profiles(config: &Config) -> AnyResult<()> {
+    let store = SqliteStore::open(config.gateway.store_path())?;
+    let list = serve::profiles(config, &store)?;
+    if list.is_empty() {
+        println!("no profiles (the default endpoint /mcp serves every server)");
+    }
+    let base = format!("http://{}{}", config.gateway.listen(), mcpgw_api::MCP_PATH);
+    for p in list {
+        let servers = if p.servers.is_empty() {
+            "all servers".to_string()
+        } else {
+            p.servers.join(", ")
+        };
+        let mode = serde_json::to_value(p.mode)?
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        println!("{}	{base}/p/{}	{mode}	{servers}", p.name, p.name);
+    }
+    Ok(())
+}
+
+fn connect(config: &Config, config_path: &std::path::Path, profile: Option<&str>) -> AnyResult<()> {
     let info = match daemon::running(config) {
         Some(info) => info,
         None => {
@@ -355,6 +398,10 @@ fn connect(config: &Config, config_path: &std::path::Path) -> AnyResult<()> {
     };
     let token = Token::load_or_create(&config.gateway.token_path())?;
     tracing::info!(url = %info.url, pid = info.pid, "relaying stdio to the daemon");
-    serve::runtime()?.block_on(mcpgw_proto::relay::stdio_to_http(&info.url, token.expose()))?;
+    let url = match profile {
+        Some(p) => format!("{}/p/{p}", info.url),
+        None => info.url.clone(),
+    };
+    serve::runtime()?.block_on(mcpgw_proto::relay::stdio_to_http(&url, token.expose()))?;
     Ok(())
 }

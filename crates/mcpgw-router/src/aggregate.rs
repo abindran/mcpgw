@@ -90,10 +90,31 @@ where
     out
 }
 
+/// Which servers an endpoint sees, and as which accounts (M2-07).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Scope {
+    /// Servers this endpoint may list and call; `None` means all.
+    pub servers: Option<std::collections::BTreeSet<String>>,
+    /// Account per account-scoped server (M2-03).
+    pub accounts: std::collections::BTreeMap<String, String>,
+}
+
+impl Scope {
+    /// Whether `server` is visible here.
+    pub fn allows(&self, server: &str) -> bool {
+        self.servers.as_ref().is_none_or(|s| s.contains(server))
+    }
+}
+
 /// Aggregated, prefixed tool list across all servers (from their manifests).
 pub async fn list_all_tools(manager: &BackendManager) -> Vec<JsonObject> {
+    list_tools_in(manager, &Scope::default()).await
+}
+
+/// Aggregated tool list of the servers `scope` allows.
+pub async fn list_tools_in(manager: &BackendManager, scope: &Scope) -> Vec<JsonObject> {
     let mut per = Vec::new();
-    for name in manager.names() {
+    for name in manager.names().into_iter().filter(|n| scope.allows(n)) {
         let prefix = manager.prefix(&name).unwrap_or_else(|| name.clone());
         let tools = manager.tools(&name).await;
         per.push((prefix, tools));
@@ -103,8 +124,20 @@ pub async fn list_all_tools(manager: &BackendManager) -> Vec<JsonObject> {
 
 /// Map a public name back to `(server, backend tool name)`.
 pub async fn resolve(manager: &BackendManager, public: &str) -> Option<(String, String)> {
+    resolve_in(manager, public, &Scope::default()).await
+}
+
+/// Like [`resolve`], only among the servers `scope` allows.
+pub async fn resolve_in(
+    manager: &BackendManager,
+    public: &str,
+    scope: &Scope,
+) -> Option<(String, String)> {
     let (prefix, part) = split_name(public)?;
     let server = manager.server_for_prefix(prefix)?;
+    if !scope.allows(&server) {
+        return None;
+    }
     for t in manager.tools(&server).await {
         if let Some(name) = t.get("name").and_then(Value::as_str)
             && public_name(prefix, name) == public
@@ -133,13 +166,30 @@ pub async fn call_public_as(
     arguments: Option<JsonObject>,
     accounts: &std::collections::BTreeMap<String, String>,
 ) -> Result<JsonObject, ProtoError> {
-    let (server, tool) = resolve(manager, public)
-        .await
-        .ok_or_else(|| ProtoError::Rpc {
-            code: mcpgw_proto::backend::INVALID_PARAMS,
-            message: format!("tool not found: {public}"),
-            data: None,
-        })?;
+    let scope = Scope {
+        servers: None,
+        accounts: accounts.clone(),
+    };
+    call_in(manager, public, arguments, &scope).await
+}
+
+/// Route a call by public name within `scope`: servers outside it are
+/// unknown, and account-scoped servers use its accounts.
+pub async fn call_in(
+    manager: &BackendManager,
+    public: &str,
+    arguments: Option<JsonObject>,
+    scope: &Scope,
+) -> Result<JsonObject, ProtoError> {
+    let accounts = &scope.accounts;
+    let (server, tool) =
+        resolve_in(manager, public, scope)
+            .await
+            .ok_or_else(|| ProtoError::Rpc {
+                code: mcpgw_proto::backend::INVALID_PARAMS,
+                message: format!("tool not found: {public}"),
+                data: None,
+            })?;
     let account = accounts.get(&server).map(String::as_str);
     manager
         .call_tool_as(&server, account, &tool, arguments)

@@ -232,6 +232,38 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
             });
         }
     }
+    let mut profiles = HashSet::new();
+    for pr in &cfg.profiles {
+        let issue = |message: String, hint: &str| Issue {
+            server: None,
+            field: "profile",
+            message,
+            hint: Some(hint.into()),
+        };
+        if validate_server_name(&pr.name).is_err() {
+            return Err(issue(
+                format!("profile name {:?} is invalid", pr.name),
+                "use letters, digits, '-' or '_' (it becomes the URL /mcp/p/<name>)",
+            ));
+        }
+        if !profiles.insert(pr.name.as_str()) {
+            return Err(issue(
+                format!("duplicate profile `{}`", pr.name),
+                "profile names must be unique",
+            ));
+        }
+        for (server, account) in &pr.accounts {
+            if validate_server_name(account).is_err() {
+                return Err(issue(
+                    format!(
+                        "profile `{}`: account {account:?} for `{server}` is invalid",
+                        pr.name
+                    ),
+                    "use letters, digits, '-' or '_'",
+                ));
+            }
+        }
+    }
     let mut apps = HashSet::new();
     for o in &cfg.oauth {
         let issue = |message: String, hint: &str| Issue {

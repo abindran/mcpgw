@@ -38,3 +38,12 @@ name = "docs"
 transport = "http"
 url = "https://example.com/mcp"
 enabled = false
+
+# A profile is its own endpoint, /mcp/p/<name>, with a subset of servers.
+# Point a client at it with `mcpgw client install cursor --profile frontend`.
+[[profile]]
+name = "frontend"
+servers = ["fs", "github"]
+mode = "direct"            # meta (default), direct or hybrid
+# pinned_tools = ["fs__read_file"]   # listed directly in hybrid mode
+# accounts = { github = "work" }     # for servers whose secrets use {account}

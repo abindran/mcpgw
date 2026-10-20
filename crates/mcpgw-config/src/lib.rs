@@ -32,6 +32,9 @@ pub struct Config {
     /// OAuth apps for `mcpgw auth connect`.
     #[serde(default, rename = "oauth", skip_serializing_if = "Vec::is_empty")]
     pub oauth: Vec<mcpgw_core::OAuthProvider>,
+    /// Profiles: named endpoints at `/mcp/p/<name>` (M2-07).
+    #[serde(default, rename = "profile", skip_serializing_if = "Vec::is_empty")]
+    pub profiles: Vec<mcpgw_core::Profile>,
 }
 
 /// JSON Schema of the config file.

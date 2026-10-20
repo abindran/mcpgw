@@ -17,10 +17,14 @@ fn target(client: Client, path: Option<PathBuf>) -> AnyResult<PathBuf> {
         .ok_or_else(|| format!("cannot find {}'s config; pass --path", client.name()).into())
 }
 
-fn entry(client: Client, explicit_config: Option<&Path>) -> AnyResult<serde_json::Value> {
+fn entry(
+    client: Client,
+    explicit_config: Option<&Path>,
+    profile: Option<&str>,
+) -> AnyResult<serde_json::Value> {
     let exe = std::env::current_exe()?;
     let config = explicit_config.map(std::fs::canonicalize).transpose()?;
-    Ok(client.gateway_entry(&exe.to_string_lossy(), config.as_deref()))
+    Ok(client.gateway_entry(&exe.to_string_lossy(), config.as_deref(), profile))
 }
 
 fn write(path: &Path, value: &serde_json::Value) -> AnyResult<Option<PathBuf>> {
@@ -50,10 +54,11 @@ pub fn install(
     path: Option<PathBuf>,
     explicit_config: Option<&Path>,
     dry_run: bool,
+    profile: Option<&str>,
 ) -> AnyResult<()> {
     let path = target(client, path)?;
     let mut cfg = clients::read(&path)?;
-    clients::install_gateway(client, &mut cfg, entry(client, explicit_config)?);
+    clients::install_gateway(client, &mut cfg, entry(client, explicit_config, profile)?);
     if dry_run {
         println!("{}", serde_json::to_string_pretty(&cfg)?);
         return Ok(());
@@ -146,7 +151,7 @@ pub fn import(
             c.add(spec, None)?;
         }
     }
-    clients::replace_with_gateway(client, &mut cfg, entry(client, explicit_config)?);
+    clients::replace_with_gateway(client, &mut cfg, entry(client, explicit_config, None)?);
     let backup = write(&path, &cfg)?;
     println!(
         "imported {} server(s) from {}; it now has only the mcpgw entry",

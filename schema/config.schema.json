@@ -200,6 +200,79 @@
       ],
       "type": "object"
     },
+    "Policy": {
+      "additionalProperties": false,
+      "description": "Tool policy: glob lists matched against public tool names\n(`<server>__<tool>`). `*` matches any run of characters, `?` one.\n\nPrecedence: `deny` beats `approve`, which beats `allow`. When `allow` is\nempty every tool not denied is allowed.",
+      "properties": {
+        "allow": {
+          "description": "Tools that may be called. Empty means all.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "approve": {
+          "description": "Tools that need a human approval per call.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "description": "Tools that are never called.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "Profile": {
+      "additionalProperties": false,
+      "description": "A named profile (`[[profile]]` in the config file).",
+      "properties": {
+        "accounts": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Account bindings: server name → account label (`github` → `work`).",
+          "type": "object"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode",
+          "default": "meta",
+          "description": "Tool presentation. Default: `meta`."
+        },
+        "name": {
+          "description": "Profile name (URL segment).",
+          "type": "string"
+        },
+        "pinned_tools": {
+          "description": "Public tool names always listed directly in `hybrid` mode.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "policy": {
+          "$ref": "#/$defs/Policy",
+          "default": {},
+          "description": "Tool policy."
+        },
+        "servers": {
+          "description": "Servers in this profile. Empty means every enabled server.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
     "ServerSpec": {
       "description": "One backend tool server (`[[server]]` in the config file).",
       "oneOf": [
@@ -342,6 +415,13 @@
       "description": "OAuth apps for `mcpgw auth connect`.",
       "items": {
         "$ref": "#/$defs/OAuthProvider"
+      },
+      "type": "array"
+    },
+    "profile": {
+      "description": "Profiles: named endpoints at `/mcp/p/<name>` (M2-07).",
+      "items": {
+        "$ref": "#/$defs/Profile"
       },
       "type": "array"
     },

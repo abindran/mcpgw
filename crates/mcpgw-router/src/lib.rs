@@ -11,7 +11,8 @@ pub mod meta;
 use std::sync::Arc;
 
 pub use aggregate::{
-    MAX_TOOL_NAME, call_public, call_public_as, list_all_tools, public_name, resolve, split_name,
+    MAX_TOOL_NAME, Scope, call_in, call_public, call_public_as, list_all_tools, list_tools_in,
+    public_name, resolve, resolve_in, split_name,
 };
 use mcpgw_core::Mode;
 use mcpgw_proto::front::{self, BoxFuture, FrontInfo, ToolProvider};
@@ -35,6 +36,8 @@ pub struct GatewayOptions {
     /// Account per server (`github` → `work`) for servers whose secrets
     /// use `{account}`; others use `default`.
     pub accounts: std::collections::BTreeMap<String, String>,
+    /// The servers this endpoint exposes (a profile's set); `None` = all.
+    pub servers: Option<std::collections::BTreeSet<String>>,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -60,6 +63,13 @@ impl GatewayProvider {
         Self { manager, opts }
     }
 
+    fn scope(&self) -> Scope {
+        Scope {
+            servers: self.opts.servers.clone(),
+            accounts: self.opts.accounts.clone(),
+        }
+    }
+
     /// Start the login a failed call needs and answer with its link.
     async fn login_answer(
         &self,
@@ -68,7 +78,7 @@ impl GatewayProvider {
         ctx: &front::CallContext,
         link: &login::LoginLink,
     ) -> Result<JsonObject, ProtoError> {
-        let Some((server, _)) = resolve(&self.manager, public).await else {
+        let Some((server, _)) = resolve_in(&self.manager, public, &self.scope()).await else {
             return Err(e);
         };
         let account = self.opts.accounts.get(&server).map(String::as_str);
@@ -87,15 +97,20 @@ impl GatewayProvider {
 
     async fn listing(&self) -> Vec<JsonObject> {
         match self.opts.mode {
-            Mode::Direct => list_all_tools(&self.manager).await,
+            Mode::Direct => list_tools_in(&self.manager, &self.scope()).await,
             Mode::Meta => meta::meta_tools(),
             Mode::Hybrid => {
                 let mut out = meta::meta_tools();
-                out.extend(list_all_tools(&self.manager).await.into_iter().filter(|t| {
-                    t["name"]
-                        .as_str()
-                        .is_some_and(|n| self.opts.pinned.iter().any(|p| p == n))
-                }));
+                out.extend(
+                    list_tools_in(&self.manager, &self.scope())
+                        .await
+                        .into_iter()
+                        .filter(|t| {
+                            t["name"]
+                                .as_str()
+                                .is_some_and(|n| self.opts.pinned.iter().any(|p| p == n))
+                        }),
+                );
                 out
             }
         }
@@ -134,9 +149,9 @@ impl ToolProvider for GatewayProvider {
             };
             mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
                 let res = if meta {
-                    meta::call(&self.manager, &name, arguments, &self.opts.accounts).await
+                    meta::call(&self.manager, &name, arguments, &self.scope()).await
                 } else {
-                    call_public_as(&self.manager, &name, arguments, &self.opts.accounts).await
+                    call_in(&self.manager, &name, arguments, &self.scope()).await
                 };
                 match (res, &self.opts.login) {
                     (Err(e), Some(link)) if login::needs_login(&e) => {

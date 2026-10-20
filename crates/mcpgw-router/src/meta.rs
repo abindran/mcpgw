@@ -13,7 +13,7 @@ use serde_json::{Map, Value, json};
 
 use mcpgw_runtime::{BackendManager, JsonObject, ProtoError};
 
-use crate::aggregate::{call_public_as, list_all_tools};
+use crate::aggregate::{Scope, call_in, list_tools_in};
 
 /// `search_tools`.
 pub const SEARCH: &str = "search_tools";
@@ -163,7 +163,7 @@ pub async fn call(
     manager: &BackendManager,
     name: &str,
     args: Option<JsonObject>,
-    accounts: &std::collections::BTreeMap<String, String>,
+    scope: &Scope,
 ) -> Result<JsonObject, ProtoError> {
     let args = args.unwrap_or_default();
     let str_arg = |k: &str| {
@@ -180,7 +180,7 @@ pub async fn call(
                 .map(|n| n as usize)
                 .unwrap_or(DEFAULT_LIMIT);
             let query = str_arg("query");
-            let hits = search(&list_all_tools(manager).await, &query, limit);
+            let hits = search(&list_tools_in(manager, scope).await, &query, limit);
             let summary: Vec<Value> = hits
                 .iter()
                 .map(|t| json!({"name": t["name"], "description": t.get("description").cloned().unwrap_or(Value::Null)}))
@@ -205,7 +205,7 @@ pub async fn call(
         }
         DESCRIBE => {
             let wanted = str_arg("name");
-            match list_all_tools(manager)
+            match list_tools_in(manager, scope)
                 .await
                 .into_iter()
                 .find(|t| t["name"] == wanted.as_str())
@@ -231,7 +231,7 @@ pub async fn call(
                 ));
             }
             let inner = args.get("arguments").and_then(Value::as_object).cloned();
-            match call_public_as(manager, &target, inner, accounts).await {
+            match call_in(manager, &target, inner, scope).await {
                 Ok(r) => Ok(r),
                 // the gateway turns these into a sign-in link
                 Err(e) if crate::login::needs_login(&e) => Err(e),

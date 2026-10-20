@@ -102,13 +102,17 @@ impl Client {
     }
 
     /// The gateway entry for this client: `mcpgw connect` over stdio.
-    pub fn gateway_entry(self, exe: &str, config: Option<&Path>) -> Value {
+    pub fn gateway_entry(self, exe: &str, config: Option<&Path>, profile: Option<&str>) -> Value {
         let mut args = Vec::new();
         if let Some(c) = config {
             args.push(Value::String("--config".into()));
             args.push(Value::String(c.to_string_lossy().into_owned()));
         }
         args.push(Value::String("connect".into()));
+        if let Some(p) = profile {
+            args.push(Value::String("--profile".into()));
+            args.push(Value::String(p.into()));
+        }
         match self {
             Self::VsCode => json!({"type": "stdio", "command": exe, "args": args}),
             _ => json!({"command": exe, "args": args}),
@@ -426,7 +430,7 @@ mod tests {
     #[test]
     fn gateway_entry_install_and_replace() {
         let mut cfg = json!({"theme": "dark", "mcpServers": {"fs": {"command": "x"}}});
-        let entry = Client::Cursor.gateway_entry("/bin/mcpgw", None);
+        let entry = Client::Cursor.gateway_entry("/bin/mcpgw", None, None);
         assert_eq!(entry, json!({"command": "/bin/mcpgw", "args": ["connect"]}));
         install_gateway(Client::Cursor, &mut cfg, entry.clone());
         assert_eq!(
@@ -437,10 +441,11 @@ mod tests {
         replace_with_gateway(Client::Cursor, &mut cfg, entry);
         assert_eq!(cfg["theme"], "dark");
         assert_eq!(cfg["mcpServers"].as_object().unwrap().len(), 1);
-        let vs = Client::VsCode.gateway_entry("mcpgw", Some(Path::new("/c.toml")));
+        let vs =
+            Client::VsCode.gateway_entry("mcpgw", Some(Path::new("/c.toml")), Some("frontend"));
         assert_eq!(
             vs,
-            json!({"type": "stdio", "command": "mcpgw", "args": ["--config", "/c.toml", "connect"]})
+            json!({"type": "stdio", "command": "mcpgw", "args": ["--config", "/c.toml", "connect", "--profile", "frontend"]})
         );
         assert_eq!("VS-Code".parse::<Client>(), Ok(Client::VsCode));
     }
