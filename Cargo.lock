@@ -1784,6 +1784,7 @@ dependencies = [
 name = "mcpgw-core"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "rustls",
  "schemars",
  "serde",

@@ -39,6 +39,8 @@ pub struct Install {
     pub disabled: bool,
     /// Don't read its tools now.
     pub no_introspect: bool,
+    /// Add even with high-risk scan findings.
+    pub accept_risk: bool,
 }
 
 fn registry(config: &Config) -> AnyResult<Registry> {
@@ -170,8 +172,24 @@ pub fn add(config: &Config, path: &Path, i: Install) -> AnyResult<()> {
     }
     let label = spec.name.clone();
     let yes = i.yes;
-    let review = move |m: Option<&ToolManifest>| -> AnyResult<bool> {
+    let accept_risk = i.accept_risk;
+    let review = move |m: Option<&ToolManifest>,
+                       findings: &[mcpgw_core::scan::Finding]|
+          -> AnyResult<bool> {
         show_tools(&label, m);
+        let high = findings
+            .iter()
+            .filter(|f| f.severity == mcpgw_core::scan::Severity::High)
+            .count();
+        if high > 0 && !accept_risk {
+            if yes {
+                eprintln!(
+                    "mcpgw: not adding {label} with -y: {high} high-risk finding(s) in its tools (above); review them, then add with --accept-risk"
+                );
+                return Ok(false);
+            }
+            return confirm(&format!("add {label} despite {high} high-risk finding(s)?"));
+        }
         Ok(yes || confirm(&format!("add {label}?"))?)
     };
     // first runs download the package or image: allow for that
@@ -183,6 +201,7 @@ pub fn add(config: &Config, path: &Path, i: Install) -> AnyResult<()> {
             introspect: !i.no_introspect,
             install: true,
             timeout: Duration::from_secs(300),
+            accept_risk: i.accept_risk,
         },
         Some(&review),
     )?;

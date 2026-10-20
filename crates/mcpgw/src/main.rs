@@ -64,6 +64,12 @@ enum Cmd {
     Status,
     /// CPU, memory and process counts of running container servers.
     Stats,
+    /// Check servers' tools for poisoning signs (hidden characters,
+    /// injection phrases, instructions about other tools).
+    Scan {
+        /// Only this server (read live if it has no pinned tools).
+        server: Option<String>,
+    },
     /// Relay stdin/stdout to the daemon, starting it if needed. Use this as
     /// the command in clients that only launch stdio servers.
     Connect {
@@ -246,6 +252,10 @@ struct AddArgs {
     /// starts through npx/uvx each time.
     #[arg(long)]
     no_cache: bool,
+    /// Add it even if its tool descriptions look poisoned (hidden
+    /// characters, injection phrases); see `mcpgw scan`.
+    #[arg(long)]
+    accept_risk: bool,
     /// Registry installs: the server name to use (default: the entry's
     /// last path segment).
     #[arg(long = "as", value_name = "NAME", conflicts_with_all = ["command", "url", "image"])]
@@ -438,6 +448,7 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Down => servers::down(&config),
         Cmd::Status => servers::status(&config),
         Cmd::Stats => servers::stats(&config),
+        Cmd::Scan { server } => servers::scan(&config, server.as_deref()),
         Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
         Cmd::Add(a) if a.command.is_none() && a.url.is_none() && a.image.is_none() => {
             if !a.name.contains('/') {
@@ -467,6 +478,7 @@ fn run(cli: Cli) -> AnyResult<()> {
                     warm: a.warm,
                     disabled: a.disabled,
                     no_introspect: a.no_introspect,
+                    accept_risk: a.accept_risk,
                 },
             )
         }
@@ -527,6 +539,7 @@ fn run(cli: Cli) -> AnyResult<()> {
                 servers::AddOpts {
                     introspect: !a.no_introspect,
                     install: !a.no_cache,
+                    accept_risk: a.accept_risk,
                     ..Default::default()
                 },
             )

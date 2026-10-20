@@ -73,6 +73,18 @@ impl Catalog {
             .unwrap_or_default()
     }
 
+    /// Tool names of every server but `server` (for the M3-10 scanner's
+    /// shadowing check).
+    pub fn tool_names_except(&self, server: &str) -> Vec<String> {
+        self.manifests
+            .read()
+            .expect("catalog")
+            .iter()
+            .filter(|(s, _)| s.as_str() != server)
+            .flat_map(|(_, m)| m.tools.iter().map(|t| t.name.clone()))
+            .collect()
+    }
+
     /// Store a manifest (replacing any previous one) and persist it.
     pub fn record(&self, m: ToolManifest) {
         if let Some(p) = &self.persist {

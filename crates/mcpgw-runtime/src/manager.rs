@@ -1525,6 +1525,35 @@ impl Actor {
                 let tool_count = tools.len();
                 if !self.shared.catalog.contains(&self.shared.catalog_key) {
                     let m = manifest_from(&self.shared.catalog_key, pv.clone(), &tools);
+                    // First sight of tools nobody reviewed (no pin yet): if
+                    // they look poisoned, hold them like a drift (M3-10).
+                    let others = self
+                        .shared
+                        .catalog
+                        .tool_names_except(&self.shared.catalog_key);
+                    let findings = mcpgw_core::scan::scan_tools(&m.tools, &others);
+                    if mcpgw_core::scan::has_high(&findings) {
+                        let high: Vec<&mcpgw_core::scan::Finding> = findings
+                            .iter()
+                            .filter(|f| f.severity == mcpgw_core::scan::Severity::High)
+                            .collect();
+                        let why = format!(
+                            "tool scan: {} high-risk finding(s), e.g. {}: {}; review with `mcpgw scan {}`, accept with `mcpgw pin {}`",
+                            high.len(),
+                            high[0].tool,
+                            high[0].message,
+                            self.shared.catalog_key,
+                            self.shared.catalog_key
+                        );
+                        tracing::warn!(server = %self.shared.name, %why, "tools look poisoned; quarantined");
+                        *self.shared.pending.lock().expect("pending") = Some(m);
+                        self.shared.update(|s| s.last_error = Some(why));
+                        self.apply(Event::Drift);
+                        if let Some(e) = self.refusal() {
+                            self.fail_waiters(&e);
+                        }
+                        return;
+                    }
                     tracing::info!(server = %self.shared.name, pin = %m.sha256, tools = m.tools.len(), "captured manifest");
                     self.shared.catalog.record(m);
                 }

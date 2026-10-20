@@ -4,7 +4,10 @@
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
 use mcpgw_config::Config;
-use mcpgw_core::{ServerSpec, ToolManifest, Transport};
+use mcpgw_core::{
+    ServerSpec, ToolManifest, Transport,
+    scan::{Finding, Severity, has_high, scan_tools},
+};
 use mcpgw_runtime::{BackendManager, ManagerOptions, State};
 use mcpgw_store::{SqliteStore, Store, effective_servers};
 
@@ -27,6 +30,8 @@ pub struct AddOpts {
     pub install: bool,
     /// How long reading the tools may take.
     pub timeout: Duration,
+    /// Add even with high-risk scan findings (M3-10).
+    pub accept_risk: bool,
 }
 
 impl Default for AddOpts {
@@ -35,6 +40,7 @@ impl Default for AddOpts {
             introspect: true,
             install: true,
             timeout: Duration::from_secs(60),
+            accept_risk: false,
         }
     }
 }
@@ -79,7 +85,79 @@ pub fn install_package(config: &Config, spec: &ServerSpec, force: bool) -> AnyRe
 
 /// Shown the tools read from a new server (`None`: they couldn't be read
 /// now); returns whether to add it.
-pub type Review<'a> = &'a dyn Fn(Option<&ToolManifest>) -> AnyResult<bool>;
+pub type Review<'a> = &'a dyn Fn(Option<&ToolManifest>, &[Finding]) -> AnyResult<bool>;
+
+/// Tool names of every server but `name` (stored pins).
+fn other_tool_names(s: &SqliteStore, name: &str) -> Vec<String> {
+    s.manifests()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|m| m.server != name)
+        .flat_map(|m| m.tools.into_iter().map(|t| t.name))
+        .collect()
+}
+
+/// Print scan findings, high first.
+pub fn print_findings(server: &str, findings: &[Finding]) {
+    let mut f: Vec<&Finding> = findings.iter().collect();
+    f.sort_by_key(|x| std::cmp::Reverse(x.severity));
+    for x in f {
+        let level = match x.severity {
+            Severity::High => "HIGH",
+            Severity::Warning => "warning",
+        };
+        eprintln!(
+            "  {level}: {server}/{} ({}): {}",
+            x.tool, x.location, x.message
+        );
+    }
+}
+
+/// `mcpgw scan [server]`: check pinned tools (or, without a pin, the live
+/// ones) for poisoning signs. Fails if anything is high risk.
+pub fn scan(config: &Config, only: Option<&str>) -> AnyResult<()> {
+    let s = store(config)?;
+    let servers = effective_servers(&config.servers, &s)?;
+    if let Some(n) = only
+        && !servers.iter().any(|x| x.name == n)
+    {
+        return Err(format!("no such server: {n}").into());
+    }
+    let mut high = 0;
+    for spec in servers.iter().filter(|x| only.is_none_or(|n| n == x.name)) {
+        let tools = match s.manifest(&spec.name)? {
+            Some(m) => m.tools,
+            None if only.is_some() => {
+                eprintln!("{} has no pinned tools; reading them now", spec.name);
+                serve::runtime()?
+                    .block_on(mcpgw_runtime::introspect_with_secrets(
+                        spec,
+                        Duration::from_secs(60),
+                        Some(serve::resolver(config)),
+                    ))?
+                    .tools
+            }
+            None => {
+                println!("{}\tnot scanned (no pinned tools yet)", spec.name);
+                continue;
+            }
+        };
+        let f = scan_tools(&tools, &other_tool_names(&s, &spec.name));
+        let h = f.iter().filter(|x| x.severity == Severity::High).count();
+        high += h;
+        println!(
+            "{}\t{} tools\t{h} high, {} warnings",
+            spec.name,
+            tools.len(),
+            f.len() - h
+        );
+        print_findings(&spec.name, &f);
+    }
+    if high > 0 {
+        return Err(format!("{high} high-risk finding(s)").into());
+    }
+    Ok(())
+}
 
 /// [`add`], reading the tools within `timeout` and asking `review` before
 /// anything is stored. Returns whether the server was added.
@@ -94,6 +172,7 @@ pub fn add_reviewed(
         introspect,
         install,
         timeout,
+        accept_risk,
     } = opts;
     let name = spec.name.clone();
     if in_config(config, &name) {
@@ -136,11 +215,37 @@ pub fn add_reviewed(
             ),
         }
     }
-    if let Some(review) = review
-        && !review(manifest.as_ref())?
-    {
-        println!("not added: {name}");
-        return Ok(false);
+    // M3-10: poisoning signs are shown before anything is approved
+    let findings = manifest
+        .as_ref()
+        .map(|m| scan_tools(&m.tools, &other_tool_names(&s, &name)))
+        .unwrap_or_default();
+    if !findings.is_empty() {
+        let h = findings
+            .iter()
+            .filter(|x| x.severity == Severity::High)
+            .count();
+        eprintln!(
+            "tool scan of {name}: {h} high-risk, {} warnings",
+            findings.len() - h
+        );
+        print_findings(&name, &findings);
+    }
+    let risky = has_high(&findings);
+    match review {
+        Some(review) => {
+            if !review(manifest.as_ref(), &findings)? {
+                println!("not added: {name}");
+                return Ok(false);
+            }
+        }
+        None if risky && !accept_risk => {
+            return Err(format!(
+                "not adding {name}: its tools look poisoned (high-risk findings above); if you trust it, add it with --accept-risk"
+            )
+            .into());
+        }
+        None => {}
     }
     s.upsert_server(&spec)?;
     // A changed spec may expose different tools: drop the old pin.
@@ -159,6 +264,10 @@ pub fn add_reviewed(
         serde_json::json!({
             "transport": spec.transport.kind(),
             "pin": manifest.as_ref().map(|m| m.sha256.clone()),
+            "scan": {
+                "high": findings.iter().filter(|x| x.severity == Severity::High).count(),
+                "warnings": findings.iter().filter(|x| x.severity == Severity::Warning).count(),
+            },
             "registry": spec.registry,
         }),
     );

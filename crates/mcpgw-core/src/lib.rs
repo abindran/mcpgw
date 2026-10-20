@@ -9,6 +9,7 @@ pub mod manifest;
 pub mod oauth;
 pub mod profile;
 pub mod sandbox;
+pub mod scan;
 pub mod secret;
 pub mod server;
 pub mod tls;
