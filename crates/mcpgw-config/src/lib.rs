@@ -78,6 +78,10 @@ pub struct GatewayConfig {
     /// Profiles (M2-07) set their own. Default: `default`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub accounts: std::collections::BTreeMap<String, String>,
+    /// Tool policy for the default endpoint (profiles have their own):
+    /// `policy = { deny = ["*__delete_*"], approve = ["gh__merge_*"] }`.
+    #[serde(default, skip_serializing_if = "mcpgw_core::Policy::is_empty")]
+    pub policy: mcpgw_core::Policy,
     /// Public tool names always listed in `hybrid` mode.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_tools: Vec<String>,

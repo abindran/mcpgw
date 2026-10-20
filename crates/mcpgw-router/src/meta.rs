@@ -205,6 +205,9 @@ pub async fn call(
         }
         DESCRIBE => {
             let wanted = str_arg("name");
+            if let Some(refusal) = scope.denial(&wanted) {
+                return Ok(refusal);
+            }
             match list_tools_in(manager, scope)
                 .await
                 .into_iter()

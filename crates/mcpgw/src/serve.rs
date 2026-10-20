@@ -40,6 +40,8 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         accounts: config.gateway.accounts.clone(),
         login: None,
         servers: None,
+        policy: config.gateway.policy.clone(),
+        label: "the default endpoint".into(),
     }
 }
 
@@ -66,6 +68,8 @@ fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::Ga
         accounts,
         servers: (!p.servers.is_empty()).then(|| p.servers.iter().cloned().collect()),
         login: None,
+        policy: p.policy.clone(),
+        label: format!("profile {}", p.name),
     }
 }
 

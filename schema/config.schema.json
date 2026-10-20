@@ -93,6 +93,10 @@
           },
           "type": "array"
         },
+        "policy": {
+          "$ref": "#/$defs/Policy",
+          "description": "Tool policy for the default endpoint (profiles have their own):\n`policy = { deny = [\"*__delete_*\"], approve = [\"gh__merge_*\"] }`."
+        },
         "store_path": {
           "default": null,
           "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",

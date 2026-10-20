@@ -12,6 +12,10 @@ struct Env {
 
 impl Env {
     fn new(tag: &str) -> Self {
+        Self::with(tag, "")
+    }
+
+    fn with(tag: &str, extra: &str) -> Self {
         let dir = std::env::temp_dir().join(format!("mcpgw-profiles-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -28,6 +32,7 @@ impl Env {
         }
         cfg += "[[profile]]\nname = \"frontend\"\nservers = [\"fs\", \"gh\", \"figma\"]\nmode = \"direct\"\n\n";
         cfg += "[[profile]]\nname = \"backend\"\nservers = [\"db\"]\nmode = \"hybrid\"\npinned_tools = [\"db__add\"]\n";
+        cfg += extra;
         std::fs::write(dir.join("config.toml"), cfg).unwrap();
         Self { dir }
     }
@@ -205,4 +210,104 @@ fn invalid_profiles_are_rejected() {
         "{err}"
     );
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+fn text(r: &serde_json::Value) -> String {
+    r["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// M2-08: a denied tool is hidden and, if called anyway, answers "disabled
+/// by policy" instead of failing silently.
+#[tokio::test(flavor = "multi_thread")]
+async fn policy_denies_with_a_clear_message() {
+    let e = Env::with(
+        "policy",
+        "\n[[profile]]\nname = \"safe\"\nservers = [\"gh\", \"fs\"]\nmode = \"direct\"\n\
+         policy = { deny = [\"gh__crash\", \"*__spawn\"] }\n\
+         \n[[profile]]\nname = \"narrow\"\nservers = [\"gh\"]\nmode = \"meta\"\n\
+         policy = { allow = [\"gh__add\", \"gh__echo\"], deny = [\"gh__echo\"] }\n",
+    );
+    e.ok(&["up"]);
+    let token = e.ok(&["token"]);
+    let token = token.trim();
+
+    let safe = McpClient::http(&format!("{}/p/safe", e.url()), Some(token))
+        .await
+        .unwrap();
+    let names = safe.tool_names().await.unwrap();
+    assert!(names.contains(&"gh__add".to_string()), "{names:?}");
+    for hidden in ["gh__crash", "gh__spawn", "fs__spawn"] {
+        assert!(
+            !names.contains(&hidden.to_string()),
+            "{hidden} listed: {names:?}"
+        );
+    }
+    let r = safe.call("gh__crash", json!({})).await.unwrap();
+    assert_eq!(r["isError"], true);
+    assert_eq!(
+        text(&r),
+        "Tool gh__crash is disabled by policy (profile safe denies `gh__crash`)."
+    );
+    let r = safe.call("fs__spawn", json!({})).await.unwrap();
+    assert_eq!(
+        text(&r),
+        "Tool fs__spawn is disabled by policy (profile safe denies `*__spawn`)."
+    );
+    // the denied call never reached the server: it is still up
+    assert_eq!(
+        safe.call_text("gh__add", json!({"a": 2, "b": 2}))
+            .await
+            .unwrap(),
+        "4"
+    );
+
+    // meta mode with an allow list: search, describe and call_tool all agree
+    let narrow = McpClient::http(&format!("{}/p/narrow", e.url()), Some(token))
+        .await
+        .unwrap();
+    let r = narrow
+        .call("search_tools", json!({"query": "gh"}))
+        .await
+        .unwrap();
+    let hits: Vec<&str> = r["structuredContent"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(hits, ["gh__add"]);
+    let r = narrow
+        .call("describe_tool", json!({"name": "gh__echo"}))
+        .await
+        .unwrap();
+    assert_eq!(
+        text(&r),
+        "Tool gh__echo is disabled by policy (profile narrow denies `gh__echo`)."
+    );
+    let r = narrow
+        .call(
+            "call_tool",
+            json!({"name": "gh__env", "arguments": {"name": "HOME"}}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        text(&r),
+        "Tool gh__env is disabled by policy (profile narrow only allows gh__add, gh__echo)."
+    );
+
+    // the default endpoint has no policy
+    let all = McpClient::http(&e.url(), Some(token)).await.unwrap();
+    assert!(
+        all.tool_names()
+            .await
+            .unwrap()
+            .contains(&"gh__crash".to_string())
+    );
+    for c in [safe, narrow, all] {
+        c.close().await;
+    }
 }

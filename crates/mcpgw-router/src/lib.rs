@@ -38,6 +38,10 @@ pub struct GatewayOptions {
     pub accounts: std::collections::BTreeMap<String, String>,
     /// The servers this endpoint exposes (a profile's set); `None` = all.
     pub servers: Option<std::collections::BTreeSet<String>>,
+    /// Tool policy for this endpoint (M2-08).
+    pub policy: mcpgw_core::Policy,
+    /// Name of this endpoint in messages (`profile frontend`).
+    pub label: String,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -67,6 +71,8 @@ impl GatewayProvider {
         Scope {
             servers: self.opts.servers.clone(),
             accounts: self.opts.accounts.clone(),
+            policy: self.opts.policy.clone(),
+            label: self.opts.label.clone(),
         }
     }
 

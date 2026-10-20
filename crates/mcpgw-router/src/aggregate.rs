@@ -97,12 +97,40 @@ pub struct Scope {
     pub servers: Option<std::collections::BTreeSet<String>>,
     /// Account per account-scoped server (M2-03).
     pub accounts: std::collections::BTreeMap<String, String>,
+    /// Tool policy (M2-08), matched against public tool names.
+    pub policy: mcpgw_core::Policy,
+    /// Where this scope applies, for messages: `profile frontend`.
+    pub label: String,
 }
 
 impl Scope {
     /// Whether `server` is visible here.
     pub fn allows(&self, server: &str) -> bool {
         self.servers.as_ref().is_none_or(|s| s.contains(server))
+    }
+
+    /// The tool error for a call the policy refuses, if it does.
+    pub fn denial(&self, public: &str) -> Option<JsonObject> {
+        let mcpgw_core::Decision::Deny { pattern } = self.policy.decide(public) else {
+            return None;
+        };
+        let at = if self.label.is_empty() {
+            "this endpoint"
+        } else {
+            self.label.as_str()
+        };
+        let why = match pattern {
+            Some(p) => format!("{at} denies `{p}`"),
+            None => format!("{at} only allows {}", self.policy.allow.join(", ")),
+        };
+        tracing::warn!(tool = public, scope = at, "call refused by policy");
+        let text = format!("Tool {public} is disabled by policy ({why}).");
+        Some(
+            serde_json::json!({"content": [{"type": "text", "text": text}], "isError": true})
+                .as_object()
+                .cloned()
+                .expect("object"),
+        )
     }
 }
 
@@ -119,7 +147,11 @@ pub async fn list_tools_in(manager: &BackendManager, scope: &Scope) -> Vec<JsonO
         let tools = manager.tools(&name).await;
         per.push((prefix, tools));
     }
-    aggregate(per.iter().map(|(p, t)| (p.as_str(), t.clone())))
+    let mut out = aggregate(per.iter().map(|(p, t)| (p.as_str(), t.clone())));
+    if !scope.policy.is_empty() {
+        out.retain(|t| t["name"].as_str().is_some_and(|n| scope.policy.visible(n)));
+    }
+    out
 }
 
 /// Map a public name back to `(server, backend tool name)`.
@@ -167,8 +199,8 @@ pub async fn call_public_as(
     accounts: &std::collections::BTreeMap<String, String>,
 ) -> Result<JsonObject, ProtoError> {
     let scope = Scope {
-        servers: None,
         accounts: accounts.clone(),
+        ..Scope::default()
     };
     call_in(manager, public, arguments, &scope).await
 }
@@ -181,6 +213,9 @@ pub async fn call_in(
     arguments: Option<JsonObject>,
     scope: &Scope,
 ) -> Result<JsonObject, ProtoError> {
+    if let Some(refusal) = scope.denial(public) {
+        return Ok(refusal);
+    }
     let accounts = &scope.accounts;
     let (server, tool) =
         resolve_in(manager, public, scope)

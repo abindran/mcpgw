@@ -40,6 +40,77 @@ pub struct Policy {
     pub approve: Vec<String>,
 }
 
+/// What a policy says about one tool.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Decision {
+    /// The tool may be called.
+    Allow,
+    /// The tool may be called after a human approves it (M2-09).
+    Approve {
+        /// The `approve` pattern that matched.
+        pattern: String,
+    },
+    /// The tool is disabled.
+    Deny {
+        /// The `deny` pattern that matched, or `None` when it isn't in a
+        /// non-empty `allow` list.
+        pattern: Option<String>,
+    },
+}
+
+/// `*` matches any run of characters (including none), `?` exactly one.
+pub fn glob_match(pattern: &str, text: &str) -> bool {
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star, mut mark) = (None, 0);
+    while ti < t.len() {
+        if pi < p.len() && (p[pi] == '?' || p[pi] == t[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < p.len() && p[pi] == '*' {
+            star = Some(pi);
+            mark = ti;
+            pi += 1;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            mark += 1;
+            ti = mark;
+        } else {
+            return false;
+        }
+    }
+    p[pi..].iter().all(|c| *c == '*')
+}
+
+impl Policy {
+    /// Decide for a public tool name: deny beats approve, which beats allow;
+    /// an empty `allow` list allows everything not denied.
+    pub fn decide(&self, tool: &str) -> Decision {
+        let first = |list: &[String]| list.iter().find(|p| glob_match(p, tool)).cloned();
+        if let Some(p) = first(&self.deny) {
+            return Decision::Deny { pattern: Some(p) };
+        }
+        if let Some(p) = first(&self.approve) {
+            return Decision::Approve { pattern: p };
+        }
+        if self.allow.is_empty() || first(&self.allow).is_some() {
+            Decision::Allow
+        } else {
+            Decision::Deny { pattern: None }
+        }
+    }
+
+    /// Whether the tool may be listed (allowed, or allowed with approval).
+    pub fn visible(&self, tool: &str) -> bool {
+        !matches!(self.decide(tool), Decision::Deny { .. })
+    }
+
+    /// Whether the policy restricts anything.
+    pub fn is_empty(&self) -> bool {
+        self.allow.is_empty() && self.deny.is_empty() && self.approve.is_empty()
+    }
+}
+
 /// A named profile (`[[profile]]` in the config file).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -89,6 +160,56 @@ mod tests {
         assert_eq!(back, p);
         let back: Profile = toml::from_str(&toml::to_string(&p).unwrap()).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn globs() {
+        for (p, t, ok) in [
+            ("gh__*", "gh__delete_repo", true),
+            ("*__delete_*", "gh__delete_repo", true),
+            ("*", "", true),
+            ("gh__?ead", "gh__read", true),
+            ("gh__?ead", "gh__thread", false),
+            ("fs__read", "fs__read_file", false),
+            ("*file", "fs__read_file", true),
+            ("a*b*c", "axxbyyc", true),
+            ("a*b*c", "axxbyy", false),
+        ] {
+            assert_eq!(glob_match(p, t), ok, "{p} vs {t}");
+        }
+    }
+
+    #[test]
+    fn deny_beats_approve_beats_allow() {
+        let p = Policy {
+            allow: vec!["gh__*".into(), "fs__read_*".into()],
+            deny: vec!["gh__delete_*".into()],
+            approve: vec!["gh__merge_*".into(), "gh__delete_repo".into()],
+        };
+        assert_eq!(p.decide("gh__list_issues"), Decision::Allow);
+        assert_eq!(
+            p.decide("gh__delete_repo"),
+            Decision::Deny {
+                pattern: Some("gh__delete_*".into())
+            }
+        );
+        assert_eq!(
+            p.decide("gh__merge_pull_request"),
+            Decision::Approve {
+                pattern: "gh__merge_*".into()
+            }
+        );
+        assert_eq!(
+            p.decide("fs__write_file"),
+            Decision::Deny { pattern: None },
+            "not in allow"
+        );
+        assert!(Policy::default().visible("anything") && Policy::default().is_empty());
+        let only_deny = Policy {
+            deny: vec!["*__exec".into()],
+            ..Default::default()
+        };
+        assert_eq!(only_deny.decide("fs__read"), Decision::Allow);
     }
 
     #[test]
