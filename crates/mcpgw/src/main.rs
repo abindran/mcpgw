@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 use mcpgw_auth::Token;
 use mcpgw_config::Config;
 use mcpgw_core::{ServerSpec, Transport};
-use mcpgw_runtime::{BackendManager, BackendState, ManagerOptions};
+use mcpgw_runtime::{BackendManager, ManagerOptions, State};
 use mcpgw_store::{SqliteStore, Store, effective_servers};
 
 #[derive(Parser)]
@@ -284,13 +284,15 @@ fn list_servers(config: &Config, store: &SqliteStore, check: bool) -> AnyResult<
             let mut out = BTreeMap::new();
             for st in mgr.status().await {
                 let n = mgr.tools(&st.name).await.len();
+                let err = st.last_error.clone().unwrap_or_default();
                 let text = match st.state {
-                    BackendState::Running { protocol_version } => {
-                        format!("ok ({n} tools, {protocol_version})")
-                    }
-                    BackendState::Restarting { last_error, .. } => format!("error: {last_error}"),
-                    BackendState::Unsupported(why) => format!("skipped: {why}"),
-                    other => format!("{other:?}"),
+                    s if s.is_connected() => format!(
+                        "ok ({n} tools, {})",
+                        st.protocol_version.as_deref().unwrap_or("?")
+                    ),
+                    State::Disabled => format!("skipped: {err}"),
+                    State::Backoff { .. } | State::Failed => format!("error: {err}"),
+                    other => other.name().to_string(),
                 };
                 out.insert(st.name, text);
             }

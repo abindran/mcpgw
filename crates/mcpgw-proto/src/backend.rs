@@ -127,15 +127,15 @@ fn legacy_lifecycle() -> ClientLifecycleMode {
 /// is alive, so a group that is already gone just gives `ESRCH`. On Windows
 /// the Job Object does the same when its handle closes.
 struct TreeGuard {
+    pid: Option<u32>,
     #[cfg(unix)]
     pgid: Option<i32>,
 }
 
 impl TreeGuard {
     fn new(pid: Option<u32>) -> Self {
-        #[cfg(not(unix))]
-        let _ = pid;
         Self {
+            pid,
             #[cfg(unix)]
             pgid: pid.and_then(|p| i32::try_from(p).ok()),
         }
@@ -259,6 +259,11 @@ impl BackendConn {
             Ok(Err(e)) => Err(ProtoError::Connect(e.to_string())),
             Err(_) => Err(ProtoError::Timeout(timeout)),
         }
+    }
+
+    /// Process id of a stdio server (its process group id on Unix).
+    pub fn pid(&self) -> Option<u32> {
+        self._tree.pid
     }
 
     /// Negotiated protocol version, e.g. `"2025-11-25"`.

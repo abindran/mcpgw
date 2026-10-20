@@ -5,6 +5,8 @@
 //! through `mcpgw-proto`.
 
 pub mod manager;
+pub mod state;
 
-pub use manager::{BackendManager, BackendState, BackendStatus, ManagerOptions};
+pub use manager::{BackendManager, BackendStatus, ManagerOptions};
 pub use mcpgw_proto::{JsonObject, ProtoError};
+pub use state::State;
