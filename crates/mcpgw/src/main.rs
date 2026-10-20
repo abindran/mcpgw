@@ -170,8 +170,17 @@ fn run(cli: Cli) -> AnyResult<()> {
             // A changed spec may expose different tools: drop the old pin.
             s.remove_manifest(&name)?;
             if spec.enabled && !no_introspect && matches!(spec.transport, Transport::Stdio { .. }) {
-                match runtime()?.block_on(mcpgw_runtime::introspect(&spec, Duration::from_secs(60)))
-                {
+                let resolver: Arc<dyn mcpgw_runtime::SecretResolver> =
+                    Arc::new(secrets::VaultResolver::new(
+                        config.gateway.vault_path(),
+                        mcpgw_vault::KeySource::from_env(),
+                    ));
+                let capture = mcpgw_runtime::introspect_with_secrets(
+                    &spec,
+                    Duration::from_secs(60),
+                    Some(resolver),
+                );
+                match runtime()?.block_on(capture) {
                     Ok(m) => {
                         s.put_manifest(&m)?;
                         println!(
