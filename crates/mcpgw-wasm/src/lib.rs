@@ -2,9 +2,9 @@
 //!
 //! A Wasm tool server is a component exporting the `mcpgw:tool` world
 //! (`wit/tool.wit`): `list-tools` and `call-tool`, with JSON arguments. It
-//! runs in wasmtime with the component model and WASI p2 linked (with
-//! nothing granted: no files, network, environment or clock beyond the
-//! defaults; grants come in M4-02). Instances come from the **pooling
+//! runs in wasmtime with the component model and WASI p2 linked, and is
+//! granted nothing by default: no network, no files, no environment
+//! ([`Grants`], M4-02). Instances come from the **pooling
 //! allocator**, from a pre-linked [`ToolServerPre`], so instantiation takes
 //! well under a millisecond once a component is compiled. Compiled code is
 //! kept in memory per file and, with [`set_cache_dir`], on disk by content
@@ -12,6 +12,7 @@
 
 use std::{
     collections::HashMap,
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
     time::SystemTime,
@@ -23,7 +24,73 @@ use wasmtime::{
     Config, Engine, InstanceAllocationStrategy, PoolingAllocationConfig, Store,
     component::{Component, Linker, ResourceTable},
 };
-use wasmtime_wasi::{WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
+use wasmtime_wasi::{
+    FsPerms, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView, sockets::SocketAddrUse,
+};
+
+/// What an instance may use; everything else is denied (M4-02).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Grants {
+    /// TCP destinations it may connect to (already resolved). Nothing else:
+    /// no listening, no UDP.
+    pub connect: Vec<SocketAddr>,
+    /// Connect anywhere (an explicit `*` grant).
+    pub any_network: bool,
+    /// May resolve host names (when names were granted).
+    pub dns: bool,
+    /// Host directories visible inside, at a guest path, read-only unless
+    /// `write`.
+    pub dirs: Vec<DirGrant>,
+    /// Environment variables it sees.
+    pub env: Vec<(String, String)>,
+}
+
+/// One directory grant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirGrant {
+    /// On the host.
+    pub host: PathBuf,
+    /// Where the guest finds it.
+    pub guest: String,
+    /// May create and change files.
+    pub write: bool,
+}
+
+impl Grants {
+    fn wasi(&self) -> Result<WasiCtx, String> {
+        let mut b = WasiCtxBuilder::new();
+        for (k, v) in &self.env {
+            b.env(k, v);
+        }
+        for d in &self.dirs {
+            let perms = if d.write {
+                FsPerms::ReadWrite
+            } else {
+                FsPerms::ReadOnly
+            };
+            b.preopened_dir(&d.host, &d.guest, perms)
+                .map_err(|e| format!("granting {}: {e}", d.host.display()))?;
+        }
+        let tcp = self.any_network || !self.connect.is_empty();
+        b.allow_tcp(tcp)
+            .allow_udp(false)
+            .allow_ip_name_lookup(self.dns && tcp);
+        let allowed = self.connect.clone();
+        let any = self.any_network;
+        b.socket_addr_check(move |addr, used| {
+            let ok = match used {
+                SocketAddrUse::TcpConnect => any || allowed.contains(&addr),
+                // the implicit bind a connect makes, to an unspecified address
+                SocketAddrUse::TcpBind => {
+                    (any || !allowed.is_empty()) && addr.ip().is_unspecified() && addr.port() == 0
+                }
+                _ => false,
+            };
+            Box::pin(async move { ok })
+        });
+        Ok(b.build())
+    }
+}
 
 wasmtime::component::bindgen!({
     path: "wit",
@@ -156,9 +223,14 @@ pub fn load(path: &Path) -> Result<Arc<WasmTools>, String> {
 }
 
 impl WasmTools {
-    /// A fresh instance with its own store and an empty WASI context.
+    /// A fresh instance with its own store, granted nothing.
     pub async fn instantiate(&self) -> Result<Running, String> {
-        let wasi = WasiCtxBuilder::new().build();
+        self.instantiate_with(&Grants::default()).await
+    }
+
+    /// A fresh instance granted `grants` (and nothing else).
+    pub async fn instantiate_with(&self, grants: &Grants) -> Result<Running, String> {
+        let wasi = grants.wasi()?;
         let mut store = Store::new(
             engine(),
             Host {

@@ -12,7 +12,7 @@ use serde_json::json;
 fn echo_tool() -> ServerSpec {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../mcpgw-wasm/tests/fixtures/echo-tool.wasm");
-    ServerSpec::new("wecho", Transport::Wasm { path })
+    ServerSpec::new("wecho", Transport::wasm(path))
 }
 
 async fn until(mut f: impl FnMut() -> bool, secs: u64) -> bool {

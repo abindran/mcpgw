@@ -1,0 +1,35 @@
+package mcpgw:tool@0.1.0;
+
+/// What a Wasm tool server is: a component that lists its tools and runs
+/// them. Arguments and results travel as JSON text, so the interface stays
+/// small and stable while MCP evolves.
+interface types {
+  /// One tool, as `tools/list` shows it.
+  record tool {
+    /// Unique within the component.
+    name: string,
+    /// What it does, for the model.
+    description: string,
+    /// JSON Schema of the arguments, as JSON text (`{"type":"object",…}`).
+    input-schema: string,
+  }
+
+  /// The result of a call.
+  record output {
+    /// The text content returned to the client.
+    text: string,
+    /// Whether the call failed in a way the model should see (`isError`).
+    is-error: bool,
+  }
+}
+
+world tool-server {
+  use types.{tool, output};
+
+  /// The tools this component offers.
+  export list-tools: func() -> list<tool>;
+
+  /// Run tool `name` with `arguments` (a JSON object as text). An `err` is a
+  /// protocol-level failure (unknown tool, malformed arguments).
+  export call-tool: func(name: string, arguments: string) -> result<output, string>;
+}

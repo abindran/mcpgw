@@ -449,6 +449,31 @@
             ],
             "description": "A size such as \"256MiB\", \"512m\" or \"1GiB\", or bytes."
           },
+          "DirAccess": {
+            "additionalProperties": false,
+            "description": "A host directory granted to a Wasm server.",
+            "properties": {
+              "guest": {
+                "description": "Where the component sees it. Default: the same path.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "path": {
+                "description": "The directory on the host.",
+                "type": "string"
+              },
+              "write": {
+                "description": "May create and change files. Default: read-only.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          },
           "Duration": {
             "anyOf": [
               {
@@ -688,6 +713,27 @@
           {
             "description": "A Wasm component exporting the `mcpgw:tool` world, run in-process\nwith wasmtime (M4-01).",
             "properties": {
+              "allow_dirs": {
+                "description": "Host directories it may use. Default: none.",
+                "items": {
+                  "$ref": "#/$defs/DirAccess"
+                },
+                "type": "array"
+              },
+              "allow_network": {
+                "description": "TCP destinations it may connect to, `[\"api.github.com:443\"]`, or\n`[\"*\"]` for any. Default: no network at all (M4-02).",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "env": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables it sees (secrets bind through `secrets`).\nDefault: none; the host's environment never leaks in.",
+                "type": "object"
+              },
               "path": {
                 "description": "The component file (`.wasm`).",
                 "type": "string"

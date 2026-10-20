@@ -63,7 +63,17 @@ fn wasm() -> bool {
         .filter(|p| p.join("Cargo.toml").is_file())
         .collect();
     dirs.sort();
+    let canonical = std::fs::read_to_string("crates/mcpgw-wasm/wit/tool.wit").unwrap_or_default();
     for dir in dirs {
+        // guests with their own WIT keep a copy of the tool world: it must be current
+        let copy = dir.join("wit/deps/tool.wit");
+        if copy.is_file() && std::fs::read_to_string(&copy).unwrap_or_default() != canonical {
+            eprintln!(
+                "{} is out of date; copy crates/mcpgw-wasm/wit/tool.wit over it",
+                copy.display()
+            );
+            return false;
+        }
         let manifest = dir.join("Cargo.toml");
         let manifest = manifest.to_string_lossy();
         if !run(

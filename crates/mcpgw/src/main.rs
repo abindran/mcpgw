@@ -195,6 +195,16 @@ struct AddArgs {
     /// with wasmtime.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["command", "url", "image"])]
     wasm: Option<PathBuf>,
+    /// Let a Wasm server connect to HOST:PORT (repeatable; `*` for any).
+    /// Default: no network.
+    #[arg(long, value_name = "HOST:PORT", requires = "wasm")]
+    allow_network: Vec<String>,
+    /// Let a Wasm server read this directory (repeatable).
+    #[arg(long, value_name = "DIR", requires = "wasm")]
+    allow_dir: Vec<PathBuf>,
+    /// Let a Wasm server read and write this directory (repeatable).
+    #[arg(long, value_name = "DIR", requires = "wasm")]
+    allow_dir_rw: Vec<PathBuf>,
     /// Container runtime for --image: docker or podman (default: whichever
     /// is installed, Docker first).
     #[arg(long, requires = "image")]
@@ -533,7 +543,27 @@ fn run(cli: Cli) -> AnyResult<()> {
                     // stored absolute: the daemon may run from elsewhere
                     let path =
                         std::fs::canonicalize(&p).map_err(|e| format!("{}: {e}", p.display()))?;
-                    Transport::Wasm { path }
+                    let dir = |p: &PathBuf, write: bool| -> AnyResult<mcpgw_core::DirAccess> {
+                        Ok(mcpgw_core::DirAccess {
+                            path: std::fs::canonicalize(p)
+                                .map_err(|e| format!("{}: {e}", p.display()))?,
+                            guest: Some(p.to_string_lossy().replace('\\', "/")),
+                            write,
+                        })
+                    };
+                    let mut allow_dirs = Vec::new();
+                    for p in &a.allow_dir {
+                        allow_dirs.push(dir(p, false)?);
+                    }
+                    for p in &a.allow_dir_rw {
+                        allow_dirs.push(dir(p, true)?);
+                    }
+                    Transport::Wasm {
+                        path,
+                        allow_network: a.allow_network.clone(),
+                        allow_dirs,
+                        env: a.env.iter().cloned().collect(),
+                    }
                 }
                 (None, None) => Transport::Container {
                     image: a.image.unwrap_or_default(),

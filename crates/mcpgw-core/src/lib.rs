@@ -22,9 +22,9 @@ pub use profile::{Decision, Mode, Policy, Profile, glob_match};
 pub use sandbox::{ByteSize, Limits, Sandbox};
 pub use secret::{SecretMeta, validate_secret_name};
 pub use server::{
-    ACCOUNT_PLACEHOLDER, CONTAINER_RUNTIMES, DEFAULT_ACCOUNT, RegistryRef, SECRET_PLACEHOLDER,
-    ServerSpec, TOOL_SEPARATOR, Transport, WarmPool, fill_placeholders, on_path, parse_egress,
-    pinned_image_ref, secret_placeholders, validate_server_name,
+    ACCOUNT_PLACEHOLDER, CONTAINER_RUNTIMES, DEFAULT_ACCOUNT, DirAccess, RegistryRef,
+    SECRET_PLACEHOLDER, ServerSpec, TOOL_SEPARATOR, Transport, WarmPool, fill_placeholders,
+    on_path, parse_egress, pinned_image_ref, secret_placeholders, validate_server_name,
 };
 
 use thiserror::Error;

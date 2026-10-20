@@ -993,9 +993,17 @@ impl Launch {
                 egress: egress.clone(),
                 files: cfg.files.clone(),
             }),
-            Transport::Wasm { path } => {
-                Template::Wasm(crate::wasm::WasmTemplate { path: path.clone() })
-            }
+            Transport::Wasm {
+                path,
+                allow_network,
+                allow_dirs,
+                env,
+            } => Template::Wasm(crate::wasm::WasmTemplate {
+                path: path.clone(),
+                allow_network: allow_network.clone(),
+                allow_dirs: allow_dirs.clone(),
+                env: env.clone(),
+            }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),
                 headers: headers.clone(),
@@ -1075,7 +1083,15 @@ impl Launch {
                     env.insert(var.clone(), lookup(name).unwrap_or_default());
                 }
             }
-            Template::Http(_) | Template::Wasm(_) => {}
+            Template::Wasm(w) => {
+                for v in w.env.values_mut() {
+                    *v = fill(v);
+                }
+                for (var, name) in &self.bindings {
+                    w.env.insert(var.clone(), lookup(name).unwrap_or_default());
+                }
+            }
+            Template::Http(_) => {}
         }
         if let Template::Container(c) = &mut spec {
             for v in c.files.values_mut() {

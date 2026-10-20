@@ -1,0 +1,19 @@
+# A test Wasm tool server (not part of the workspace), built by `cargo xtask wasm`.
+[package]
+name = "probe-tool"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.63", default-features = false, features = ["macros", "realloc"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[workspace]

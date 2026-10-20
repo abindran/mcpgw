@@ -74,7 +74,32 @@ pub enum Transport {
     Wasm {
         /// The component file (`.wasm`).
         path: PathBuf,
+        /// TCP destinations it may connect to, `["api.github.com:443"]`, or
+        /// `["*"]` for any. Default: no network at all (M4-02).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        allow_network: Vec<String>,
+        /// Host directories it may use. Default: none.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        allow_dirs: Vec<DirAccess>,
+        /// Environment variables it sees (secrets bind through `secrets`).
+        /// Default: none; the host's environment never leaks in.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
     },
+}
+
+/// A host directory granted to a Wasm server.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DirAccess {
+    /// The directory on the host.
+    pub path: PathBuf,
+    /// Where the component sees it. Default: the same path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest: Option<String>,
+    /// May create and change files. Default: read-only.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub write: bool,
 }
 
 /// Split an egress entry `host:port`, checking both parts.
@@ -178,6 +203,16 @@ impl Transport {
         }
     }
 
+    /// A Wasm component, granted nothing.
+    pub fn wasm(path: impl Into<PathBuf>) -> Self {
+        Self::Wasm {
+            path: path.into(),
+            allow_network: Vec::new(),
+            allow_dirs: Vec::new(),
+            env: BTreeMap::new(),
+        }
+    }
+
     /// One line saying what runs: the command line, the URL, or the image
     /// (pinned by digest) and its arguments.
     pub fn target(&self) -> String {
@@ -196,7 +231,7 @@ impl Transport {
                 .chain(args.iter().cloned())
                 .collect::<Vec<_>>()
                 .join(" "),
-            Self::Wasm { path } => path.display().to_string(),
+            Self::Wasm { path, .. } => path.display().to_string(),
         }
     }
 
@@ -413,7 +448,11 @@ impl ServerSpec {
                     *v = fill(v);
                 }
             }
-            Transport::Wasm { .. } => {}
+            Transport::Wasm { env, .. } => {
+                for v in env.values_mut() {
+                    *v = fill(v);
+                }
+            }
         }
         s
     }
@@ -426,6 +465,11 @@ impl ServerSpec {
             .chain(self.files.values())
             .cloned()
             .collect();
+        if let Transport::Wasm { env, .. } = &self.transport {
+            for s in env.values() {
+                refs.extend(secret_placeholders(s));
+            }
+        }
         if let Transport::Stdio { args, env, .. } | Transport::Container { args, env, .. } =
             &self.transport
         {
@@ -484,7 +528,7 @@ impl ServerSpec {
             Transport::Stdio { command, .. } => command.trim().is_empty(),
             Transport::Http { url, .. } => url.trim().is_empty(),
             Transport::Container { image, .. } => image.trim().is_empty(),
-            Transport::Wasm { path } => path.as_os_str().is_empty(),
+            Transport::Wasm { path, .. } => path.as_os_str().is_empty(),
         };
         if empty {
             return Err(Error::Config(format!(
@@ -533,6 +577,21 @@ impl ServerSpec {
                 )));
             }
             crate::validate_secret_name(&secret.replace(ACCOUNT_PLACEHOLDER, DEFAULT_ACCOUNT))?;
+        }
+        if let Transport::Wasm { allow_network, .. } = &self.transport {
+            for e in allow_network.iter().filter(|e| e.as_str() != "*") {
+                let ok = parse_egress(e).is_ok()
+                    || e.rsplit_once(':').is_some_and(|(h, p)| {
+                        h.parse::<std::net::IpAddr>().is_ok()
+                            && p.parse::<u16>().is_ok_and(|p| p > 0)
+                    });
+                if !ok {
+                    return Err(Error::Config(format!(
+                        "server {}: allow_network entry {e:?} must be host:port, ip:port or \"*\"",
+                        self.name
+                    )));
+                }
+            }
         }
         if let Transport::Container {
             digest,
@@ -747,6 +806,42 @@ mod tests {
         );
         let empty = ServerSpec::new("c", Transport::container(" "));
         assert!(empty.validate().is_err());
+    }
+
+    #[test]
+    fn wasm_transport_and_grants() {
+        let src = r#"
+            name = "notes"
+            transport = "wasm"
+            path = "/opt/notes.wasm"
+            allow_network = ["api.example.com:443", "127.0.0.1:8080", "*"]
+            allow_dirs = [{ path = "/data", write = true }, { path = "/srv/docs", guest = "/docs" }]
+            env = { REGION = "eu", KEY = "${secret:notes_key}" }
+        "#;
+        let s: ServerSpec = toml::from_str(src).unwrap();
+        s.validate().unwrap();
+        assert_eq!(
+            (s.transport.kind(), s.transport.target().as_str()),
+            ("wasm", "/opt/notes.wasm")
+        );
+        assert!(s.secret_refs().contains("notes_key"));
+        assert_eq!(
+            toml::from_str::<ServerSpec>(&toml::to_string(&s).unwrap()).unwrap(),
+            s
+        );
+        for bad in ["api.example.com", "1.2.3.4:0", "*.example.com:443"] {
+            let mut t = s.clone();
+            if let Transport::Wasm { allow_network, .. } = &mut t.transport {
+                *allow_network = vec![bad.into()];
+            }
+            assert!(
+                t.validate()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("allow_network"),
+                "{bad}"
+            );
+        }
     }
 
     #[test]
