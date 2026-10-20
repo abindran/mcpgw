@@ -225,6 +225,11 @@ pub struct ServerSpec {
     /// stopped for idleness or evicted.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stateful: bool,
+    /// Keep this server started: `{ min = 1 }` starts it with the gateway,
+    /// never stops it for idleness or evicts it, and restarts it after a
+    /// crash, so calls never wait for a cold start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warm_pool: Option<WarmPool>,
     /// Deadline for start-up and the MCP handshake. Default: gateway-wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_timeout: Option<Duration>,
@@ -248,6 +253,22 @@ pub struct ServerSpec {
     /// Registry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub registry: Option<RegistryRef>,
+}
+
+/// How many instances of a server to keep started.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct WarmPool {
+    /// Instances kept warm: 0 (start on demand) or 1. Calls share one
+    /// connection per server, so larger pools aren't supported.
+    pub min: u32,
+}
+
+impl ServerSpec {
+    /// Whether the server is kept warm (`warm_pool.min >= 1`).
+    pub fn warm(&self) -> bool {
+        self.warm_pool.is_some_and(|w| w.min >= 1)
+    }
 }
 
 /// A pinned MCP Registry entry.
@@ -347,6 +368,7 @@ impl ServerSpec {
             enabled: true,
             idle_timeout: None,
             stateful: false,
+            warm_pool: None,
             startup_timeout: None,
             secrets: BTreeMap::new(),
             files: BTreeMap::new(),
@@ -440,6 +462,14 @@ impl ServerSpec {
             validate_server_name(a).map_err(|_| {
                 Error::Config(format!("invalid alias {a:?} for server {}", self.name))
             })?;
+        }
+        if let Some(w) = self.warm_pool
+            && w.min > 1
+        {
+            return Err(Error::Config(format!(
+                "server {}: warm_pool.min = {} is not supported; use 0 or 1 (calls share one connection per server)",
+                self.name, w.min
+            )));
         }
         let empty = match &self.transport {
             Transport::Stdio { command, .. } => command.trim().is_empty(),

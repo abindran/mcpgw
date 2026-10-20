@@ -228,6 +228,10 @@ struct AddArgs {
     /// Keep its processes running even when idle (browser or database sessions).
     #[arg(long)]
     stateful: bool,
+    /// Keep it warm: start it with the gateway and restart it after a crash,
+    /// so calls never wait for a cold start (`warm_pool = { min = 1 }`).
+    #[arg(long)]
+    warm: bool,
     /// Register but do not start it.
     #[arg(long)]
     disabled: bool,
@@ -440,6 +444,7 @@ fn run(cli: Cli) -> AnyResult<()> {
                     yes: a.yes,
                     alias: a.alias,
                     stateful: a.stateful,
+                    warm: a.warm,
                     disabled: a.disabled,
                     no_introspect: a.no_introspect,
                 },
@@ -483,6 +488,7 @@ fn run(cli: Cli) -> AnyResult<()> {
             spec.enabled = !a.disabled;
             spec.alias = a.alias;
             spec.stateful = a.stateful;
+            spec.warm_pool = a.warm.then_some(mcpgw_core::WarmPool { min: 1 });
             spec.secrets = a.secrets.into_iter().collect();
             spec.files = a.secret_files.into_iter().collect();
             spec.limits = mcpgw_core::Limits {

@@ -108,6 +108,9 @@ impl ApiState {
             "state": st.as_ref().map(|s| s.state.name()),
             "pid": st.as_ref().and_then(|s| s.pid),
             "container": st.as_ref().and_then(|s| s.container.clone()),
+            "warm": spec.warm(),
+            "cold_starts": st.as_ref().map(|s| s.cold_starts),
+            "last_start_ms": st.as_ref().and_then(|s| s.last_start_ms),
             "restarts": st.as_ref().map(|s| s.restarts),
             "protocol_version": st.as_ref().and_then(|s| s.protocol_version.clone()),
             "last_error": st.as_ref().and_then(|s| s.last_error.clone()),
@@ -674,6 +677,8 @@ pub fn openapi() -> Value {
                     "alias": {"type": ["string", "null"]}, "enabled": {"type": "boolean"}, "stateful": {"type": "boolean"},
                     "source": {"enum": ["config", "store"]}, "state": {"type": ["string", "null"]},
                     "pid": {"type": ["integer", "null"]}, "restarts": {"type": ["integer", "null"]},
+                    "warm": {"type": "boolean"}, "cold_starts": {"type": ["integer", "null"]},
+                    "last_start_ms": {"type": ["integer", "null"]},
                     "container": {"oneOf": [{"type": "null"}, {"type": "object", "properties": {
                         "runtime": {"type": "string"}, "name": {"type": "string"}, "image": {"type": "string"},
                         "rootless": {"type": "boolean"}}}]},

@@ -319,6 +319,12 @@
               "null"
             ]
           },
+          "cold_starts": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
           "container": {
             "oneOf": [
               {
@@ -349,6 +355,12 @@
           "last_error": {
             "type": [
               "string",
+              "null"
+            ]
+          },
+          "last_start_ms": {
+            "type": [
+              "integer",
               "null"
             ]
           },
@@ -409,6 +421,9 @@
               "http",
               "container"
             ]
+          },
+          "warm": {
+            "type": "boolean"
           }
         },
         "type": "object"
@@ -513,6 +528,22 @@
                 "type": "string"
               }
             ]
+          },
+          "WarmPool": {
+            "additionalProperties": false,
+            "description": "How many instances of a server to keep started.",
+            "properties": {
+              "min": {
+                "description": "Instances kept warm: 0 (start on demand) or 1. Calls share one\nconnection per server, so larger pools aren't supported.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "min"
+            ],
+            "type": "object"
           }
         },
         "description": "One backend tool server (`[[server]]` in the config file).",
@@ -719,6 +750,17 @@
           "stateful": {
             "description": "The server keeps user state (browser, database session): it is never\nstopped for idleness or evicted.",
             "type": "boolean"
+          },
+          "warm_pool": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/WarmPool"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Keep this server started: `{ min = 1 }` starts it with the gateway,\nnever stops it for idleness or evicts it, and restarts it after a\ncrash, so calls never wait for a cold start."
           }
         },
         "required": [

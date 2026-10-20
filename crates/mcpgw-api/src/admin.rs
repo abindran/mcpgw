@@ -66,6 +66,15 @@ pub struct ServerInfo {
     pub last_error: Option<String>,
     /// Never stopped for idleness.
     pub stateful: bool,
+    /// Kept warm (`warm_pool.min = 1`).
+    #[serde(default)]
+    pub warm: bool,
+    /// Calls that waited for a start.
+    #[serde(default)]
+    pub cold_starts: u64,
+    /// How long the last start took.
+    #[serde(default)]
+    pub last_start_ms: Option<u64>,
     /// Tools in its pinned manifest.
     pub tools: usize,
 }
@@ -121,6 +130,9 @@ async fn status(State(s): State<AdminState>) -> Json<StatusReport> {
             protocol_version: st.protocol_version,
             last_error: st.last_error,
             stateful: st.stateful,
+            warm: st.warm,
+            cold_starts: st.cold_starts,
+            last_start_ms: st.last_start_ms,
             tools,
             name: st.name,
         });

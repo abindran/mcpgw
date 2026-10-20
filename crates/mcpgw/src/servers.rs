@@ -325,7 +325,11 @@ pub fn status(config: &Config) -> AnyResult<()> {
             (None, None) => "-".into(),
         };
         let err = s.last_error.map(|e| format!("\t{e}")).unwrap_or_default();
-        println!("{}\t{}\t{} tools\t{pid}{err}", s.name, s.state, s.tools);
+        let warm = if s.warm { " (warm)" } else { "" };
+        println!(
+            "{}\t{}{warm}\t{} tools\t{pid}{err}",
+            s.name, s.state, s.tools
+        );
     }
     Ok(())
 }

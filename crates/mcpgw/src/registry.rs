@@ -33,6 +33,8 @@ pub struct Install {
     pub alias: Option<String>,
     /// Never stopped for idleness.
     pub stateful: bool,
+    /// Kept warm.
+    pub warm: bool,
     /// Register but don't start it.
     pub disabled: bool,
     /// Don't read its tools now.
@@ -130,6 +132,7 @@ pub fn add(config: &Config, path: &Path, i: Install) -> AnyResult<()> {
     let mut spec = plan.spec;
     spec.alias = i.alias;
     spec.stateful = i.stateful;
+    spec.warm_pool = i.warm.then_some(mcpgw_core::WarmPool { min: 1 });
     spec.enabled = !i.disabled;
     println!("{} {} via {}", entry.name, entry.version, plan.method);
     if let Some(d) = &entry.description {

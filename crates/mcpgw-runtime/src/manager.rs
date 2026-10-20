@@ -114,6 +114,13 @@ pub struct BackendStatus {
     pub last_used: Option<Instant>,
     /// Never stopped for idleness or evicted.
     pub stateful: bool,
+    /// Kept warm (`warm_pool.min = 1`): started with the gateway, never
+    /// stopped for idleness or evicted, restarted after a crash.
+    pub warm: bool,
+    /// Calls that had to wait for the server to start.
+    pub cold_starts: u64,
+    /// How long the last start took (spawn or connect through tools/list).
+    pub last_start_ms: Option<u64>,
 }
 
 struct Shared {
@@ -245,7 +252,9 @@ impl Registry {
         }
         let victim = others
             .iter()
-            .filter(|(s, _)| matches!(s.state, State::Ready | State::Idle) && !s.stateful)
+            .filter(|(s, _)| {
+                matches!(s.state, State::Ready | State::Idle) && !s.stateful && !s.warm
+            })
             .min_by_key(|(s, _)| s.last_used);
         match victim {
             Some((s, h)) => {
@@ -466,6 +475,9 @@ impl BackendManager {
                 container: None,
                 last_used: None,
                 stateful: cfg.stateful,
+                warm: cfg.warm(),
+                cold_starts: 0,
+                last_start_ms: None,
             }),
             tools: RwLock::new(Vec::new()),
             stderr: Arc::default(),
@@ -483,6 +495,7 @@ impl BackendManager {
                     .map(|d| d.get())
                     .unwrap_or(self.opts.idle_timeout),
                 stateful: cfg.stateful,
+                warm: cfg.warm(),
             };
             let actor = Actor::new(
                 shared.clone(),
@@ -503,7 +516,7 @@ impl BackendManager {
                 .lock()
                 .expect("tasks mutex")
                 .push(tokio::spawn(actor.run()));
-            if self.opts.eager && cfg.enabled {
+            if (self.opts.eager || cfg.warm()) && cfg.enabled {
                 let (reply, _) = oneshot::channel();
                 let _ = tx.send(Cmd::Ensure(reply));
             }
@@ -613,13 +626,15 @@ impl BackendManager {
     }
 
     /// Wait until no backend is starting (and, when eager, none is still
-    /// cold), or `timeout` elapses. Returns whether everything settled.
+    /// cold; warm ones never count as settled while cold), or `timeout`
+    /// elapses. Returns whether everything settled.
     pub async fn wait_ready(&self, timeout: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
             let busy = self.read().values().any(|h| {
-                let s = h.shared.snapshot().state;
-                s == State::Starting || (self.opts.eager && s == State::Cold)
+                let snap = h.shared.snapshot();
+                let s = snap.state;
+                s == State::Starting || ((self.opts.eager || snap.warm) && s == State::Cold)
             });
             if !busy {
                 return true;
@@ -1019,6 +1034,7 @@ struct Limits {
     connect_timeout: Duration,
     idle_timeout: Duration,
     stateful: bool,
+    warm: bool,
 }
 
 struct Actor {
@@ -1040,6 +1056,8 @@ struct Actor {
     container: Option<ContainerInfo>,
     /// Background closes still running (see `closing`).
     closes: Vec<tokio::task::JoinHandle<()>>,
+    /// When the current start began.
+    start_began: Option<Instant>,
     waiters: Vec<Waiter>,
     retry_at: Option<tokio::time::Instant>,
     ping_inflight: bool,
@@ -1077,6 +1095,7 @@ impl Actor {
             conn: None,
             container: None,
             closes: Vec::new(),
+            start_began: None,
             waiters: Vec::new(),
             retry_at: None,
             ping_inflight: false,
@@ -1159,7 +1178,9 @@ impl Actor {
     /// Keep the idle timer armed exactly while the server is connected and
     /// unused (and not stateful).
     fn rearm_idle(&mut self) {
-        let idle = matches!(self.state, State::Ready | State::Idle) && !self.limits.stateful;
+        let idle = matches!(self.state, State::Ready | State::Idle)
+            && !self.limits.stateful
+            && !self.limits.warm;
         if !idle {
             self.idle_at = None;
         } else if self.idle_at.is_none() {
@@ -1197,6 +1218,7 @@ impl Actor {
         match action {
             Action::None => {}
             Action::Spawn => {
+                self.start_began = Some(Instant::now());
                 self.registry.make_room(&self.shared.name);
                 let launch = self.launch.clone();
                 let timeout = self.limits.connect_timeout;
@@ -1277,6 +1299,8 @@ impl Actor {
                 } else if matches!(self.state, State::Ready | State::Idle | State::Busy { .. }) {
                     self.dispatch(tool, args, reply);
                 } else {
+                    // this call waits for a start
+                    self.shared.update(|s| s.cold_starts += 1);
                     self.waiters.push(Waiter::Call { tool, args, reply });
                     self.apply(Event::Demand);
                 }
@@ -1449,6 +1473,10 @@ impl Actor {
                     return;
                 }
                 if self.state == State::Ready {
+                    if let Some(t) = self.start_began.take() {
+                        let ms = t.elapsed().as_millis() as u64;
+                        self.shared.update(|s| s.last_start_ms = Some(ms));
+                    }
                     tracing::info!(server = %self.shared.name, protocol = ?pv, tools = tools.len(), "backend connected");
                     if self.ever_connected {
                         self.shared.update(|s| s.restarts += 1);
@@ -1619,7 +1647,9 @@ impl Actor {
     fn on_retry(&mut self) {
         self.retry_at = None;
         self.apply(Event::RetryDue);
-        if self.exiting.is_none() && (self.opts.eager || !self.waiters.is_empty()) {
+        if self.exiting.is_none()
+            && (self.opts.eager || self.limits.warm || !self.waiters.is_empty())
+        {
             self.apply(Event::Demand);
         }
     }
