@@ -8,6 +8,7 @@
 
 pub mod backend;
 pub mod front;
+pub mod http;
 pub mod relay;
 pub mod spike_bridge;
 pub mod spike_server;
@@ -18,6 +19,7 @@ pub mod spike_server;
 /// older protocol to backend tool servers; version bridging is proven in the
 /// M0-04 / M0-05 spikes.
 pub use backend::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
+pub use http::HttpSpec;
 
 pub mod version {
     /// Protocol version presented to LLM clients (server side).

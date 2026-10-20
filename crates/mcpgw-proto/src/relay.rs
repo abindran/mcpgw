@@ -40,6 +40,7 @@ async fn relay<L>(mut local: L, url: &str, token: &str) -> Result<(), ProtoError
 where
     L: Transport<RoleServer>,
 {
+    mcpgw_core::tls::install();
     let cfg = StreamableHttpClientTransportConfig::with_uri(url.to_string())
         .auth_header(token.to_string());
     let mut remote: StreamableHttpClientTransport<_> =

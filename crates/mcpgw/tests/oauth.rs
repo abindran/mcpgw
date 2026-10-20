@@ -77,6 +77,7 @@ impl Env {
                 break format!("http{u}");
             }
         };
+        mcpgw_core::tls::install();
         let page = reqwest::get(&url).await.unwrap(); // follows the redirects
         let status = page.status().as_u16();
         let body = page.text().await.unwrap();
@@ -171,6 +172,7 @@ async fn refused_and_forged_logins_fail_clearly() {
         .unwrap()
         .trim_end_matches("/mcp")
         .to_string();
+    mcpgw_core::tls::install();
     let r = reqwest::get(format!("{base}/oauth/callback?state=forged&code=x"))
         .await
         .unwrap();

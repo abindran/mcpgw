@@ -48,7 +48,7 @@ pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> 
     // A changed spec may expose different tools: drop the old pin.
     s.remove_manifest(&name)?;
     let mut manifest = None;
-    if spec.enabled && introspect && matches!(spec.transport, Transport::Stdio { .. }) {
+    if spec.enabled && introspect {
         let capture = mcpgw_runtime::introspect_with_secrets(
             &spec,
             Duration::from_secs(60),

@@ -21,3 +21,4 @@ base64 = "0.22"
 secrecy = "0.10"
 mcpgw-testkit.workspace = true
 tokio = { workspace = true, features = ["rt", "macros", "time"] }
+serde_json.workspace = true

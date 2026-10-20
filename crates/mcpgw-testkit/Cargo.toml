@@ -17,6 +17,7 @@ rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "tra
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "form", "query"] }
 sha2.workspace = true
 base64 = "0.22"
+futures = "0.3"
 serde_json.workspace = true
 tokio = { workspace = true, features = ["io-std", "io-util", "process", "time", "net", "signal"] }
 

@@ -191,6 +191,7 @@ impl Broker {
         store: Arc<dyn TokenStore>,
         secrets: SecretLookup,
     ) -> Self {
+        mcpgw_core::tls::install();
         Self {
             providers,
             flows: Mutex::new(HashMap::new()),

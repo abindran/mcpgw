@@ -286,26 +286,19 @@ async fn lazy_start_failure_is_reported_to_the_caller() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn disabled_and_unsupported_servers() {
+async fn disabled_and_unreachable_servers() {
     let web = ServerSpec::new("web", Transport::http("http://127.0.0.1:1/mcp"));
     let mut off = server("off", &[]);
     off.enabled = false;
-    let m = BackendManager::start(&[web, off], fast());
-    assert!(m.wait_ready(Duration::from_secs(5)).await);
-    for name in ["off", "web"] {
-        assert_eq!(state(&m, name), State::Disabled, "{name}");
-        assert!(matches!(
-            m.call_tool(name, "x", None).await,
-            Err(ProtoError::Unavailable(_))
-        ));
-    }
-    assert!(
-        m.status_of("web")
-            .unwrap()
-            .last_error
-            .unwrap()
-            .contains("http")
-    );
+    let m = BackendManager::start(&[web, off], lazy());
+    assert_eq!(state(&m, "off"), State::Disabled);
+    assert!(matches!(
+        m.call_tool("off", "x", None).await,
+        Err(ProtoError::Unavailable(_))
+    ));
+    // nothing listens on port 1: the call reports the connect failure
+    let err = m.call_tool("web", "x", None).await.unwrap_err();
+    assert!(matches!(err, ProtoError::Connect(_)), "{err:?}");
     assert!(matches!(
         m.call_tool("missing", "x", None).await,
         Err(ProtoError::Unavailable(_))

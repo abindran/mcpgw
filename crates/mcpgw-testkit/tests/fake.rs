@@ -103,6 +103,7 @@ async fn scripted_tools_and_crash_after() {
 #[tokio::test(flavor = "multi_thread")]
 async fn serves_streamable_http() {
     let fake = HttpFake::start(&[]);
+    mcpgw_core::tls::install();
     let t = StreamableHttpClientTransport::from_uri(fake.url.clone());
     let s = ().serve_with_lifecycle(t, auto()).await.unwrap();
     assert_eq!(version(&s), "2026-07-28");

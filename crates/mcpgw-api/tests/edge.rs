@@ -24,6 +24,7 @@ async fn start() -> (u16, Token) {
 
 #[tokio::test]
 async fn status_codes() {
+    mcpgw_core::tls::install();
     let (port, token) = start().await;
     let c = reqwest::Client::new();
     let bearer = format!("Bearer {}", token.expose());

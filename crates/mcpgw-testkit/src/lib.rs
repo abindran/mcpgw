@@ -7,6 +7,7 @@
 //! the way Claude Code or Cursor would.
 
 pub mod oauth;
+pub mod sse;
 
 use std::{
     collections::BTreeMap,
@@ -163,6 +164,7 @@ impl McpClient {
                 streamable_http_client::StreamableHttpClientTransportConfig,
             },
         };
+        mcpgw_core::tls::install();
         let mut cfg = StreamableHttpClientTransportConfig::with_uri(url.to_string());
         if let Some(t) = token {
             cfg = cfg.auth_header(t.to_string());

@@ -18,7 +18,7 @@ use std::{
 };
 
 use mcpgw_core::{ManifestDiff, ServerSpec, ToolManifest, Transport};
-use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
+use mcpgw_proto::{BackendConn, HttpSpec, JsonObject, ProtoError, StderrSink, StdioSpec};
 use mcpgw_vault::Redactor;
 use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::{RwLock, mpsc, oneshot};
@@ -196,7 +196,7 @@ enum Waiter {
 }
 
 enum Internal {
-    Started(Result<(BackendConn, Vec<JsonObject>, Redactor), String>),
+    Started(Result<Box<(BackendConn, Vec<JsonObject>, Redactor)>, String>),
     CallDone { lost: bool, failed: bool },
     Ping(Result<(), String>),
     Recheck,
@@ -419,13 +419,9 @@ impl BackendManager {
         instance_of: Option<&str>,
     ) -> Result<(), ProtoError> {
         let catalog_key = instance_of.unwrap_or(key).to_string();
-        let (state, why) = match (&cfg.transport, cfg.enabled) {
-            (_, false) => (State::Disabled, Some("disabled".to_string())),
-            (Transport::Http { .. }, _) => (
-                State::Disabled,
-                Some("http transport arrives in M2-04".to_string()),
-            ),
-            (Transport::Stdio { .. }, true) => (State::Cold, None),
+        let (state, why) = match cfg.enabled {
+            false => (State::Disabled, Some("disabled".to_string())),
+            true => (State::Cold, None),
         };
         let mut backends = self.backends.write().expect("backends lock");
         if backends.contains_key(key) {
@@ -462,19 +458,7 @@ impl BackendManager {
             catalog: self.catalog.clone(),
         });
         let (tx, rx) = mpsc::unbounded_channel();
-        if let Transport::Stdio {
-            command,
-            args,
-            env,
-            cwd,
-        } = &cfg.transport
         {
-            let spec = StdioSpec {
-                command: command.clone(),
-                args: args.clone(),
-                env: env.clone(),
-                cwd: cwd.clone(),
-            };
             let limits = Limits {
                 connect_timeout: cfg
                     .startup_timeout
@@ -488,12 +472,7 @@ impl BackendManager {
             };
             let actor = Actor::new(
                 shared.clone(),
-                Launch {
-                    template: spec,
-                    bindings: cfg.secrets.clone(),
-                    refs: cfg.secret_refs(),
-                    resolver: self.secrets.clone(),
-                },
+                Launch::new(cfg, self.secrets.clone()),
                 self.opts.clone(),
                 limits,
                 state,
@@ -773,15 +752,64 @@ impl BackendManager {
 /// How to launch a server: the spec with secret placeholders, its env
 /// bindings, and where secrets come from.
 pub(crate) struct Launch {
-    pub(crate) template: StdioSpec,
+    pub(crate) template: Template,
     pub(crate) bindings: BTreeMap<String, String>,
     pub(crate) refs: std::collections::BTreeSet<String>,
     pub(crate) resolver: Option<Arc<dyn SecretResolver>>,
 }
 
+/// A backend to connect to, before or after secrets are filled in.
+#[derive(Debug, Clone)]
+pub(crate) enum Template {
+    Stdio(StdioSpec),
+    Http(HttpSpec),
+}
+
+impl Template {
+    /// Connect: spawn the process, or open the HTTP session.
+    pub(crate) async fn connect(
+        &self,
+        timeout: Duration,
+        sink: Option<StderrSink>,
+    ) -> Result<BackendConn, ProtoError> {
+        match self {
+            Template::Stdio(s) => BackendConn::connect_stdio(s, timeout, sink).await,
+            Template::Http(h) => BackendConn::connect_http(h, timeout).await,
+        }
+    }
+}
+
 impl Launch {
-    /// The concrete spec plus a redactor for the injected values.
-    pub(crate) fn resolve(&self) -> Result<(StdioSpec, Redactor), String> {
+    /// How to launch `cfg`, with secrets from `resolver`.
+    pub(crate) fn new(cfg: &ServerSpec, resolver: Option<Arc<dyn SecretResolver>>) -> Self {
+        let template = match &cfg.transport {
+            Transport::Stdio {
+                command,
+                args,
+                env,
+                cwd,
+            } => Template::Stdio(StdioSpec {
+                command: command.clone(),
+                args: args.clone(),
+                env: env.clone(),
+                cwd: cwd.clone(),
+            }),
+            Transport::Http { url, headers } => Template::Http(HttpSpec {
+                url: url.clone(),
+                headers: headers.clone(),
+            }),
+        };
+        Self {
+            template,
+            bindings: cfg.secrets.clone(),
+            refs: cfg.secret_refs(),
+            resolver,
+        }
+    }
+
+    /// The concrete backend plus a redactor for the injected values.
+    /// For HTTP servers, `secrets` bindings become headers.
+    pub(crate) fn resolve(&self) -> Result<(Template, Redactor), String> {
         if self.refs.is_empty() {
             return Ok((self.template.clone(), Redactor::default()));
         }
@@ -802,18 +830,28 @@ impl Launch {
             }
         }
         let lookup = |n: &str| values.get(n).map(|v| v.expose_secret().to_string());
+        let fill = |s: &str| mcpgw_core::fill_placeholders(s, &lookup);
         let mut spec = self.template.clone();
-        spec.args = spec
-            .args
-            .iter()
-            .map(|a| mcpgw_core::fill_placeholders(a, &lookup))
-            .collect();
-        for v in spec.env.values_mut() {
-            *v = mcpgw_core::fill_placeholders(v, &lookup);
-        }
-        for (var, name) in &self.bindings {
-            spec.env
-                .insert(var.clone(), lookup(name).unwrap_or_default());
+        match &mut spec {
+            Template::Stdio(s) => {
+                s.args = s.args.iter().map(|a| fill(a)).collect();
+                for v in s.env.values_mut() {
+                    *v = fill(v);
+                }
+                for (var, name) in &self.bindings {
+                    s.env.insert(var.clone(), lookup(name).unwrap_or_default());
+                }
+            }
+            Template::Http(h) => {
+                h.url = fill(&h.url);
+                for v in h.headers.values_mut() {
+                    *v = fill(v);
+                }
+                for (header, name) in &self.bindings {
+                    h.headers
+                        .insert(header.clone(), lookup(name).unwrap_or_default());
+                }
+            }
         }
         let redactor = Redactor::new(values.iter().map(|(n, v)| (n.as_str(), v.expose_secret())));
         Ok((spec, redactor))
@@ -1041,7 +1079,7 @@ impl Actor {
                     };
                     // stderr may speak before the handshake completes
                     *redactor_cell.write().expect("redactor") = Arc::new(redactor.clone());
-                    let res = match BackendConn::connect_stdio(&spec, timeout, Some(sink)).await {
+                    let res = match spec.connect(timeout, Some(sink)).await {
                         Ok(c) => match c.list_tools().await {
                             Ok(tools) => Ok((c, tools, redactor)),
                             Err(e) => {
@@ -1049,9 +1087,16 @@ impl Actor {
                                 Err(format!("tools/list failed: {e}"))
                             }
                         },
-                        Err(e) => Err(redactor.redact(&e.to_string()).into_owned()),
+                        Err(e) => {
+                            // the actor wraps this in ProtoError::Connect again
+                            let msg = match e {
+                                ProtoError::Connect(m) => m,
+                                other => other.to_string(),
+                            };
+                            Err(redactor.redact(&msg).into_owned())
+                        }
                     };
-                    let _ = itx.send(Internal::Started(res));
+                    let _ = itx.send(Internal::Started(res.map(Box::new)));
                 });
             }
             Action::Close => {
@@ -1228,7 +1273,8 @@ impl Actor {
 
     fn on_internal(&mut self, ev: Internal) {
         match ev {
-            Internal::Started(Ok((conn, tools, redactor))) => {
+            Internal::Started(Ok(started)) => {
+                let (conn, tools, redactor) = *started;
                 *self.shared.redactor.write().expect("redactor") = Arc::new(redactor);
                 let pv = conn.protocol_version();
                 self.conn = Some(Arc::new(conn));

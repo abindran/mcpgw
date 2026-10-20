@@ -9,6 +9,7 @@ pub mod oauth;
 pub mod profile;
 pub mod secret;
 pub mod server;
+pub mod tls;
 
 pub use duration::Duration;
 pub use manifest::{ManifestDiff, ToolDef, ToolManifest};

@@ -92,7 +92,7 @@ impl ClientHandler for GatewayClient {}
 /// Prefers `2026-07-28` via `server/discover`, accepts `2025-11-25`, and falls
 /// back to legacy `initialize` for servers that reject discovery. Both
 /// versions must be in `preferred_versions` (finding from M0-05).
-fn backend_lifecycle() -> ClientLifecycleMode {
+pub(crate) fn backend_lifecycle() -> ClientLifecycleMode {
     ClientLifecycleMode::Auto {
         preferred_versions: vec![ProtocolVersion::V_2026_07_28, ProtocolVersion::V_2025_11_25],
         legacy_version: Some(ProtocolVersion::V_2025_11_25),
@@ -125,8 +125,10 @@ fn legacy_lifecycle() -> ClientLifecycleMode {
 /// children (`npx` → `node`) running. Killing the group or job covers both
 /// cases, even after the leader is gone: the group id can't be reused while
 /// any member is alive, and the job outlives its first process.
-struct TreeGuard {
+pub(crate) struct TreeGuard {
     pid: Option<u32>,
+    /// Background tasks of the connection (the SSE bridge), aborted on drop.
+    pub(crate) tasks: Vec<tokio::task::JoinHandle<()>>,
     child: Option<std::sync::Mutex<Box<dyn process_wrap::tokio::ChildWrapper>>>,
 }
 
@@ -135,6 +137,7 @@ impl TreeGuard {
         Self {
             pid: None,
             child: None,
+            tasks: Vec::new(),
         }
     }
 
@@ -157,6 +160,9 @@ impl TreeGuard {
 
 impl Drop for TreeGuard {
     fn drop(&mut self) {
+        for t in self.tasks.drain(..) {
+            t.abort();
+        }
         if let Some(mut c) = self.child.take().and_then(|c| c.into_inner().ok()) {
             let _ = c.start_kill();
             // Reap, so no zombie is left behind on Unix.
@@ -173,7 +179,7 @@ impl Drop for TreeGuard {
 pub struct BackendConn {
     service: RunningService<RoleClient, GatewayClient>,
     // Declared after `service` so it drops (kills the tree) last.
-    _tree: TreeGuard,
+    pub(crate) _tree: TreeGuard,
 }
 
 impl BackendConn {
@@ -255,6 +261,7 @@ impl BackendConn {
         let tree = TreeGuard {
             pid: child.id(),
             child: Some(std::sync::Mutex::new(child)),
+            tasks: Vec::new(),
         };
         // If the handshake fails, dropping `tree` kills the process tree.
         let mut conn = Self::connect_transport((stdout, stdin), timeout, lifecycle).await?;
@@ -270,7 +277,7 @@ impl BackendConn {
         Self::connect_transport(io, timeout, backend_lifecycle()).await
     }
 
-    async fn connect_transport<T, E, A>(
+    pub(crate) async fn connect_transport<T, E, A>(
         transport: T,
         timeout: Duration,
         lifecycle: ClientLifecycleMode,

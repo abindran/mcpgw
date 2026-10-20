@@ -33,7 +33,10 @@ impl Control {
         Ok(Some(Self {
             base,
             token: token.expose().to_string(),
-            client: reqwest::Client::new(),
+            client: {
+                mcpgw_core::tls::install();
+                reqwest::Client::new()
+            },
             rt: runtime()?,
             info,
         }))

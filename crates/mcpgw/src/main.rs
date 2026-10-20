@@ -128,9 +128,13 @@ struct AddArgs {
     /// Stdio command to launch.
     #[arg(long, conflicts_with = "url", required_unless_present = "url")]
     command: Option<String>,
-    /// Streamable HTTP URL (connected from M2-04 on).
+    /// Remote MCP URL: Streamable HTTP, or a legacy `…/sse` endpoint.
     #[arg(long)]
     url: Option<String>,
+    /// HTTP header for a remote server, NAME=VALUE (repeatable). Values may
+    /// use `${secret:<name>}`, e.g. `Authorization=Bearer ${secret:api_key}`.
+    #[arg(long = "header", value_parser = parse_kv, requires = "url")]
+    headers: Vec<(String, String)>,
     /// Environment variable for the command, KEY=VALUE (repeatable).
     #[arg(long = "env", value_parser = parse_kv)]
     env: Vec<(String, String)>,
@@ -239,6 +243,7 @@ fn parse_kv(s: &str) -> Result<(String, String), String> {
 }
 
 fn main() -> ExitCode {
+    mcpgw_core::tls::install();
     let cli = Cli::parse();
     if let Err(e) = mcpgw_telemetry::init(cli.log_format, "warn") {
         eprintln!("mcpgw: {e}");
@@ -277,7 +282,10 @@ fn run(cli: Cli) -> AnyResult<()> {
                     env: a.env.into_iter().collect::<BTreeMap<_, _>>(),
                     cwd: None,
                 },
-                (None, Some(url)) => Transport::http(url),
+                (None, Some(url)) => Transport::Http {
+                    url,
+                    headers: a.headers.into_iter().collect(),
+                },
                 _ => return Err("give exactly one of --command or --url".into()),
             };
             let mut spec = ServerSpec::new(a.name, transport);

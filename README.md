@@ -63,6 +63,8 @@ mcpgw secret set github_token            # prompts without echo; or pipe the val
 mcpgw add fs --command npx -- -y @modelcontextprotocol/server-filesystem /tmp
 mcpgw add gh --command github-mcp-server --secret GITHUB_TOKEN=github_token -- stdio
 
+mcpgw add docs --url https://mcp.example.com/mcp --header 'x-api-key=${secret:docs_key}'
+
 mcpgw up                         # start the daemon (http://127.0.0.1:7777/mcp)
 mcpgw status                     # daemon and per-server state
 mcpgw logs gh                    # a server's recent stderr (`mcpgw logs` = daemon log)

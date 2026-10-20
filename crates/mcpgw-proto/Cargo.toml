@@ -14,6 +14,9 @@ repository.workspace = true
 [dependencies]
 # Pinned in the M0-04 spike (see wiki/M0-04-rmcp-Server-Spike.md).
 rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "macros", "transport-child-process", "transport-streamable-http-server", "transport-streamable-http-client-reqwest"] }
+futures = "0.3"
+mcpgw-core.workspace = true
+reqwest.workspace = true
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio"] }
 process-wrap = { version = "10", default-features = false, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
 serde = { workspace = true }

@@ -7,8 +7,8 @@
 
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
-use mcpgw_core::{ServerSpec, ToolDef, ToolManifest, Transport};
-use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StdioSpec};
+use mcpgw_core::{ServerSpec, ToolDef, ToolManifest};
+use mcpgw_proto::{JsonObject, ProtoError};
 
 /// Saves a manifest durably (wired to the store by the daemon).
 pub type Persist = Arc<dyn Fn(&ToolManifest) + Send + Sync>;
@@ -118,34 +118,13 @@ pub async fn introspect_with_secrets(
     } else {
         spec
     };
-    let Transport::Stdio {
-        command,
-        args,
-        env,
-        cwd,
-    } = &spec.transport
-    else {
-        return Err(ProtoError::Unavailable(
-            "only stdio servers can be introspected until M2-04".into(),
-        ));
-    };
-    let launch = crate::manager::Launch {
-        template: StdioSpec {
-            command: command.clone(),
-            args: args.clone(),
-            env: env.clone(),
-            cwd: cwd.clone(),
-        },
-        bindings: spec.secrets.clone(),
-        refs: spec.secret_refs(),
-        resolver: secrets,
-    };
-    let (spec_io, _) = tokio::task::spawn_blocking(move || launch.resolve())
+    let launch = crate::manager::Launch::new(spec, secrets);
+    let (target, _) = tokio::task::spawn_blocking(move || launch.resolve())
         .await
         .map_err(|e| ProtoError::Other(e.to_string()))?
         .map_err(ProtoError::Connect)?;
     let timeout = spec.startup_timeout.map(|d| d.get()).unwrap_or(timeout);
-    let conn = BackendConn::connect_stdio(&spec_io, timeout, None).await?;
+    let conn = target.connect(timeout, None).await?;
     let tools = conn.list_tools().await;
     let pv = conn.protocol_version();
     conn.shutdown().await;

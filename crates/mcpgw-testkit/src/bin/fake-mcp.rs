@@ -16,6 +16,7 @@
 //! | `FAKE_HANG_PING` | `1`: never answer `ping` (health-check tests) |
 //! | `FAKE_STDERR` | line written to stderr at startup |
 //! | `FAKE_SPAWN_LOG` | file; the process appends its pid on start |
+//! | `FAKE_REQUIRE_HEADER` | `--http` only: `Name=value` every request must carry, else 401 |
 //!
 //! Built-in tools: `add`, `echo`, `crash`, `sleep`, `env`, `spawn`, `stderr`.
 //! `fake-mcp --idle` just sleeps (used as a grandchild by `spawn`);
@@ -249,7 +250,32 @@ async fn serve_http(fake: Fake, addr: &str) {
         Arc::new(LocalSessionManager::default()),
         StreamableHttpServerConfig::default(),
     );
-    let app = axum::Router::new().nest_service("/mcp", service);
+    let mut app = axum::Router::new().nest_service("/mcp", service);
+    if let Some((name, value)) = env("FAKE_REQUIRE_HEADER").and_then(|v| {
+        v.split_once('=')
+            .map(|(n, v)| (n.to_ascii_lowercase(), v.to_string()))
+    }) {
+        app = app.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let ok = req
+                    .headers()
+                    .get(name.as_str())
+                    .and_then(|h| h.to_str().ok())
+                    == Some(value.as_str());
+                async move {
+                    if ok {
+                        next.run(req).await
+                    } else {
+                        axum::response::IntoResponse::into_response((
+                            axum::http::StatusCode::UNAUTHORIZED,
+                            [("www-authenticate", "Bearer")],
+                            "missing or wrong header",
+                        ))
+                    }
+                }
+            },
+        ));
+    }
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     let local = listener.local_addr().expect("local addr");
     println!("listening http://{local}/mcp");

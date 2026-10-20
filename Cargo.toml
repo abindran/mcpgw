@@ -69,7 +69,10 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 clap = { version = "4.6", features = ["derive"] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 getrandom = "0.4"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+# One reqwest for us and rmcp. TLS: rustls with the ring provider
+# (mcpgw_core::tls::install) and the OS trust store.
+reqwest = { version = "0.13", default-features = false, features = ["json", "form", "stream", "http2", "charset", "system-proxy", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
 schemars = "1"
 sha2 = "0.10"
 
