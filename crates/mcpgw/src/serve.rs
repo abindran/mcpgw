@@ -38,6 +38,7 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         mode: config.gateway.mode,
         pinned: config.gateway.pinned_tools.clone(),
         accounts: config.gateway.accounts.clone(),
+        login: None,
     }
 }
 
@@ -248,6 +249,32 @@ async fn refresh_loop(broker: Arc<mcpgw_auth::oauth::Broker>, every: Duration) {
     }
 }
 
+/// After a login for `(provider, account)`, clear the backoff of every
+/// server that uses it, so the next call starts it with the new token.
+fn reset_after_login(mgr: &BackendManager, provider: &str, account: &str) {
+    let secret = mcpgw_core::oauth_secret_name(provider, account);
+    for name in mgr.names() {
+        let Some(spec) = mgr.spec(&name) else {
+            continue;
+        };
+        let uses = name == provider
+            || spec.secret_refs().contains(&secret)
+            || spec.for_account(account).secret_refs().contains(&secret);
+        if !uses {
+            continue;
+        }
+        let key = if account == mcpgw_core::DEFAULT_ACCOUNT {
+            name.clone()
+        } else {
+            format!("{name}@{account}")
+        };
+        for k in [&name, &key] {
+            let _ = mgr.reset(k);
+        }
+        tracing::info!(server = %name, %provider, %account, "login completed; server will start fresh");
+    }
+}
+
 async fn serve_http(
     config: &Config,
     token: Token,
@@ -265,13 +292,26 @@ async fn serve_http(
         manager: mgr.clone(),
         shutdown: stop.clone(),
     });
+    let m = mgr.clone();
     let oauth = mcpgw_api::oauth::OAuthState {
         broker,
         base_url: format!("http://127.0.0.1:{}", local.port()),
         remote: Some(login),
+        on_login: Some(Arc::new(move |p: &str, a: &str| {
+            reset_after_login(&m, p, a)
+        })),
+    };
+    let link_state = oauth.clone();
+    let link: mcpgw_router::login::LoginLink = Arc::new(move |p: String, a: String| {
+        let s = link_state.clone();
+        Box::pin(async move { mcpgw_api::oauth::begin_login(&s, &p, &a).await })
+    });
+    let opts = mcpgw_router::GatewayOptions {
+        login: Some(link),
+        ..gateway_options(config)
     };
     let app = mcpgw_api::edge_full(
-        mcpgw_router::http_router(mgr, gateway_options(config)),
+        mcpgw_router::http_router(mgr, opts),
         admin.merge(mcpgw_api::oauth::admin_routes(oauth.clone())),
         mcpgw_api::oauth::public_routes(oauth),
         mcpgw_api::EdgeOptions {

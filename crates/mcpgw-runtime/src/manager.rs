@@ -863,6 +863,14 @@ impl Launch {
                 Some(v) => {
                     values.insert(name.clone(), v);
                 }
+                None if name.starts_with("oauth/") => {
+                    let (p, a) = name["oauth/".len()..]
+                        .split_once('@')
+                        .unwrap_or((name, "default"));
+                    return Err(format!(
+                        "{name} is not connected; run `mcpgw auth connect {p} --account {a}`"
+                    ));
+                }
                 None => {
                     return Err(format!(
                         "secret {name:?} is not set; add it with `mcpgw secret set {name}`"
@@ -1213,6 +1221,9 @@ impl Actor {
             }
             Cmd::Reset => {
                 self.failures = 0;
+                if matches!(self.state, State::Backoff { .. }) {
+                    self.retry_at = None;
+                }
                 self.apply(Event::Reset);
             }
             Cmd::SetEnabled(true, reply) => {

@@ -114,13 +114,17 @@ async fn oauth_protected_remote_server_connects_with_tokens_held_by_mcpgw() {
     assert!(out.contains("added server atl"), "{out}");
     assert!(err.contains("mcpgw auth connect atl"), "{err}");
 
-    // a call before logging in fails with the same hint
+    // a call before logging in answers with a sign-in link (M2-06)
     let c = e.client().await;
-    let err = c
-        .call("atl__add", json!({"a": 1, "b": 2}))
-        .await
-        .unwrap_err();
-    assert!(err.contains("mcpgw auth connect atl"), "{err}");
+    let r = c.call("atl__add", json!({"a": 1, "b": 2})).await.unwrap();
+    assert_eq!(r["isError"], true);
+    assert!(
+        r["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Sign in to atl"),
+        "{r}"
+    );
 
     // login: discovery, dynamic registration, PKCE flow with resource
     let (ok, out) = e.login(&["auth", "connect", "atl", "--no-browser"]).await;
@@ -226,4 +230,94 @@ async fn servers_without_oauth_metadata_say_so() {
         out.contains("publishes no OAuth protected resource metadata"),
         "{out}"
     );
+}
+
+async fn open_link(url: &str) -> String {
+    mcpgw_core::tls::install();
+    let page = reqwest::get(url).await.unwrap(); // provider → daemon callback
+    assert_eq!(page.status().as_u16(), 200);
+    page.text().await.unwrap()
+}
+
+async fn retry(c: &McpClient, name: &str, args: serde_json::Value) -> serde_json::Value {
+    let mut last = serde_json::Value::Null;
+    for _ in 0..30 {
+        match c.call_raw(name, args.clone()).await {
+            Ok(r) if r["isError"] != true => return r,
+            Ok(r) => last = r,
+            Err(e) => last = e,
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("retry never succeeded: {last}");
+}
+
+/// M2-06: a client that supports URL elicitation gets `-32042` with the
+/// sign-in link; after the browser login the retry succeeds.
+#[tokio::test(flavor = "multi_thread")]
+async fn first_call_returns_a_login_link_via_url_elicitation() {
+    let idp = FakeOAuth::start(3600).await;
+    let mcp = HttpFake::start(&[("FAKE_AUTH_SERVER", &idp.base)]);
+    let e = Env::new("elicit");
+    e.ok(&["up"]);
+    e.run(&["add", "atl", "--url", &mcp.url]);
+
+    let info: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(e.dir.join("daemon.json")).unwrap()).unwrap();
+    let token = e.ok(&["token"]);
+    let c = McpClient::http_url_elicitation(info["url"].as_str().unwrap(), Some(token.trim()))
+        .await
+        .unwrap();
+    let err = c
+        .call_raw("atl__add", json!({"a": 1, "b": 2}))
+        .await
+        .unwrap_err();
+    assert_eq!(err["code"], -32042, "{err}");
+    let el = &err["data"]["elicitations"][0];
+    assert_eq!(el["mode"], "url");
+    assert_eq!(el["message"], "Sign in to atl to use this tool.");
+    let url = el["url"].as_str().unwrap();
+    assert!(
+        url.starts_with(&format!("{}/authorize?", idp.base)),
+        "{url}"
+    );
+
+    assert!(open_link(url).await.contains("connected to atl"));
+    let r = retry(&c, "atl__add", json!({"a": 1, "b": 2})).await;
+    assert_eq!(r["content"][0]["text"], "3");
+    c.close().await;
+}
+
+/// A client without URL elicitation gets the link as a tool error the model
+/// can pass on, here through the meta-tools.
+#[tokio::test(flavor = "multi_thread")]
+async fn clients_without_elicitation_get_the_link_as_text() {
+    let idp = FakeOAuth::start(3600).await;
+    let mcp = HttpFake::start(&[("FAKE_AUTH_SERVER", &idp.base)]);
+    let e = Env::new("linktext");
+    let cfg = std::fs::read_to_string(e.dir.join("config.toml")).unwrap();
+    std::fs::write(
+        e.dir.join("config.toml"),
+        cfg.replace("mode = \"direct\"", "mode = \"meta\""),
+    )
+    .unwrap();
+    e.ok(&["up"]);
+    e.run(&["add", "atl", "--url", &mcp.url]);
+    let c = e.client().await;
+
+    let args = json!({"name": "atl__add", "arguments": {"a": 5, "b": 5}});
+    let r = c.call_raw("call_tool", args.clone()).await.unwrap();
+    assert_eq!(r["isError"], true, "{r}");
+    let text = r["content"][0]["text"].as_str().unwrap();
+    assert!(
+        text.starts_with("Sign in to atl to use this tool."),
+        "{text}"
+    );
+    let url = text.lines().last().unwrap();
+    assert!(url.starts_with("http"), "{text}");
+
+    open_link(url).await;
+    let r = retry(&c, "call_tool", args).await;
+    assert_eq!(r["content"][0]["text"], "10");
+    c.close().await;
 }

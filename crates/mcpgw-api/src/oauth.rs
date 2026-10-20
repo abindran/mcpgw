@@ -25,6 +25,9 @@ use serde_json::json;
 pub type SaveClient =
     Arc<dyn Fn(&mcpgw_core::OAuthProvider, Option<&str>) -> Result<(), String> + Send + Sync>;
 
+/// Runs after a completed login, with `(provider, account)`.
+pub type OnLogin = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
 /// Finds the URL of a remote MCP server by name.
 pub type ServerUrl = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
@@ -50,6 +53,22 @@ pub struct OAuthState {
     pub base_url: String,
     /// Discovery for remote MCP servers.
     pub remote: Option<RemoteLogin>,
+    /// Called after a login completes, with `(provider, account)`.
+    pub on_login: Option<OnLogin>,
+}
+
+/// Start a login (discovering a remote server's OAuth setup if needed);
+/// returns `(state, authorization URL)`.
+pub async fn begin_login(
+    s: &OAuthState,
+    provider: &str,
+    account: &str,
+) -> Result<(String, String), String> {
+    let redirect = format!("{}/oauth/callback", s.base_url);
+    if s.broker.provider(provider).is_none() {
+        discover_provider(s, provider, &redirect).await?;
+    }
+    s.broker.start(provider, account, &redirect)
 }
 
 /// Discover, register and add a provider for remote server `name`.
@@ -92,13 +111,7 @@ async fn start(
     let account = body
         .and_then(|b| b.0.account)
         .unwrap_or_else(|| "default".into());
-    let redirect = format!("{}/oauth/callback", s.base_url);
-    if s.broker.provider(&provider).is_none()
-        && let Err(e) = discover_provider(&s, &provider, &redirect).await
-    {
-        return (StatusCode::BAD_REQUEST, Json(json!({"error": e}))).into_response();
-    }
-    match s.broker.start(&provider, &account, &redirect) {
+    match begin_login(&s, &provider, &account).await {
         Ok((state, url)) => {
             Json(json!({"state": state, "url": url, "account": account})).into_response()
         }
@@ -190,10 +203,15 @@ async fn callback(State(s): State<OAuthState>, Query(q): Query<CallbackQuery>) -
         .complete(&state, q.code.as_deref(), error.as_deref())
         .await
     {
-        FlowStatus::Done { provider, account } => page(
-            "Connected",
-            &format!("mcpgw is connected to {provider} ({account}). You can close this tab."),
-        )
+        FlowStatus::Done { provider, account } => {
+            if let Some(f) = &s.on_login {
+                f(&provider, &account);
+            }
+            page(
+                "Connected",
+                &format!("mcpgw is connected to {provider} ({account}). You can close this tab."),
+            )
+        }
         .into_response(),
         FlowStatus::Error { message } => {
             (StatusCode::BAD_REQUEST, page("Login failed", &message)).into_response()

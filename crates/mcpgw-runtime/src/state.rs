@@ -209,6 +209,8 @@ pub fn step(
 
         (S::Backoff { .. }, E::Demand) => (state.clone(), A::None),
         (S::Backoff { .. }, E::RetryDue) => (S::Cold, A::None),
+        // the cause was fixed (e.g. a login completed): retry now
+        (S::Backoff { .. }, E::Reset) => (S::Cold, A::None),
         (S::Backoff { .. }, E::Stop) => (S::Cold, A::None),
 
         (S::Failed, E::Demand | E::Stop) => (S::Failed, A::None),
@@ -306,7 +308,7 @@ mod tests {
             (S::Draining { .. }, E::StartErr) => (S::Cold, A::None),
             (S::Draining { .. }, E::Drift) => (S::Cold, A::Close),
             (S::Backoff { .. }, E::Demand) => (s.clone(), A::None),
-            (S::Backoff { .. }, E::RetryDue | E::Stop) => (S::Cold, A::None),
+            (S::Backoff { .. }, E::RetryDue | E::Stop | E::Reset) => (S::Cold, A::None),
             (S::Failed, E::Demand | E::Stop) => (S::Failed, A::None),
             (S::Failed, E::Reset) => (S::Cold, A::None),
             (S::Quarantined, E::Demand | E::Stop) => (S::Quarantined, A::None),

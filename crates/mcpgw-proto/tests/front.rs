@@ -30,6 +30,7 @@ impl ToolProvider for Fake {
         &self,
         name: String,
         args: Option<JsonObject>,
+        _ctx: mcpgw_proto::front::CallContext,
     ) -> BoxFuture<'_, Result<JsonObject, ProtoError>> {
         Box::pin(async move {
             match name.as_str() {

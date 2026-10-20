@@ -233,6 +233,8 @@ pub async fn call(
             let inner = args.get("arguments").and_then(Value::as_object).cloned();
             match call_public_as(manager, &target, inner, accounts).await {
                 Ok(r) => Ok(r),
+                // the gateway turns these into a sign-in link
+                Err(e) if crate::login::needs_login(&e) => Err(e),
                 Err(ProtoError::Rpc { message, .. }) => Ok(tool_error(message)),
                 Err(e) => Ok(tool_error(e.to_string())),
             }

@@ -5,6 +5,7 @@
 //! `rmcp` directly; all protocol access goes through `mcpgw-proto`.
 
 pub mod aggregate;
+pub mod login;
 pub mod meta;
 
 use std::sync::Arc;
@@ -22,8 +23,10 @@ pub fn client_facing_version() -> &'static str {
 }
 
 /// How the gateway presents tools.
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct GatewayOptions {
+    /// Starts logins for calls that need one (M2-06); none in stdio mode.
+    pub login: Option<login::LoginLink>,
     /// `direct`: every backend tool; `meta`: only the meta-tools;
     /// `hybrid`: meta-tools plus `pinned`.
     pub mode: Mode,
@@ -55,6 +58,31 @@ impl GatewayProvider {
     /// Wrap a running backend manager with presentation options.
     pub fn with_options(manager: Arc<BackendManager>, opts: GatewayOptions) -> Self {
         Self { manager, opts }
+    }
+
+    /// Start the login a failed call needs and answer with its link.
+    async fn login_answer(
+        &self,
+        e: ProtoError,
+        public: &str,
+        ctx: &front::CallContext,
+        link: &login::LoginLink,
+    ) -> Result<JsonObject, ProtoError> {
+        let Some((server, _)) = resolve(&self.manager, public).await else {
+            return Err(e);
+        };
+        let account = self.opts.accounts.get(&server).map(String::as_str);
+        let (provider, account) = login::login_target(&e, &server, account);
+        match link(provider.clone(), account.clone()).await {
+            Ok((id, url)) => {
+                tracing::info!(%provider, %account, "call needs a login; sent a sign-in link");
+                login::respond(ctx, &provider, &account, &id, &url)
+            }
+            Err(why) => {
+                tracing::warn!(%provider, %account, error = %why, "could not start a login");
+                Err(e)
+            }
+        }
     }
 
     async fn listing(&self) -> Vec<JsonObject> {
@@ -90,6 +118,7 @@ impl ToolProvider for GatewayProvider {
         &self,
         name: String,
         arguments: Option<JsonObject>,
+        ctx: front::CallContext,
     ) -> BoxFuture<'_, Result<JsonObject, ProtoError>> {
         Box::pin(async move {
             // In meta and hybrid modes the meta-tools exist; any tool can still
@@ -104,10 +133,16 @@ impl ToolProvider for GatewayProvider {
                 _ => name.clone(),
             };
             mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
-                if meta {
+                let res = if meta {
                     meta::call(&self.manager, &name, arguments, &self.opts.accounts).await
                 } else {
                     call_public_as(&self.manager, &name, arguments, &self.opts.accounts).await
+                };
+                match (res, &self.opts.login) {
+                    (Err(e), Some(link)) if login::needs_login(&e) => {
+                        self.login_answer(e, &label, &ctx, link).await
+                    }
+                    (res, _) => res,
                 }
             })
             .await

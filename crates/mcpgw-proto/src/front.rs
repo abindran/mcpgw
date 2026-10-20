@@ -31,8 +31,22 @@ pub trait ToolProvider: Send + Sync + 'static {
         &self,
         name: String,
         arguments: Option<JsonObject>,
+        ctx: CallContext,
     ) -> BoxFuture<'_, Result<JsonObject, ProtoError>>;
 }
+
+/// What the gateway knows about the client making a call.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CallContext {
+    /// The client handles URL-mode elicitation (MCP 2025-11-25), so a
+    /// `-32042` "URL elicitation required" error will show it a link.
+    pub url_elicitation: bool,
+    /// The client's name, if it said.
+    pub client_name: Option<String>,
+}
+
+/// JSON-RPC error code: the request needs the user to visit a URL first.
+pub const URL_ELICITATION_REQUIRED: i32 = -32042;
 
 /// Identity + instructions advertised to clients.
 #[derive(Debug, Clone)]
@@ -106,11 +120,19 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let caps = context.client_capabilities();
+        let ctx = CallContext {
+            url_elicitation: caps
+                .as_ref()
+                .and_then(|c| c.elicitation.as_ref())
+                .is_some_and(|e| e.url.is_some()),
+            client_name: context.client_info().map(|i| i.name),
+        };
         let out = self
             .provider
-            .call_tool(request.name.to_string(), request.arguments)
+            .call_tool(request.name.to_string(), request.arguments, ctx)
             .await
             .map_err(to_error_data)?;
         let result: CallToolResult = serde_json::from_value(Value::Object(out)).map_err(|e| {

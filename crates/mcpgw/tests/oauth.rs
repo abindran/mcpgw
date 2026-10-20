@@ -268,16 +268,20 @@ async fn tokens_refresh_and_revocation_needs_a_new_login() {
         "kept refreshing a dead grant"
     );
 
-    // the running server keeps working; a fresh start needs the new login
+    // the running server keeps working; a fresh start needs the new login,
+    // and the call answers with a sign-in link for it (M2-06)
     e.ok(&["restart", "fx"]);
-    let err = c
+    let r = c
         .call("fx__env", serde_json::json!({"name": "GITHUB_TOKEN"}))
         .await
-        .unwrap_err();
+        .unwrap();
+    assert_eq!(r["isError"], true, "{r}");
+    let text = r["content"][0]["text"].as_str().unwrap();
     assert!(
-        err.contains("mcpgw auth connect fake --account default"),
-        "{err}"
+        text.starts_with("Sign in to fake to use this tool."),
+        "{text}"
     );
+    assert!(text.contains(&format!("{}/authorize?", idp.base)), "{text}");
     c.close().await;
 }
 

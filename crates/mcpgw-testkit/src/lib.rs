@@ -129,7 +129,21 @@ impl Drop for HttpFake {
 /// An MCP client for tests: rmcp with the same lifecycle real clients use
 /// (2026-07-28 preferred, 2025-11-25 accepted).
 pub struct McpClient {
-    svc: rmcp::service::RunningService<rmcp::RoleClient, ()>,
+    svc: rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientConfig>,
+}
+
+/// Client identity and capabilities; `url_elicitation` declares support for
+/// URL-mode elicitation.
+fn client_config(url_elicitation: bool) -> rmcp::model::ClientConfig {
+    use rmcp::model::{ClientCapabilities, ElicitationCapability, UrlElicitationCapability};
+    let mut caps = ClientCapabilities::default();
+    if url_elicitation {
+        caps.elicitation =
+            Some(ElicitationCapability::new().with_url(UrlElicitationCapability::new()));
+    }
+    let mut cfg = rmcp::model::ClientConfig::default();
+    cfg.capabilities = caps;
+    cfg
 }
 
 fn lifecycle() -> rmcp::ClientLifecycleMode {
@@ -143,19 +157,25 @@ fn lifecycle() -> rmcp::ClientLifecycleMode {
 impl McpClient {
     /// Connect over Streamable HTTP, sending `Authorization: Bearer <token>`.
     pub async fn http(url: &str, token: Option<&str>) -> Result<Self, String> {
-        Self::http_with(url, token, lifecycle()).await
+        Self::http_with(url, token, lifecycle(), false).await
+    }
+
+    /// Like [`McpClient::http`], as a client that supports URL elicitation.
+    pub async fn http_url_elicitation(url: &str, token: Option<&str>) -> Result<Self, String> {
+        Self::http_with(url, token, lifecycle(), true).await
     }
 
     /// Like [`McpClient::http`] but as a 2025-11-25 client (`initialize`,
     /// HTTP sessions).
     pub async fn http_legacy(url: &str, token: Option<&str>) -> Result<Self, String> {
-        Self::http_with(url, token, rmcp::ClientLifecycleMode::Initialize).await
+        Self::http_with(url, token, rmcp::ClientLifecycleMode::Initialize, false).await
     }
 
     async fn http_with(
         url: &str,
         token: Option<&str>,
         lifecycle: rmcp::ClientLifecycleMode,
+        url_elicitation: bool,
     ) -> Result<Self, String> {
         use rmcp::{
             ClientServiceExt,
@@ -170,7 +190,10 @@ impl McpClient {
             cfg = cfg.auth_header(t.to_string());
         }
         let t = StreamableHttpClientTransport::from_config(cfg);
-        let svc = ().serve_with_lifecycle(t, lifecycle).await.map_err(|e| e.to_string())?;
+        let svc = client_config(url_elicitation)
+            .serve_with_lifecycle(t, lifecycle)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(Self { svc })
     }
 
@@ -190,7 +213,10 @@ impl McpClient {
     ) -> Result<Self, String> {
         use rmcp::{ClientServiceExt, transport::TokioChildProcess};
         let t = TokioChildProcess::new(cmd).map_err(|e| e.to_string())?;
-        let svc = ().serve_with_lifecycle(t, lifecycle).await.map_err(|e| e.to_string())?;
+        let svc = client_config(false)
+            .serve_with_lifecycle(t, lifecycle)
+            .await
+            .map_err(|e| e.to_string())?;
         Ok(Self { svc })
     }
 
@@ -227,6 +253,24 @@ impl McpClient {
         p.arguments = args.as_object().cloned();
         let r = self.svc.call_tool(p).await.map_err(|e| e.to_string())?;
         Ok(serde_json::to_value(r).expect("result json"))
+    }
+
+    /// Call a tool; `Err` is the JSON-RPC error object (`code`, `message`,
+    /// `data`) when the server returned one.
+    pub async fn call_raw(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, serde_json::Value> {
+        let mut p = rmcp::model::CallToolRequestParams::new(name.to_string());
+        p.arguments = args.as_object().cloned();
+        match self.svc.call_tool(p).await {
+            Ok(r) => Ok(serde_json::to_value(r).expect("result json")),
+            Err(rmcp::ServiceError::McpError(e)) => {
+                Err(serde_json::to_value(e).expect("error json"))
+            }
+            Err(e) => Err(serde_json::json!({"message": e.to_string()})),
+        }
     }
 
     /// The first text content of a tool call, for brevity in assertions.

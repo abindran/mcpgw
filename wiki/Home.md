@@ -65,7 +65,7 @@ M1 exit check: [M1-Exit](M1-Exit.md).
 | [M2-03](M2-03-Multi-Account-Bindings.md) | Multi-account bindings | ✅ |
 | [M2-04](M2-04-Remote-HTTP-Backends.md) | Remote HTTP backends, legacy SSE bridge | ✅ |
 | [M2-05](M2-05-Upstream-OAuth.md) | Upstream OAuth for remote MCP servers | ✅ |
-| M2-06 | URL-mode elicitation for auth | ⏳ |
+| [M2-06](M2-06-URL-Elicitation-for-Auth.md) | URL-mode elicitation for auth | ✅ |
 | M2-07 | Profiles | ⏳ |
 | M2-08 | Tool policy | ⏳ |
 | M2-09 | Approvals | ⏳ |
