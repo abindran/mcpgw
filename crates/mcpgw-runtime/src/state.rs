@@ -12,6 +12,8 @@
 //!    │                 Failed ──Reset──▶ Cold
 //!    │
 //!    └── Close ◀── Draining{n} ◀── Stop (from Ready / Idle / Busy / Starting)
+//!
+//!   Starting ──Drift──▶ Quarantined ──Reset (approve)──▶ Cold
 //! ```
 //!
 //! `Disabled` servers never leave `Disabled`.
@@ -44,6 +46,9 @@ pub enum State {
     },
     /// Gave up after too many consecutive failures; needs a reset.
     Failed,
+    /// Its tools no longer match the pinned manifest; calls are refused
+    /// until the new tools are approved (M1-08).
+    Quarantined,
     /// Not allowed to run (disabled, or transport not supported).
     Disabled,
 }
@@ -60,6 +65,7 @@ impl State {
             Self::Draining { .. } => "draining",
             Self::Backoff { .. } => "backoff",
             Self::Failed => "failed",
+            Self::Quarantined => "quarantined",
             Self::Disabled => "disabled",
         }
     }
@@ -82,6 +88,8 @@ pub enum Event {
     StartOk,
     /// The spawn or handshake failed.
     StartErr,
+    /// The server started but its tools differ from the pin.
+    Drift,
     /// A tool call started.
     CallStart,
     /// A tool call finished.
@@ -92,7 +100,8 @@ pub enum Event {
     Stop,
     /// The backoff delay elapsed.
     RetryDue,
-    /// Operator reset of a failed server.
+    /// Operator reset of a failed server, or approval of a quarantined
+    /// server's new tools.
     Reset,
 }
 
@@ -146,6 +155,7 @@ pub fn step(
         (S::Starting, E::Demand) => (S::Starting, A::None),
         (S::Starting, E::StartOk) => (S::Ready, A::None),
         (S::Starting, E::StartErr) => after_failure(),
+        (S::Starting, E::Drift) => (S::Quarantined, A::Close),
         // Can't abort a handshake; drain it and close when it lands.
         (S::Starting, E::Stop) => (S::Draining { inflight: 0 }, A::None),
 
@@ -184,6 +194,7 @@ pub fn step(
             A::None,
         ),
         (S::Draining { .. }, E::StartOk | E::Lost) => (S::Cold, A::Close),
+        (S::Draining { .. }, E::Drift) => (S::Cold, A::Close),
         (S::Draining { .. }, E::StartErr) => (S::Cold, A::None),
 
         (S::Backoff { .. }, E::Demand) => (state.clone(), A::None),
@@ -192,6 +203,9 @@ pub fn step(
 
         (S::Failed, E::Demand | E::Stop) => (S::Failed, A::None),
         (S::Failed, E::Reset) => (S::Cold, A::None),
+
+        (S::Quarantined, E::Demand | E::Stop) => (S::Quarantined, A::None),
+        (S::Quarantined, E::Reset) => (S::Cold, A::None),
 
         (state, event) => {
             return Err(Invalid {
@@ -210,10 +224,11 @@ mod tests {
     use Event as E;
     use State as S;
 
-    const ALL_EVENTS: [Event; 9] = [
+    const ALL_EVENTS: [Event; 10] = [
         E::Demand,
         E::StartOk,
         E::StartErr,
+        E::Drift,
         E::CallStart,
         E::CallEnd,
         E::Lost,
@@ -235,6 +250,7 @@ mod tests {
             S::Draining { inflight: 2 },
             S::Backoff { attempt: 2 },
             S::Failed,
+            S::Quarantined,
             S::Disabled,
         ]
     }
@@ -248,6 +264,7 @@ mod tests {
             (S::Starting, E::Demand) => (S::Starting, A::None),
             (S::Starting, E::StartOk) => (S::Ready, A::None),
             (S::Starting, E::StartErr) => (S::Backoff { attempt: 1 }, A::Retry),
+            (S::Starting, E::Drift) => (S::Quarantined, A::Close),
             (S::Starting, E::Stop) => (S::Draining { inflight: 0 }, A::None),
             (S::Ready, E::Demand) => (S::Ready, A::None),
             (S::Idle, E::Demand) => (S::Idle, A::None),
@@ -270,10 +287,13 @@ mod tests {
             (S::Draining { inflight: 2 }, E::CallEnd) => (S::Draining { inflight: 1 }, A::None),
             (S::Draining { .. }, E::StartOk | E::Lost) => (S::Cold, A::Close),
             (S::Draining { .. }, E::StartErr) => (S::Cold, A::None),
+            (S::Draining { .. }, E::Drift) => (S::Cold, A::Close),
             (S::Backoff { .. }, E::Demand) => (s.clone(), A::None),
             (S::Backoff { .. }, E::RetryDue | E::Stop) => (S::Cold, A::None),
             (S::Failed, E::Demand | E::Stop) => (S::Failed, A::None),
             (S::Failed, E::Reset) => (S::Cold, A::None),
+            (S::Quarantined, E::Demand | E::Stop) => (S::Quarantined, A::None),
+            (S::Quarantined, E::Reset) => (S::Cold, A::None),
             _ => return None,
         })
     }
@@ -288,7 +308,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 12 * 9);
+        assert_eq!(checked, 13 * 10);
     }
 
     #[test]

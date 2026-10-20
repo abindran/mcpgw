@@ -17,7 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use mcpgw_core::{ServerSpec, Transport};
+use mcpgw_core::{ManifestDiff, ServerSpec, ToolManifest, Transport};
 use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
 use tokio::sync::{RwLock, mpsc, oneshot};
 
@@ -106,6 +106,8 @@ pub struct BackendStatus {
 
 struct Shared {
     name: String,
+    /// The live manifest that differs from the pin, while quarantined.
+    pending: std::sync::Mutex<Option<ToolManifest>>,
     status: std::sync::RwLock<BackendStatus>,
     tools: RwLock<Vec<JsonObject>>,
     stderr: Arc<Mutex<VecDeque<String>>>,
@@ -252,6 +254,7 @@ impl BackendManager {
             };
             let shared = Arc::new(Shared {
                 name: cfg.name.clone(),
+                pending: std::sync::Mutex::new(None),
                 status: std::sync::RwLock::new(BackendStatus {
                     name: cfg.name.clone(),
                     state: state.clone(),
@@ -447,6 +450,35 @@ impl BackendManager {
         let _ = h.tx.send(Cmd::Stop(reply));
         let _ = rx.await;
         Ok(())
+    }
+
+    /// The tools a quarantined server reports now, which differ from its pin.
+    pub fn pending_manifest(&self, server: &str) -> Option<ToolManifest> {
+        self.backends
+            .get(server)?
+            .shared
+            .pending
+            .lock()
+            .expect("pending")
+            .clone()
+    }
+
+    /// Trust a quarantined server's new tools: they become its pin and the
+    /// server can start again. Returns the new manifest.
+    pub fn approve_tools(&self, server: &str) -> Result<ToolManifest, ProtoError> {
+        let h = self.handle(server)?;
+        let m = h
+            .shared
+            .pending
+            .lock()
+            .expect("pending")
+            .take()
+            .ok_or_else(|| {
+                ProtoError::Unavailable(format!("server {server} is not quarantined"))
+            })?;
+        self.catalog.record(m.clone());
+        let _ = h.tx.send(Cmd::Reset);
+        Ok(m)
     }
 
     /// Clear a `Failed` server so the next call tries again.
@@ -744,6 +776,11 @@ impl Actor {
                 "server {name} is {}",
                 why()
             ))),
+            State::Quarantined => Some(ProtoError::Unavailable(format!(
+                "server {name} is quarantined: its tools changed since they were pinned ({}). \
+                 Calls are blocked until someone reviews the change and runs `mcpgw pin {name}`",
+                why()
+            ))),
             State::Failed => Some(ProtoError::Unavailable(format!(
                 "server {name} failed to start {} times (last error: {}); fix it and run `mcpgw restart {name}`",
                 self.failures,
@@ -794,6 +831,16 @@ impl Actor {
             Internal::Started(Ok((conn, tools))) => {
                 let pv = conn.protocol_version();
                 self.conn = Some(Arc::new(conn));
+                if let Some(diff) = self.drift(pv.clone(), &tools) {
+                    tracing::warn!(server = %self.shared.name, %diff, "tools changed since pinned; quarantined");
+                    self.shared
+                        .update(|s| s.last_error = Some(diff.to_string()));
+                    self.apply(Event::Drift);
+                    if let Some(e) = self.refusal() {
+                        self.fail_waiters(&e);
+                    }
+                    return;
+                }
                 if !self.apply(Event::StartOk) {
                     if let Some(c) = self.conn.take() {
                         tokio::spawn(close(c));
@@ -864,6 +911,19 @@ impl Actor {
                 self.lost(format!("health check failed: {e}"));
             }
         }
+    }
+
+    /// Compare the tools a server reports on start with its pin. On a
+    /// mismatch, keeps the live manifest for approval and returns the diff.
+    fn drift(&mut self, pv: Option<String>, tools: &[JsonObject]) -> Option<ManifestDiff> {
+        let pinned = self.shared.catalog.get(&self.shared.name)?;
+        let live = manifest_from(&self.shared.name, pv, tools);
+        if live.sha256 == pinned.sha256 {
+            return None;
+        }
+        let diff = ManifestDiff::between(&pinned, &live);
+        *self.shared.pending.lock().expect("pending") = Some(live);
+        Some(diff)
     }
 
     fn lost(&mut self, why: String) {

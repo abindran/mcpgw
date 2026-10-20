@@ -10,7 +10,7 @@ pub mod secret;
 pub mod server;
 
 pub use duration::Duration;
-pub use manifest::{ToolDef, ToolManifest};
+pub use manifest::{ManifestDiff, ToolDef, ToolManifest};
 pub use profile::{Mode, Policy, Profile};
 pub use secret::{SecretMeta, validate_secret_name};
 pub use server::{ServerSpec, TOOL_SEPARATOR, Transport, validate_server_name};
