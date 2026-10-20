@@ -206,7 +206,9 @@ async fn passes_env_and_rpc_errors() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn restarts_after_crash() {
-    let m = BackendManager::start(&[server("fx", &[])], fast());
+    // a crash is seen by the failed call and the process exit; fast pings
+    // would only add a load-dependent way to drop the restarted session
+    let m = BackendManager::start(&[server("fx", &[])], patient());
     assert!(m.wait_ready(Duration::from_secs(20)).await);
     let err = m.call_tool("fx", "crash", None).await.unwrap_err();
     assert!(
