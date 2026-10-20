@@ -206,3 +206,96 @@ async fn slow_first_start_of_legacy_server_connects() {
     m.shutdown().await;
     let _ = std::fs::remove_file(&marker);
 }
+
+fn alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        std::process::Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
+    }
+}
+
+async fn gone(pid: u32) -> bool {
+    for _ in 0..100 {
+        if !alive(pid) {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    false
+}
+
+/// Health checks slow enough that a loaded machine never restarts the
+/// server mid-test (a restart would kill the tree before we look).
+fn patient() -> ManagerOptions {
+    ManagerOptions {
+        health_interval: Duration::from_secs(60),
+        ping_timeout: Duration::from_secs(30),
+        ..fast()
+    }
+}
+
+/// Stopping a server removes its whole process tree, like the `node`
+/// process an `npx` launcher leaves behind.
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_a_server_kills_its_process_tree() {
+    let m = BackendManager::start(&[server("fx", &[])], patient());
+    assert!(m.wait_ready(Duration::from_secs(20)).await);
+    let pid: u32 = text_of(&m.call_tool("fx", "spawn", None).await.unwrap())
+        .parse()
+        .unwrap();
+    assert!(alive(pid), "grandchild {pid} should be running");
+    m.shutdown().await;
+    assert!(gone(pid).await, "grandchild {pid} survived its server");
+}
+
+/// A crashed server's leftovers go too: the restart cleans up the old tree.
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_after_crash_cleans_up_grandchildren() {
+    let m = BackendManager::start(&[server("fx", &[])], patient());
+    assert!(m.wait_ready(Duration::from_secs(20)).await);
+    let pid: u32 = text_of(&m.call_tool("fx", "spawn", None).await.unwrap())
+        .parse()
+        .unwrap();
+    let _ = m.call_tool("fx", "crash", None).await;
+    assert!(
+        gone(pid).await,
+        "grandchild {pid} survived the crash restart"
+    );
+    m.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn captures_stderr_lines() {
+    let m = BackendManager::start(&[server("fx", &[("FAKE_STDERR", "booting fx")])], patient());
+    assert!(m.wait_ready(Duration::from_secs(20)).await);
+    m.call_tool(
+        "fx",
+        "stderr",
+        args(serde_json::json!({"text": "warn: disk"})),
+    )
+    .await
+    .unwrap();
+    let mut tail = Vec::new();
+    for _ in 0..100 {
+        tail = m.stderr_tail("fx");
+        if tail.len() >= 2 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(tail, ["booting fx", "warn: disk"]);
+    assert!(m.stderr_tail("nope").is_empty());
+    m.shutdown().await;
+}

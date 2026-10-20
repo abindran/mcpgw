@@ -18,7 +18,8 @@
 //! | `FAKE_SPAWN_LOG` | file; the process appends its pid on start |
 //!
 //! Built-in tools: `add`, `echo`, `crash`, `sleep`, `env`, `spawn`, `stderr`.
-//! `fake-mcp --idle` just sleeps (used as a grandchild by `spawn`).
+//! `fake-mcp --idle` just sleeps (used as a grandchild by `spawn`);
+//! `fake-mcp --exit` exits at once (spawn-cost baseline for timing tests).
 
 use std::{
     borrow::Cow,
@@ -259,6 +260,9 @@ async fn serve_http(fake: Fake, addr: &str) {
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--exit") {
+        return;
+    }
     if args.first().map(String::as_str) == Some("--idle") {
         loop {
             tokio::time::sleep(Duration::from_secs(3600)).await;

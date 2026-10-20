@@ -5,16 +5,19 @@
 //! on failure drop the connection and reconnect with exponential backoff.
 
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU32, Ordering},
     },
     time::Duration,
 };
 
 use mcpgw_core::{ServerSpec, Transport};
-use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StdioSpec};
+use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
+
+/// Lines of stderr kept per server.
+pub const STDERR_LINES: usize = 200;
 use tokio::sync::{Notify, RwLock, watch};
 
 /// Tunables for the backend manager.
@@ -98,9 +101,24 @@ struct Backend {
     state: RwLock<BackendState>,
     restarts: AtomicU32,
     wake: Notify,
+    stderr: Arc<Mutex<VecDeque<String>>>,
 }
 
 impl Backend {
+    /// A sink that keeps the last [`STDERR_LINES`] lines and logs each one.
+    fn stderr_sink(&self) -> StderrSink {
+        let buf = self.stderr.clone();
+        let name = self.name.clone();
+        Arc::new(move |line: &str| {
+            tracing::debug!(target: "mcpgw::backend", server = %name, "{line}");
+            let mut b = buf.lock().expect("stderr buffer");
+            if b.len() == STDERR_LINES {
+                b.pop_front();
+            }
+            b.push_back(line.to_string());
+        })
+    }
+
     async fn set_state(&self, s: BackendState) {
         *self.state.write().await = s;
     }
@@ -136,6 +154,7 @@ impl BackendManager {
                 state: RwLock::new(initial.clone()),
                 restarts: AtomicU32::new(0),
                 wake: Notify::new(),
+                stderr: Arc::default(),
             });
             if let (
                 BackendState::Starting,
@@ -205,6 +224,20 @@ impl BackendManager {
                 return false;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// The last lines a server wrote to stderr (across restarts).
+    pub fn stderr_tail(&self, server: &str) -> Vec<String> {
+        match self.backends.get(server) {
+            Some(b) => b
+                .stderr
+                .lock()
+                .expect("stderr buffer")
+                .iter()
+                .cloned()
+                .collect(),
+            None => Vec::new(),
         }
     }
 
@@ -286,20 +319,23 @@ async fn supervise(
 ) {
     let mut attempt: u32 = 0;
     let mut ever_connected = false;
+    let sink = b.stderr_sink();
     loop {
         if *stop.borrow() {
             break;
         }
-        let connected = match BackendConn::connect_stdio(&spec, opts.connect_timeout).await {
-            Ok(c) => match c.list_tools().await {
-                Ok(tools) => Ok((c, tools)),
-                Err(e) => {
-                    c.shutdown().await;
-                    Err(format!("tools/list failed: {e}"))
-                }
-            },
-            Err(e) => Err(e.to_string()),
-        };
+        let connected =
+            match BackendConn::connect_stdio(&spec, opts.connect_timeout, Some(sink.clone())).await
+            {
+                Ok(c) => match c.list_tools().await {
+                    Ok(tools) => Ok((c, tools)),
+                    Err(e) => {
+                        c.shutdown().await;
+                        Err(format!("tools/list failed: {e}"))
+                    }
+                },
+                Err(e) => Err(e.to_string()),
+            };
         match connected {
             Ok((conn, tools)) => {
                 let conn = Arc::new(conn);

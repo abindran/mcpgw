@@ -42,7 +42,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | [M1-01](M1-01-HTTP-Front-Door.md) | Streamable HTTP front door on `127.0.0.1:7777/mcp` | ✅ |
 | [M1-02](M1-02-Stdio-Shim.md) | stdio shim `mcpgw connect` | ✅ |
 | [M1-03](M1-03-SQLite-Store.md) | SQLite store: servers, manifests, profiles, secrets metadata | ✅ |
-| M1-04 | stdio launcher: process groups / Job Objects, stderr capture | ⏳ |
+| [M1-04](M1-04-Stdio-Launcher.md) | stdio launcher: process groups / Job Objects, stderr capture | ✅ |
 | M1-05 | Lifecycle supervisor state machine | ⏳ |
 | M1-06 | Idle reaper and `max_running` cap | ⏳ |
 | M1-07 | Manifest capture with SHA-256 pin | ⏳ |

@@ -120,10 +120,21 @@ async fn starts_in_under_50ms() {
         times.push(t0.elapsed());
         s.cancel().await.unwrap();
     }
-    // Best of five, so parallel tests on a loaded CI runner don't skew it.
+    // Best of five, so parallel tests on a loaded runner don't skew it. On a
+    // badly overloaded machine even exec is slow, so also accept a handshake
+    // that adds under 25 ms to a bare spawn of the same binary.
     times.sort();
-    assert!(
-        times[0] < Duration::from_millis(50),
-        "start times {times:?}"
-    );
+    let mut bare = Vec::new();
+    for _ in 0..5 {
+        let t0 = Instant::now();
+        std::process::Command::new(mcpgw_testkit::fake_mcp())
+            .arg("--exit")
+            .status()
+            .unwrap();
+        bare.push(t0.elapsed());
+    }
+    bare.sort();
+    let ok = times[0] < Duration::from_millis(50)
+        || times[0].saturating_sub(bare[0]) < Duration::from_millis(25);
+    assert!(ok, "start times {times:?}, bare spawn {bare:?}");
 }

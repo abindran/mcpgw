@@ -942,6 +942,8 @@ name = "mcpgw-proto"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "nix",
+ "process-wrap",
  "rmcp",
  "serde",
  "serde_json",

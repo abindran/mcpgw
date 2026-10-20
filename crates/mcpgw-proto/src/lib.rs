@@ -17,7 +17,7 @@ pub mod spike_server;
 /// The gateway speaks a newer protocol to LLM clients and may need to talk an
 /// older protocol to backend tool servers; version bridging is proven in the
 /// M0-04 / M0-05 spikes.
-pub use backend::{BackendConn, JsonObject, ProtoError, StdioSpec};
+pub use backend::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
 
 pub mod version {
     /// Protocol version presented to LLM clients (server side).

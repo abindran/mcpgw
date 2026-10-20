@@ -3,7 +3,7 @@
 //! The public API is `rmcp`-free: tools, arguments and results cross the seam
 //! as JSON objects so other crates never touch protocol types.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{collections::BTreeMap, process::Stdio, sync::Arc, time::Duration};
 
 use rmcp::{
     ClientHandler, ClientLifecycleMode, ClientServiceExt, RoleClient, ServiceError,
@@ -68,6 +68,9 @@ impl From<ServiceError> for ProtoError {
     }
 }
 
+/// Receives each line a stdio backend writes to stderr.
+pub type StderrSink = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// How to launch a stdio backend.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StdioSpec {
@@ -97,14 +100,65 @@ fn backend_lifecycle() -> ClientLifecycleMode {
     }
 }
 
+/// Forward a child's stderr line by line until it closes. The pipe must be
+/// drained even when nobody listens, or the child blocks on write.
+async fn drain_stderr(err: tokio::process::ChildStderr, command: String, sink: Option<StderrSink>) {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = tokio::io::BufReader::new(err).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        match &sink {
+            Some(s) => s(&line),
+            None => tracing::debug!(target: "mcpgw::backend", %command, "{line}"),
+        }
+    }
+}
+
 /// Plain legacy `initialize` at 2025-11-25 (retry path, see `connect_stdio`).
 fn legacy_lifecycle() -> ClientLifecycleMode {
     ClientLifecycleMode::Initialize
 }
 
+/// Kills a stdio server's whole process group when dropped (Unix).
+///
+/// rmcp's graceful shutdown closes stdin and waits for the server itself to
+/// exit; when it does, nothing signals the rest of the group, so children
+/// (`npx` → `node`) would outlive it. The group id is the server's pid
+/// (`ProcessGroup::leader`). The group can't be recycled while any member
+/// is alive, so a group that is already gone just gives `ESRCH`. On Windows
+/// the Job Object does the same when its handle closes.
+struct TreeGuard {
+    #[cfg(unix)]
+    pgid: Option<i32>,
+}
+
+impl TreeGuard {
+    fn new(pid: Option<u32>) -> Self {
+        #[cfg(not(unix))]
+        let _ = pid;
+        Self {
+            #[cfg(unix)]
+            pgid: pid.and_then(|p| i32::try_from(p).ok()),
+        }
+    }
+}
+
+impl Drop for TreeGuard {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        if let Some(pgid) = self.pgid {
+            let _ = nix::sys::signal::killpg(
+                nix::unistd::Pid::from_raw(pgid),
+                nix::sys::signal::Signal::SIGKILL,
+            );
+        }
+    }
+}
+
 /// A live connection to one backend.
 pub struct BackendConn {
     service: RunningService<RoleClient, GatewayClient>,
+    // Declared after `service` so it drops (kills the tree) last.
+    _tree: TreeGuard,
 }
 
 impl BackendConn {
@@ -119,15 +173,30 @@ impl BackendConn {
     /// fallback fails on the uncorrelated reply. So when the automatic
     /// handshake fails, the server is started once more with a plain legacy
     /// `initialize`.
-    pub async fn connect_stdio(spec: &StdioSpec, timeout: Duration) -> Result<Self, ProtoError> {
+    ///
+    /// The server runs in its own process group (Unix) or Job Object
+    /// (Windows): when the connection is dropped or shut down the whole
+    /// process tree is killed, including grandchildren such as the `node`
+    /// process behind `npx`. stderr is piped line by line to `stderr`, or to
+    /// the debug log when no sink is given.
+    pub async fn connect_stdio(
+        spec: &StdioSpec,
+        timeout: Duration,
+        stderr: Option<StderrSink>,
+    ) -> Result<Self, ProtoError> {
         let deadline = tokio::time::Instant::now() + timeout;
-        match Self::spawn_with(spec, timeout, backend_lifecycle()).await {
+        match Self::spawn_with(spec, timeout, backend_lifecycle(), stderr.clone()).await {
             Err(ProtoError::Connect(first)) if !first.starts_with("spawn ") => {
                 tracing::debug!(command = %spec.command, error = %first, "auto handshake failed; retrying with initialize");
                 let left = deadline.saturating_duration_since(tokio::time::Instant::now());
-                Self::spawn_with(spec, left.max(Duration::from_secs(1)), legacy_lifecycle())
-                    .await
-                    .map_err(|e| ProtoError::Connect(format!("{first}; legacy retry: {e}")))
+                Self::spawn_with(
+                    spec,
+                    left.max(Duration::from_secs(1)),
+                    legacy_lifecycle(),
+                    stderr,
+                )
+                .await
+                .map_err(|e| ProtoError::Connect(format!("{first}; legacy retry: {e}")))
             }
             other => other,
         }
@@ -137,15 +206,31 @@ impl BackendConn {
         spec: &StdioSpec,
         timeout: Duration,
         lifecycle: ClientLifecycleMode,
+        stderr: Option<StderrSink>,
     ) -> Result<Self, ProtoError> {
-        let mut cmd = tokio::process::Command::new(&spec.command);
-        cmd.args(&spec.args).envs(&spec.env);
-        if let Some(dir) = &spec.cwd {
-            cmd.current_dir(dir);
-        }
-        let child = TokioChildProcess::new(cmd)
+        use process_wrap::tokio::{CommandWrap, KillOnDrop};
+        let mut cmd = CommandWrap::with_new(&spec.command, |c| {
+            c.args(&spec.args).envs(&spec.env);
+            if let Some(dir) = &spec.cwd {
+                c.current_dir(dir);
+            }
+        });
+        #[cfg(unix)]
+        cmd.wrap(process_wrap::tokio::ProcessGroup::leader());
+        #[cfg(windows)]
+        cmd.wrap(process_wrap::tokio::JobObject);
+        cmd.wrap(KillOnDrop);
+        let (child, err) = TokioChildProcess::builder(cmd)
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|e| ProtoError::Connect(format!("spawn {}: {e}", spec.command)))?;
-        Self::connect_transport(child, timeout, lifecycle).await
+        if let Some(err) = err {
+            tokio::spawn(drain_stderr(err, spec.command.clone(), stderr));
+        }
+        let tree = TreeGuard::new(child.id());
+        let mut conn = Self::connect_transport(child, timeout, lifecycle).await?;
+        conn._tree = tree;
+        Ok(conn)
     }
 
     /// Handshake over an arbitrary transport (in-memory pipes in tests).
@@ -167,7 +252,10 @@ impl BackendConn {
     {
         let fut = GatewayClient.serve_with_lifecycle(transport, lifecycle);
         match tokio::time::timeout(timeout, fut).await {
-            Ok(Ok(service)) => Ok(Self { service }),
+            Ok(Ok(service)) => Ok(Self {
+                service,
+                _tree: TreeGuard::new(None),
+            }),
             Ok(Err(e)) => Err(ProtoError::Connect(e.to_string())),
             Err(_) => Err(ProtoError::Timeout(timeout)),
         }
