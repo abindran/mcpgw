@@ -104,6 +104,8 @@ pub struct StdioSpec {
     /// failed handshake and its retry (e.g. removing a container's network,
     /// which the retry still needs).
     pub teardown: Vec<Vec<String>>,
+    /// Memory cap for the process tree, in bytes (see [`crate::limits`]).
+    pub memory_limit: Option<u64>,
 }
 
 /// Run cleanup commands in order, quietly, each within 30 s.
@@ -176,6 +178,10 @@ pub(crate) struct TreeGuard {
     child: Option<std::sync::Mutex<Box<dyn process_wrap::tokio::ChildWrapper>>>,
     cleanup: Vec<Vec<String>>,
     teardown: Vec<Vec<String>>,
+    /// Why the tree was stopped from the inside (the memory watchdog).
+    note: Arc<std::sync::Mutex<Option<String>>>,
+    #[cfg(windows)]
+    limit_job: Option<crate::limits::LimitJob>,
 }
 
 impl TreeGuard {
@@ -186,7 +192,22 @@ impl TreeGuard {
             tasks: Vec::new(),
             cleanup: Vec::new(),
             teardown: Vec::new(),
+            note: Arc::default(),
+            #[cfg(windows)]
+            limit_job: None,
         }
+    }
+
+    /// Why the server died, if its memory cap stopped it.
+    fn death_note(&self) -> Option<String> {
+        if let Some(n) = self.note.lock().ok().and_then(|n| n.clone()) {
+            return Some(n);
+        }
+        #[cfg(windows)]
+        if let Some(j) = &self.limit_job {
+            return j.note();
+        }
+        None
     }
 
     /// Kill the tree, reap it, and run the cleanup command, waiting for all.
@@ -329,6 +350,13 @@ impl BackendConn {
             if let Some(dir) = &spec.cwd {
                 c.current_dir(dir);
             }
+            #[cfg(target_os = "linux")]
+            if let Some(bytes) = spec.memory_limit {
+                // SAFETY: the hook only calls setrlimit (async-signal-safe).
+                unsafe {
+                    c.pre_exec(move || crate::limits::set_data_limit(bytes));
+                }
+            }
         });
         #[cfg(unix)]
         cmd.wrap(process_wrap::tokio::ProcessGroup::leader());
@@ -348,13 +376,36 @@ impl BackendConn {
         if let Some(err) = io.stderr().take() {
             tokio::spawn(drain_stderr(err, spec.command.clone(), stderr));
         }
+        let pid = child.id();
         let mut tree = TreeGuard {
-            pid: child.id(),
+            pid,
             child: Some(std::sync::Mutex::new(child)),
             tasks: Vec::new(),
             cleanup: spec.cleanup.clone(),
             teardown: spec.teardown.clone(),
+            note: Arc::default(),
+            #[cfg(windows)]
+            limit_job: None,
         };
+        if let (Some(limit), Some(pid)) = (spec.memory_limit, pid) {
+            #[cfg(unix)]
+            tree.tasks.push(tokio::spawn(crate::limits::watch(
+                pid,
+                limit,
+                tree.note.clone(),
+            )));
+            #[cfg(windows)]
+            match crate::limits::LimitJob::new(pid, limit) {
+                Ok(j) => tree.limit_job = Some(j),
+                Err(e) => {
+                    tree.finish().await;
+                    return Err(ProtoError::Connect(format!(
+                        "spawn {}: could not apply its memory limit: {e}",
+                        spec.command
+                    )));
+                }
+            }
+        }
         match Self::connect_transport((stdout, stdin), timeout, lifecycle).await {
             Ok(mut conn) => {
                 conn._tree = tree;
@@ -401,6 +452,12 @@ impl BackendConn {
     /// Process id of a stdio server (its process group id on Unix).
     pub fn pid(&self) -> Option<u32> {
         self._tree.pid
+    }
+
+    /// Why a stdio server with a memory cap died, if the cap stopped it:
+    /// `out of memory: killed at its 128MiB limit (using 131MiB)`.
+    pub fn death_note(&self) -> Option<String> {
+        self._tree.death_note()
     }
 
     /// Negotiated protocol version, e.g. `"2025-11-25"`.

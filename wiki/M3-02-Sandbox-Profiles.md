@@ -33,8 +33,8 @@ mcpgw add notes --image ghcr.io/example/notes-mcp:1.4 --sandbox strict --memory 
   Whether the runtime itself is rootless (rootless Docker, or Podman as a
   user) is detected once per runtime and reported as `container.rootless`
   in status and the API.
-- `limits` on stdio or HTTP servers is refused for now. Stdio limits
-  (setrlimit and Job Objects) come in M3-05.
+- Stdio servers take a `memory` limit too ([M3-05](M3-05-Stdio-Limits.md));
+  `cpus` and `pids` need a container. Remote servers take no limits.
 
 ## Killed and reported
 

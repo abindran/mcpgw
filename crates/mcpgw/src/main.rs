@@ -200,8 +200,8 @@ struct AddArgs {
     /// Give the container no network at all.
     #[arg(long, requires = "image")]
     no_network: bool,
-    /// Memory limit, e.g. 256MiB (container servers).
-    #[arg(long, requires = "image")]
+    /// Memory cap for the server, e.g. 256MiB (stdio or container servers).
+    #[arg(long, conflicts_with = "url")]
     memory: Option<mcpgw_core::ByteSize>,
     /// CPU limit in cores, e.g. 0.5 (container servers).
     #[arg(long, requires = "image")]

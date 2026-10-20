@@ -187,6 +187,8 @@ impl ContainerTemplate {
             cwd: None,
             cleanup: vec![vec![runtime.into(), "rm".into(), "-f".into(), name.into()]],
             teardown: Vec::new(),
+            // the container runtime enforces the container's limits
+            memory_limit: None,
         }
     }
 

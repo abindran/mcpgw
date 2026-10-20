@@ -239,8 +239,9 @@ pub struct ServerSpec {
     /// a read-only file in tmpfs, gone when the server stops.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub files: BTreeMap<String, String>,
-    /// Resource limits (container servers): `{ memory = "256MiB", cpus =
-    /// 0.5, pids = 64 }`. Unset ones come from the sandbox profile.
+    /// Resource limits: `{ memory = "256MiB", cpus = 0.5, pids = 64 }`.
+    /// Container servers take all three (unset ones come from the sandbox
+    /// profile); stdio servers take `memory`, a cap on the process tree.
     #[serde(default, skip_serializing_if = "Limits::is_empty")]
     pub limits: Limits,
     /// Where it was installed from, when `mcpgw add` took it from the MCP
@@ -454,11 +455,20 @@ impl ServerSpec {
         self.limits
             .validate()
             .map_err(|m| Error::Config(format!("server {}: {m}", self.name)))?;
-        if !self.limits.is_empty() && !matches!(self.transport, Transport::Container { .. }) {
-            return Err(Error::Config(format!(
-                "server {}: limits are enforced for container servers only",
-                self.name
-            )));
+        match &self.transport {
+            Transport::Http { .. } if !self.limits.is_empty() => {
+                return Err(Error::Config(format!(
+                    "server {}: limits apply to local servers (stdio or container), not remote ones",
+                    self.name
+                )));
+            }
+            Transport::Stdio { .. } if self.limits.cpus.is_some() || self.limits.pids.is_some() => {
+                return Err(Error::Config(format!(
+                    "server {}: stdio servers take a memory limit only; cpus and pids need a container server",
+                    self.name
+                )));
+            }
+            _ => {}
         }
         if !self.files.is_empty() && !matches!(self.transport, Transport::Container { .. }) {
             return Err(Error::Config(format!(

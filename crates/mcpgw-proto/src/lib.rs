@@ -9,6 +9,7 @@
 pub mod backend;
 pub mod front;
 pub mod http;
+pub mod limits;
 pub mod relay;
 pub mod spike_bridge;
 pub mod spike_server;

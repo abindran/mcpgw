@@ -850,6 +850,7 @@ impl Launch {
                 cwd: cwd.clone(),
                 cleanup: Vec::new(),
                 teardown: Vec::new(),
+                memory_limit: cfg.limits.memory.map(|m| m.get()),
             }),
             Transport::Container {
                 image,
@@ -1545,6 +1546,14 @@ impl Actor {
         ) {
             return;
         }
+        // A stdio server stopped by its memory cap says so.
+        let why = match self.oom_note() {
+            Some(note) => {
+                (self.sink)(&format!("mcpgw: {note}"));
+                format!("{why}: {note}")
+            }
+            None => why,
+        };
         tracing::warn!(server = %self.shared.name, error = %why, "backend lost");
         self.shared.update(|s| s.last_error = Some(why.clone()));
         // A dead container is inspected before it's removed, to say why it
@@ -1579,6 +1588,25 @@ impl Actor {
             let r = conn.ping(timeout).await.map_err(|e| e.to_string());
             let _ = itx.send(Internal::Ping(r));
         });
+    }
+
+    /// Why a stdio server with a memory cap died, if the cap stopped it:
+    /// the watchdog's or the job's own note, else its last stderr lines
+    /// saying it ran out of memory (the kernel refused an allocation).
+    fn oom_note(&self) -> Option<String> {
+        let Template::Stdio(spec) = &self.launch.template else {
+            return None;
+        };
+        let limit = spec.memory_limit?;
+        if let Some(n) = self.conn.as_ref().and_then(|c| c.death_note()) {
+            return Some(n);
+        }
+        let tail = self.shared.stderr.lock().ok()?;
+        tail.iter()
+            .rev()
+            .take(20)
+            .any(|l| mcpgw_proto::limits::mentions_oom(l))
+            .then(|| format!("out of memory at its {} limit", mcpgw_core::ByteSize(limit)))
     }
 
     /// Close a connection in the background, tracked so the actor waits for

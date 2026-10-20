@@ -21,6 +21,7 @@
 //! | `FAKE_AUTH_SERVER` | `--http` only: OAuth-protected. Requests need `Authorization: Bearer at-…`, else 401 with `resource_metadata`; serves protected resource metadata naming this issuer |
 //!
 //! Built-in tools: `add`, `echo`, `crash`, `sleep`, `env`, `spawn`, `stderr`.
+//! `alloc` (hold `mib` MiB, `step_ms` apart) works when listed in `FAKE_TOOLS`.
 //! `fake-mcp --idle` just sleeps (used as a grandchild by `spawn`);
 //! `fake-mcp --exit` exits at once (spawn-cost baseline for timing tests).
 
@@ -178,6 +179,19 @@ impl Fake {
             "stderr" => {
                 eprintln!("{}", arg_str(&args, "text"));
                 text("ok")
+            }
+            // Not built in (list it in FAKE_TOOLS): hold `mib` more MiB of
+            // touched memory, pausing `step_ms` after each.
+            "alloc" => {
+                static HELD: std::sync::Mutex<Vec<Vec<u8>>> = std::sync::Mutex::new(Vec::new());
+                for _ in 0..int("mib").max(0) {
+                    HELD.lock().unwrap().push(vec![1u8; 1 << 20]);
+                    let step = int("step_ms").max(0) as u64;
+                    if step > 0 {
+                        tokio::time::sleep(Duration::from_millis(step)).await;
+                    }
+                }
+                text(format!("holding {} MiB", HELD.lock().unwrap().len()))
             }
             // Scripted tool without a reply: echo the arguments back.
             _ => text(Value::Object(args).to_string()),

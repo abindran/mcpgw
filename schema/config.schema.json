@@ -548,7 +548,7 @@
         },
         "limits": {
           "$ref": "#/$defs/Limits",
-          "description": "Resource limits (container servers): `{ memory = \"256MiB\", cpus =\n0.5, pids = 64 }`. Unset ones come from the sandbox profile."
+          "description": "Resource limits: `{ memory = \"256MiB\", cpus = 0.5, pids = 64 }`.\nContainer servers take all three (unset ones come from the sandbox\nprofile); stdio servers take `memory`, a cap on the process tree."
         },
         "name": {
           "description": "Unique server name.",

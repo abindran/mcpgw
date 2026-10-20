@@ -1608,6 +1608,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "futures",
+ "libc",
  "mcpgw-core",
  "process-wrap",
  "reqwest",
@@ -1617,6 +1618,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
