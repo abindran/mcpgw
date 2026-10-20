@@ -14,7 +14,9 @@ pub const IMAGE: &str = "node:22-alpine";
 
 /// An MCP server over stdio (line-delimited JSON-RPC) with tools `echo`,
 /// `env` (read a variable), `alloc` (hold `mib` more MiB of touched memory),
-/// `write` (create a file at `path`), `uid`, and `connect` (open a TCP, or
+/// `write` (create a file at `path`), `read` (a file's contents or an error
+/// code), `mount` (the `/proc/mounts` line for `path`), `uid`, and `connect`
+/// (open a TCP, or
 /// with `tls` a verified TLS, connection to `host`:`port`, optionally with
 /// another `servername`; answers `ok …`, `error <code>` or `timeout`). It logs "node-fake ready" to
 /// stderr and exits when stdin closes.
@@ -27,6 +29,8 @@ const tools = [
   { name: 'alloc', description: 'Hold more memory', inputSchema: { type: 'object', properties: { mib: { type: 'number' } } } },
   { name: 'write', description: 'Create a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
   { name: 'uid', description: 'The user id', inputSchema: { type: 'object' } },
+  { name: 'read', description: 'Read a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+  { name: 'mount', description: 'How a path is mounted', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
   { name: 'connect', description: 'Open a connection', inputSchema: { type: 'object', properties: { host: { type: 'string' }, port: { type: 'number' }, tls: { type: 'boolean' }, servername: { type: 'string' } } } },
 ];
 const held = [];
@@ -52,6 +56,14 @@ rl.on('line', (l) => {
       if (m.params.name === 'write') {
         try { require('fs').writeFileSync(a.path, 'x'); return ok({ content: [{ type: 'text', text: 'written' }] }); }
         catch (e) { return ok({ content: [{ type: 'text', text: e.code || String(e) }] }); }
+      }
+      if (m.params.name === 'read') {
+        try { return ok({ content: [{ type: 'text', text: require('fs').readFileSync(a.path, 'utf8') }] }); }
+        catch (e) { return ok({ content: [{ type: 'text', text: e.code || String(e) }] }); }
+      }
+      if (m.params.name === 'mount') {
+        const line = require('fs').readFileSync('/proc/mounts', 'utf8').split('\n').find((l) => l.split(' ')[1] === a.path);
+        return ok({ content: [{ type: 'text', text: line || 'not mounted' }] });
       }
       if (m.params.name === 'uid') return ok({ content: [{ type: 'text', text: String(process.getuid()) }] });
       if (m.params.name === 'connect') {

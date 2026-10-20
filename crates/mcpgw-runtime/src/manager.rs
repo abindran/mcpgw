@@ -870,6 +870,7 @@ impl Launch {
                 sandbox: *sandbox,
                 limits: cfg.limits.clone(),
                 egress: egress.clone(),
+                files: cfg.files.clone(),
             }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),
@@ -950,6 +951,15 @@ impl Launch {
                     env.insert(var.clone(), lookup(name).unwrap_or_default());
                 }
             }
+            Template::Http(_) => {}
+        }
+        if let Template::Container(c) = &mut spec {
+            for v in c.files.values_mut() {
+                *v = lookup(v).unwrap_or_default();
+            }
+        }
+        match &mut spec {
+            Template::Stdio(_) | Template::Container(_) => {}
             Template::Http(h) => {
                 h.url = fill(&h.url);
                 for v in h.headers.values_mut() {

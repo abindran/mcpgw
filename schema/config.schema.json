@@ -528,6 +528,13 @@
           "description": "Whether the gateway may start this server. Default: `true`.",
           "type": "boolean"
         },
+        "files": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Secrets written to files (container servers): container path →\nvault secret, e.g. `{ \"/run/secrets/sa.json\" = \"gcp_sa\" }`. Each is\na read-only file in tmpfs, gone when the server stops.",
+          "type": "object"
+        },
         "idle_timeout": {
           "anyOf": [
             {

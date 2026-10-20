@@ -88,6 +88,24 @@ async fn container_server_through_the_daemon() {
     let e = Env::new("e2e");
     let name = format!("ctr{}", std::process::id());
 
+    // a secret to mount as a file
+    let mut set = Command::new(env!("CARGO_BIN_EXE_mcpgw"))
+        .arg("--config")
+        .arg(e.dir.join("config.toml"))
+        .args(["secret", "set", "cfg_json"])
+        .env("MCPGW_VAULT_PASSPHRASE", "test pass")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    use std::io::Write;
+    set.stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{{\"key\":\"{}\"}}\n", "j".repeat(20)).as_bytes())
+        .unwrap();
+    assert!(set.wait().unwrap().success());
+
     // add: the image digest is pinned and the tools are captured
     let added = e.ok(&[
         "add",
@@ -96,6 +114,8 @@ async fn container_server_through_the_daemon() {
         IMAGE,
         "--env",
         "GREETING=hi",
+        "--secret-file",
+        "/run/secrets/cfg.json=cfg_json",
         "--",
         "node",
         "-e",
@@ -106,7 +126,7 @@ async fn container_server_through_the_daemon() {
         "{added}"
     );
     assert!(
-        added.contains(&format!("added server {name} (6 tools, pin ")),
+        added.contains(&format!("added server {name} (8 tools, pin ")),
         "{added}"
     );
     assert!(
@@ -134,11 +154,19 @@ async fn container_server_through_the_daemon() {
         .await
         .unwrap();
     assert_eq!(r, "hi");
+    let r = c
+        .call_text(
+            &format!("{name}__read"),
+            json!({"path": "/run/secrets/cfg.json"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(r, "[REDACTED:cfg_json]");
     let ctr = containers_of(&name);
     assert_eq!(ctr.len(), 1, "{ctr:?}");
     let st = e.ok(&["status"]);
     assert!(
-        st.contains(&format!("{name}\tidle\t6 tools\tdocker {}", ctr[0])),
+        st.contains(&format!("{name}\tidle\t8 tools\tdocker {}", ctr[0])),
         "{st}"
     );
     let stats = e.ok(&["stats"]);

@@ -193,6 +193,10 @@ struct AddArgs {
         conflicts_with = "no_network"
     )]
     egress: Vec<String>,
+    /// Mount a vault secret as a read-only tmpfs file in the container,
+    /// PATH=SECRET (repeatable), e.g. `--secret-file /run/secrets/sa.json=gcp_sa`.
+    #[arg(long = "secret-file", value_parser = parse_kv, requires = "image", value_name = "PATH=SECRET")]
+    secret_files: Vec<(String, String)>,
     /// Give the container no network at all.
     #[arg(long, requires = "image")]
     no_network: bool,
@@ -480,6 +484,7 @@ fn run(cli: Cli) -> AnyResult<()> {
             spec.alias = a.alias;
             spec.stateful = a.stateful;
             spec.secrets = a.secrets.into_iter().collect();
+            spec.files = a.secret_files.into_iter().collect();
             spec.limits = mcpgw_core::Limits {
                 memory: a.memory,
                 cpus: a.cpus,

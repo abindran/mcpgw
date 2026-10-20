@@ -84,7 +84,7 @@ M2 exit check: [M2-Exit](M2-Exit.md).
 | [M3-01](M3-01-Container-Launcher.md) | Container launcher (Docker/Podman) | ✅ |
 | [M3-02](M3-02-Sandbox-Profiles.md) | Sandbox profiles | ✅ |
 | [M3-03](M3-03-Egress-Allowlist.md) | Egress allowlist | ✅ |
-| M3-04 | File and tmpfs secret injection | ⏳ |
+| [M3-04](M3-04-Secret-Files.md) | File and tmpfs secret injection | ✅ |
 | M3-05 | Resource limits for stdio servers | ⏳ |
 | M3-06 | Warm pools | ⏳ |
 | M3-07 | Predictive prewarm | ⏳ |

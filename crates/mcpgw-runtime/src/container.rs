@@ -98,7 +98,7 @@ pub async fn rootless(runtime: &str) -> Option<bool> {
 }
 
 /// How to start a container server (secrets already filled in).
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ContainerTemplate {
     /// Server name (for the container name and label).
     pub server: String,
@@ -118,6 +118,24 @@ pub struct ContainerTemplate {
     pub limits: Limits,
     /// Network allowlist (`host:port`); `Some([])` is no network.
     pub egress: Option<Vec<String>>,
+    /// Secret files: container path → vault secret name, replaced by the
+    /// value when secrets are resolved.
+    pub files: BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for ContainerTemplate {
+    // env and file contents may hold secrets: show names only
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContainerTemplate")
+            .field("server", &self.server)
+            .field("runtime", &self.runtime)
+            .field("image", &self.image)
+            .field("env", &self.env.keys().collect::<Vec<_>>())
+            .field("files", &self.files.keys().collect::<Vec<_>>())
+            .field("sandbox", &self.sandbox)
+            .field("egress", &self.egress)
+            .finish_non_exhaustive()
+    }
 }
 
 fn container_name(server: &str) -> String {
@@ -183,17 +201,30 @@ impl ContainerTemplate {
             .await
             .map_err(ProtoError::Connect)?;
         let name = container_name(&self.server);
-        let spec = match self.egress.as_deref() {
-            Some(list) if !list.is_empty() => {
-                let gw = Egress::start(&runtime, &self.server, &name, list, sink.as_ref())
-                    .await
-                    .map_err(ProtoError::Connect)?;
-                let mut spec = self.stdio_with(&runtime, &name, &gw.server_flags);
-                spec.teardown = gw.teardown;
-                spec
+        let mut flags = Vec::new();
+        let mut teardown = Vec::new();
+        if !self.files.is_empty() {
+            let f = SecretFiles::write(&runtime, &name, &self.files, sink.as_ref())
+                .await
+                .map_err(ProtoError::Connect)?;
+            flags.extend(f.flags);
+            teardown.extend(f.teardown);
+        }
+        if let Some(list) = self.egress.as_deref().filter(|l| !l.is_empty()) {
+            match Egress::start(&runtime, &self.server, &name, list, sink.as_ref()).await {
+                Ok(gw) => {
+                    flags.extend(gw.server_flags);
+                    // the proxy and network go before the secret files
+                    teardown.splice(0..0, gw.teardown);
+                }
+                Err(e) => {
+                    run_all(&teardown).await;
+                    return Err(ProtoError::Connect(e));
+                }
             }
-            _ => self.stdio(&runtime, &name),
-        };
+        }
+        let mut spec = self.stdio_with(&runtime, &name, &flags);
+        spec.teardown = teardown;
         let conn = BackendConn::connect_stdio(&spec, timeout, sink).await?;
         let rootless = rootless(&runtime).await;
         Ok((
@@ -223,8 +254,121 @@ fn labels(server: &str) -> Vec<String> {
         .collect()
 }
 
-/// Image of the egress proxy sidecar (official nginx, stream module).
+/// Image of the egress proxy sidecar (official nginx, stream module). It
+/// also serves as the small helper that writes secret files.
 pub const EGRESS_IMAGE: &str = "docker.io/library/nginx:1.27-alpine";
+
+/// Where secret files live on the container host: its `/dev/shm`, a
+/// tmpfs on every Linux host (and inside Docker Desktop's or colima's VM).
+pub const SECRETS_ROOT: &str = "/dev/shm/mcpgw-secrets";
+
+fn instance_dir() -> String {
+    INSTANCE.get().cloned().unwrap_or_else(|| "local".into())
+}
+
+/// A helper container with the host's `/dev/shm` at `/shm`, running `script`.
+fn helper(runtime: &str, script: &str) -> Vec<String> {
+    let mut v: Vec<String> = [
+        runtime,
+        "run",
+        "--rm",
+        "-i",
+        "--network=none",
+        "--memory=32m",
+    ]
+    .map(String::from)
+    .into();
+    v.extend(
+        [
+            "--label",
+            &format!("{MANAGED_LABEL}=1"),
+            "-v",
+            "/dev/shm:/shm",
+            EGRESS_IMAGE,
+            "sh",
+            "-c",
+            script,
+        ]
+        .map(String::from),
+    );
+    v
+}
+
+/// Run each command, ignoring failures (best-effort teardown).
+async fn run_all(commands: &[Vec<String>]) {
+    for argv in commands {
+        if let Some((cmd, args)) = argv.split_first() {
+            let a: Vec<&str> = args.iter().map(String::as_str).collect();
+            let _ = output(cmd, &a).await;
+        }
+    }
+}
+
+/// Secret files in place on the container host's tmpfs.
+struct SecretFiles {
+    /// `--mount` flags for the server container.
+    flags: Vec<String>,
+    /// Removes the files.
+    teardown: Vec<Vec<String>>,
+}
+
+impl SecretFiles {
+    /// Write each value (through a helper's stdin, never argv or env) to
+    /// `SECRETS_ROOT/<instance>/<container>/f<n>` (dirs 0700, files 0444)
+    /// and mount it read-only at its path.
+    async fn write(
+        runtime: &str,
+        name: &str,
+        files: &BTreeMap<String, String>,
+        sink: Option<&StderrSink>,
+    ) -> Result<SecretFiles, String> {
+        ensure_image(runtime, EGRESS_IMAGE, sink).await?;
+        let rel = format!("{}/{name}", instance_dir());
+        let inner = format!("/shm/mcpgw-secrets/{rel}");
+        let teardown = vec![helper(runtime, &format!("rm -rf {inner}"))];
+        let mut flags = Vec::new();
+        for (i, (target, value)) in files.iter().enumerate() {
+            let script = format!(
+                "umask 077 && mkdir -p {inner} && cat > {inner}/f{i} && chmod 0444 {inner}/f{i}"
+            );
+            let argv = helper(runtime, &script);
+            if let Err(e) = run_with_stdin(&argv, value.as_bytes()).await {
+                run_all(&teardown).await;
+                return Err(format!("writing the secret file {target}: {e}"));
+            }
+            flags.push(format!(
+                "--mount=type=bind,source={SECRETS_ROOT}/{rel}/f{i},target={target},readonly"
+            ));
+        }
+        Ok(SecretFiles { flags, teardown })
+    }
+}
+
+/// Run `argv` with `input` on stdin.
+async fn run_with_stdin(argv: &[String], input: &[u8]) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+    let (cmd, args) = argv.split_first().ok_or("empty command")?;
+    let mut child = tokio::process::Command::new(cmd)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| format!("{cmd}: {e}"))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(input).await.map_err(|e| e.to_string())?;
+    }
+    let o = tokio::time::timeout(Duration::from_secs(120), child.wait_with_output())
+        .await
+        .map_err(|_| "timed out".to_string())?
+        .map_err(|e| e.to_string())?;
+    if o.status.success() {
+        Ok(())
+    } else {
+        Err(first_line(&o.stderr))
+    }
+}
 
 /// The nginx config for an allowlist: one listener per port. A port with a
 /// single host passes connections straight through; a port shared by
@@ -583,6 +727,34 @@ pub async fn sweep() -> usize {
                 removed += 1;
             }
         }
+        // then secret files of containers that no longer exist (only if the
+        // helper image is here; a sweep never pulls)
+        let have_helper = output(
+            rt,
+            &["image", "inspect", "--format", "{{.Id}}", EGRESS_IMAGE],
+        )
+        .await
+        .is_ok_and(|o| o.status.success());
+        if have_helper {
+            let live = output(
+                rt,
+                &["ps", "-a", "--filter", &filter, "--format", "{{.Names}}"],
+            )
+            .await
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+            let dir = format!("/shm/mcpgw-secrets/{instance}");
+            let ls = helper(rt, &format!("ls {dir} 2>/dev/null || true"));
+            let a: Vec<&str> = ls[1..].iter().map(String::as_str).collect();
+            if let Ok(o) = output(rt, &a).await {
+                for d in String::from_utf8_lossy(&o.stdout).lines() {
+                    let ok_name = d.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+                    if ok_name && !d.is_empty() && !live.lines().any(|l| l == d) {
+                        run_all(&[helper(rt, &format!("rm -rf {dir}/{d}"))]).await;
+                    }
+                }
+            }
+        }
         // then their egress networks
         let net_format = format!("{{{{.Name}}}}\t{{{{.Label \"{PID_LABEL}\"}}}}");
         let Ok(o) = output(
@@ -629,6 +801,7 @@ mod tests {
                 ..Default::default()
             },
             egress: None,
+            files: BTreeMap::new(),
         };
         let name = container_name(&t.server);
         assert!(

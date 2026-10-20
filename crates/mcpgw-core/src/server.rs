@@ -234,6 +234,11 @@ pub struct ServerSpec {
     /// everything the server sends back.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<String, String>,
+    /// Secrets written to files (container servers): container path →
+    /// vault secret, e.g. `{ "/run/secrets/sa.json" = "gcp_sa" }`. Each is
+    /// a read-only file in tmpfs, gone when the server stops.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub files: BTreeMap<String, String>,
     /// Resource limits (container servers): `{ memory = "256MiB", cpus =
     /// 0.5, pids = 64 }`. Unset ones come from the sandbox profile.
     #[serde(default, skip_serializing_if = "Limits::is_empty")]
@@ -343,6 +348,7 @@ impl ServerSpec {
             stateful: false,
             startup_timeout: None,
             secrets: BTreeMap::new(),
+            files: BTreeMap::new(),
             limits: Limits::default(),
             registry: None,
         }
@@ -359,7 +365,7 @@ impl ServerSpec {
     pub fn for_account(&self, account: &str) -> ServerSpec {
         let fill = |s: &str| s.replace(ACCOUNT_PLACEHOLDER, account);
         let mut s = self.clone();
-        for v in s.secrets.values_mut() {
+        for v in s.secrets.values_mut().chain(s.files.values_mut()) {
             *v = fill(v);
         }
         match &mut s.transport {
@@ -382,7 +388,12 @@ impl ServerSpec {
 
     /// Every secret this server uses: bindings and placeholders.
     pub fn secret_refs(&self) -> std::collections::BTreeSet<String> {
-        let mut refs: std::collections::BTreeSet<String> = self.secrets.values().cloned().collect();
+        let mut refs: std::collections::BTreeSet<String> = self
+            .secrets
+            .values()
+            .chain(self.files.values())
+            .cloned()
+            .collect();
         if let Transport::Stdio { args, env, .. } | Transport::Container { args, env, .. } =
             &self.transport
         {
@@ -448,6 +459,30 @@ impl ServerSpec {
                 "server {}: limits are enforced for container servers only",
                 self.name
             )));
+        }
+        if !self.files.is_empty() && !matches!(self.transport, Transport::Container { .. }) {
+            return Err(Error::Config(format!(
+                "server {}: secret files are for container servers only",
+                self.name
+            )));
+        }
+        for (path, secret) in &self.files {
+            let ok = path.starts_with('/')
+                && path.len() > 1
+                && !path.ends_with('/')
+                && !path.split('/').any(|c| c == ".." || c == ".")
+                && !path.contains(['\0', ',', '='])
+                && !matches!(path.as_str(), "/proc" | "/sys" | "/dev")
+                && !["/proc/", "/sys/", "/dev/"]
+                    .iter()
+                    .any(|p| path.starts_with(p));
+            if !ok {
+                return Err(Error::Config(format!(
+                    "server {}: secret file path {path:?} must be an absolute file path (no .., commas or =; not under /proc, /sys or /dev)",
+                    self.name
+                )));
+            }
+            crate::validate_secret_name(&secret.replace(ACCOUNT_PLACEHOLDER, DEFAULT_ACCOUNT))?;
         }
         if let Transport::Container {
             digest,
@@ -627,6 +662,38 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("can't be combined with egress")
+        );
+        let mut f = ServerSpec::new("c", Transport::container("x"));
+        f.files
+            .insert("/run/secrets/sa.json".into(), "gcp_sa".into());
+        f.validate().unwrap();
+        assert!(f.secret_refs().contains("gcp_sa"));
+        for bad in [
+            "run/x",
+            "/run/../etc/x",
+            "/run/x/",
+            "/proc/self/x",
+            "/a,b",
+            "/",
+        ] {
+            let mut g = f.clone();
+            g.files = [(bad.to_string(), "gcp_sa".to_string())].into();
+            assert!(
+                g.validate()
+                    .unwrap_err()
+                    .to_string()
+                    .contains("absolute file path"),
+                "{bad}"
+            );
+        }
+        let mut stdio = ServerSpec::new("s", Transport::stdio("x", vec![]));
+        stdio.files = f.files.clone();
+        assert!(
+            stdio
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("container servers only")
         );
         let empty = ServerSpec::new("c", Transport::container(" "));
         assert!(empty.validate().is_err());
