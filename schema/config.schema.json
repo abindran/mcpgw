@@ -114,6 +114,67 @@
         }
       ]
     },
+    "OAuthProvider": {
+      "additionalProperties": false,
+      "description": "One OAuth app (`[[oauth]]` in the config file).",
+      "properties": {
+        "authorize_url": {
+          "description": "Authorization endpoint (overrides the preset).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_id": {
+          "description": "Your OAuth app's client id.",
+          "type": "string"
+        },
+        "client_secret": {
+          "description": "Vault secret holding the client secret, for confidential apps.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "extra_params": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra authorization parameters (`audience`, `prompt`, ...).",
+          "type": "object"
+        },
+        "name": {
+          "description": "Name used in `mcpgw auth connect <name>` and secret names.",
+          "type": "string"
+        },
+        "preset": {
+          "description": "Built-in endpoints to start from: `github`, `google` or `atlassian`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "scopes": {
+          "description": "Scopes to request (the preset's when empty).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "token_url": {
+          "description": "Token endpoint (overrides the preset).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "client_id"
+      ],
+      "type": "object"
+    },
     "ServerSpec": {
       "description": "One backend tool server (`[[server]]` in the config file).",
       "oneOf": [
@@ -251,6 +312,13 @@
         "token_path": null
       },
       "description": "Gateway-wide behaviour."
+    },
+    "oauth": {
+      "description": "OAuth apps for `mcpgw auth connect`.",
+      "items": {
+        "$ref": "#/$defs/OAuthProvider"
+      },
+      "type": "array"
     },
     "server": {
       "description": "Backend tool servers.",

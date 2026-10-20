@@ -222,6 +222,33 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
             });
         }
     }
+    let mut apps = HashSet::new();
+    for o in &cfg.oauth {
+        let issue = |message: String, hint: &str| Issue {
+            server: None,
+            field: "oauth",
+            message,
+            hint: Some(hint.into()),
+        };
+        if validate_server_name(&o.name).is_err() {
+            return Err(issue(
+                format!("oauth app name {:?} is invalid", o.name),
+                "use letters, digits, '-' or '_'",
+            ));
+        }
+        if !apps.insert(o.name.as_str()) {
+            return Err(issue(
+                format!("duplicate oauth app `{}`", o.name),
+                "oauth app names must be unique",
+            ));
+        }
+        if let Err(e) = o.endpoints() {
+            return Err(issue(
+                strip(e),
+                "set preset = \"github\" (or google, atlassian), or both URLs",
+            ));
+        }
+    }
     let mut seen = HashSet::new();
     let mut prefixes = std::collections::HashMap::new();
     for (i, s) in cfg.servers.iter().enumerate() {

@@ -40,11 +40,37 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
     }
 }
 
-/// The vault-backed secret source for `config`.
-pub fn resolver(config: &Config) -> Arc<dyn mcpgw_runtime::SecretResolver> {
-    Arc::new(secrets::VaultResolver::new(
+/// The vault for `config`, shared by secret injection and OAuth.
+pub fn vault(config: &Config) -> Arc<secrets::SharedVault> {
+    secrets::SharedVault::new(
         config.gateway.vault_path(),
         mcpgw_vault::KeySource::from_env(),
+    )
+}
+
+/// The vault-backed secret source for `config`.
+pub fn resolver(config: &Config) -> Arc<dyn mcpgw_runtime::SecretResolver> {
+    Arc::new(secrets::VaultResolver::shared(vault(config)))
+}
+
+/// The OAuth broker for `config`'s `[[oauth]]` apps, storing tokens in `vault`.
+pub fn broker(config: &Config, vault: Arc<secrets::SharedVault>) -> Arc<mcpgw_auth::oauth::Broker> {
+    let tokens = Arc::new(secrets::VaultTokens::new(vault.clone()));
+    let lookup: mcpgw_auth::oauth::SecretLookup = Arc::new(move |name: &str| {
+        use secrecy::ExposeSecret;
+        vault
+            .with(false, |v| match v {
+                Some(v) => v.get(name).map_err(|e| e.to_string()),
+                None => Ok(None),
+            })
+            .ok()
+            .flatten()
+            .map(|s| s.expose_secret().to_string())
+    });
+    Arc::new(mcpgw_auth::oauth::Broker::new(
+        config.oauth.clone(),
+        tokens,
+        lookup,
     ))
 }
 
@@ -100,11 +126,12 @@ pub fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult
             max_running: config.gateway.max_running(),
             ..ManagerOptions::default()
         };
+        let vault = vault(config);
         let mgr = Arc::new(BackendManager::with_secrets(
             &servers,
             opts,
             catalog,
-            Some(resolver(config)),
+            Some(Arc::new(secrets::VaultResolver::shared(vault.clone()))),
         ));
         // Servers start on first use; only those never seen are started now.
         capture_missing(&mgr, &servers, Duration::from_secs(30)).await;
@@ -115,14 +142,19 @@ pub fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult
                 _ = shutdown_signal() => Ok(()),
             }
         } else {
-            serve_http(config, token, mgr.clone()).await
+            serve_http(config, token, mgr.clone(), broker(config, vault)).await
         };
         mgr.shutdown().await;
         res
     })
 }
 
-async fn serve_http(config: &Config, token: Token, mgr: Arc<BackendManager>) -> AnyResult<()> {
+async fn serve_http(
+    config: &Config,
+    token: Token,
+    mgr: Arc<BackendManager>,
+    broker: Arc<mcpgw_auth::oauth::Broker>,
+) -> AnyResult<()> {
     let addr = config.gateway.listen();
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -133,9 +165,14 @@ async fn serve_http(config: &Config, token: Token, mgr: Arc<BackendManager>) -> 
         manager: mgr.clone(),
         shutdown: stop.clone(),
     });
-    let app = mcpgw_api::edge_with(
+    let oauth = mcpgw_api::oauth::OAuthState {
+        broker,
+        base_url: format!("http://127.0.0.1:{}", local.port()),
+    };
+    let app = mcpgw_api::edge_full(
         mcpgw_router::http_router(mgr, gateway_options(config)),
-        admin,
+        admin.merge(mcpgw_api::oauth::admin_routes(oauth.clone())),
+        mcpgw_api::oauth::public_routes(oauth),
         mcpgw_api::EdgeOptions {
             token,
             port: local.port(),

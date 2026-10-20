@@ -29,6 +29,9 @@ pub struct Config {
     /// Backend tool servers.
     #[serde(default, rename = "server", skip_serializing_if = "Vec::is_empty")]
     pub servers: Vec<ServerSpec>,
+    /// OAuth apps for `mcpgw auth connect`.
+    #[serde(default, rename = "oauth", skip_serializing_if = "Vec::is_empty")]
+    pub oauth: Vec<mcpgw_core::OAuthProvider>,
 }
 
 /// JSON Schema of the config file.

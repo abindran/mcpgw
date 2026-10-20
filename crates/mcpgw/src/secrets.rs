@@ -1,27 +1,29 @@
-//! The daemon's secret source: the vault file, opened on first use and
-//! re-read when another process (`mcpgw secret set`) changes it.
+//! The daemon's secrets: one vault file, opened on first use and re-read
+//! when another process (`mcpgw secret set`) changes it. It backs both
+//! secret injection ([`VaultResolver`]) and OAuth tokens ([`VaultTokens`]).
 
-use std::{path::PathBuf, sync::Mutex, time::SystemTime};
+use std::{path::PathBuf, sync::Arc, sync::Mutex, time::SystemTime};
 
+use mcpgw_auth::oauth::{TokenSet, TokenStore};
 use mcpgw_runtime::SecretResolver;
 use mcpgw_vault::{KeySource, Vault};
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 
-/// Resolves secrets from a vault file.
-pub struct VaultResolver {
+/// A vault shared by everything in the daemon.
+pub struct SharedVault {
     path: PathBuf,
     source: KeySource,
     open: Mutex<Option<(Vault, Option<SystemTime>)>>,
 }
 
-impl VaultResolver {
-    /// A resolver for the vault at `path`, unlocked with `source`.
-    pub fn new(path: PathBuf, source: KeySource) -> Self {
-        Self {
+impl SharedVault {
+    /// The vault at `path`, unlocked with `source` when first needed.
+    pub fn new(path: PathBuf, source: KeySource) -> Arc<Self> {
+        Arc::new(Self {
             path,
             source,
             open: Mutex::new(None),
-        }
+        })
     }
 
     fn mtime(&self) -> Option<SystemTime> {
@@ -29,10 +31,14 @@ impl VaultResolver {
             .and_then(|m| m.modified())
             .ok()
     }
-}
 
-impl SecretResolver for VaultResolver {
-    fn resolve(&self, name: &str) -> Result<Option<SecretString>, String> {
+    /// Run `f` on the up-to-date vault. With `create`, a missing vault is
+    /// created; otherwise `f` gets `None`.
+    pub fn with<T>(
+        &self,
+        create: bool,
+        f: impl FnOnce(Option<&mut Vault>) -> Result<T, String>,
+    ) -> Result<T, String> {
         let mut guard = self
             .open
             .lock()
@@ -44,16 +50,111 @@ impl SecretResolver for VaultResolver {
                 *seen = now;
             }
             Some(_) => {}
+            None if !self.path.exists() && !create => return f(None),
             None => {
-                if !self.path.exists() {
-                    return Ok(None);
-                }
-                let v = Vault::open(&self.path, &self.source).map_err(|e| e.to_string())?;
-                *guard = Some((v, now));
+                let v =
+                    Vault::open_or_create(&self.path, &self.source).map_err(|e| e.to_string())?;
+                *guard = Some((v, self.mtime()));
             }
         }
-        let (v, _) = guard.as_ref().expect("opened above");
-        v.get(name).map_err(|e| e.to_string())
+        let (v, seen) = guard.as_mut().expect("opened above");
+        let out = f(Some(v));
+        *seen = self.mtime();
+        out
+    }
+}
+
+/// Secret injection from the vault. `oauth/<provider>@<account>` names
+/// resolve to that connection's current access token.
+pub struct VaultResolver {
+    vault: Arc<SharedVault>,
+}
+
+impl VaultResolver {
+    /// A resolver over an existing shared vault.
+    pub fn shared(vault: Arc<SharedVault>) -> Self {
+        Self { vault }
+    }
+}
+
+impl SecretResolver for VaultResolver {
+    fn resolve(&self, name: &str) -> Result<Option<SecretString>, String> {
+        let value = self.vault.with(false, |v| match v {
+            Some(v) => v.get(name).map_err(|e| e.to_string()),
+            None => Ok(None),
+        })?;
+        if !name.starts_with("oauth/") {
+            return Ok(value);
+        }
+        let Some(v) = value else { return Ok(None) };
+        let t: TokenSet = serde_json::from_str(v.expose_secret())
+            .map_err(|e| format!("stored OAuth tokens for {name} are unreadable: {e}"))?;
+        if t.needs_reauth {
+            return Err(format!(
+                "the {name} login has expired; run `mcpgw auth connect {}`",
+                name.trim_start_matches("oauth/")
+                    .replace('@', " --account ")
+            ));
+        }
+        Ok(Some(SecretString::from(t.access_token)))
+    }
+}
+
+/// OAuth tokens kept in the vault as `oauth/<provider>@<account>`.
+pub struct VaultTokens {
+    vault: Arc<SharedVault>,
+}
+
+impl VaultTokens {
+    /// Tokens in `vault`.
+    pub fn new(vault: Arc<SharedVault>) -> Self {
+        Self { vault }
+    }
+}
+
+impl TokenStore for VaultTokens {
+    fn save(&self, provider: &str, account: &str, tokens: &TokenSet) -> Result<(), String> {
+        let json = serde_json::to_string(tokens).map_err(|e| e.to_string())?;
+        let name = mcpgw_core::oauth_secret_name(provider, account);
+        self.vault.with(true, |v| {
+            v.expect("created")
+                .set(&name, &SecretString::from(json))
+                .map_err(|e| e.to_string())
+        })
+    }
+
+    fn load(&self, provider: &str, account: &str) -> Result<Option<TokenSet>, String> {
+        let name = mcpgw_core::oauth_secret_name(provider, account);
+        let v = self.vault.with(false, |v| match v {
+            Some(v) => v.get(&name).map_err(|e| e.to_string()),
+            None => Ok(None),
+        })?;
+        v.map(|s| serde_json::from_str(s.expose_secret()).map_err(|e| e.to_string()))
+            .transpose()
+    }
+
+    fn list(&self) -> Result<Vec<(String, String)>, String> {
+        self.vault.with(false, |v| {
+            Ok(v.map(|v| {
+                v.list()
+                    .into_iter()
+                    .filter_map(|(n, ..)| {
+                        let rest = n.strip_prefix("oauth/")?;
+                        let (p, a) = rest.split_once('@')?;
+                        Some((p.to_string(), a.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default())
+        })
+    }
+
+    fn remove(&self, provider: &str, account: &str) -> Result<bool, String> {
+        let name = mcpgw_core::oauth_secret_name(provider, account);
+        self.vault.with(false, |v| match v {
+            Some(v) => v.remove(&name).map_err(|e| e.to_string()),
+            None => Ok(false),
+        })
     }
 }
 

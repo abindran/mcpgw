@@ -14,6 +14,7 @@
 //! the stdio shim can find a running daemon.
 
 pub mod admin;
+pub mod oauth;
 
 use std::{future::Future, sync::Arc};
 
@@ -136,13 +137,20 @@ pub fn edge(mcp: Router, opts: EdgeOptions) -> Router {
 
 /// Like [`edge`], with extra token-protected routes (`/admin`).
 pub fn edge_with(mcp: Router, extra: Router, opts: EdgeOptions) -> Router {
+    edge_full(mcp, extra, Router::new(), opts)
+}
+
+/// The full edge: `mcp` and `protected` need the token; `public` (the OAuth
+/// redirect) does not. Host and Origin checks cover all of them.
+pub fn edge_full(mcp: Router, protected: Router, public: Router, opts: EdgeOptions) -> Router {
     let state = Arc::new(opts);
     let protected = Router::new()
         .nest_service(MCP_PATH, mcp)
-        .merge(extra)
+        .merge(protected)
         .layer(middleware::from_fn_with_state(state.clone(), bearer));
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
+        .merge(public)
         .merge(protected)
         .layer(middleware::from_fn_with_state(state, host_and_origin))
 }

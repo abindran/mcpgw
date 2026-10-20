@@ -10,3 +10,7 @@ repository.workspace = true
 [dependencies]
 mcpgw-core.workspace = true
 getrandom.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+sha2.workspace = true
+base64 = "0.22"

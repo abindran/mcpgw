@@ -5,12 +5,14 @@
 
 pub mod duration;
 pub mod manifest;
+pub mod oauth;
 pub mod profile;
 pub mod secret;
 pub mod server;
 
 pub use duration::Duration;
 pub use manifest::{ManifestDiff, ToolDef, ToolManifest};
+pub use oauth::{OAuthEndpoints, OAuthProvider, oauth_secret_name};
 pub use profile::{Mode, Policy, Profile};
 pub use secret::{SecretMeta, validate_secret_name};
 pub use server::{

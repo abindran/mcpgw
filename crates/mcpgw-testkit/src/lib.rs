@@ -6,6 +6,8 @@
 //! [`McpClient`] is a real MCP client (rmcp) for driving the gateway itself,
 //! the way Claude Code or Cursor would.
 
+pub mod oauth;
+
 use std::{
     collections::BTreeMap,
     io::{BufRead, BufReader},

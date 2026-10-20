@@ -120,6 +120,52 @@ impl Control {
         Ok(serde_json::from_value(v["lines"].clone()).unwrap_or_default())
     }
 
+    /// Start an OAuth flow; returns `(state, url, account)`.
+    pub fn oauth_start(
+        &self,
+        provider: &str,
+        account: &str,
+    ) -> AnyResult<(String, String, String)> {
+        let v = self
+            .call(
+                reqwest::Method::POST,
+                &format!("/admin/oauth/{provider}/start"),
+                Some(serde_json::json!({ "account": account })),
+            )?
+            .unwrap_or_default();
+        let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();
+        Ok((s("state"), s("url"), s("account")))
+    }
+
+    /// Poll an OAuth flow.
+    pub fn oauth_flow(&self, state: &str) -> AnyResult<Value> {
+        Ok(self
+            .call(
+                reqwest::Method::GET,
+                &format!("/admin/oauth/flows/{state}"),
+                None,
+            )?
+            .unwrap_or_default())
+    }
+
+    /// Connected accounts.
+    pub fn oauth_connections(&self) -> AnyResult<Vec<Value>> {
+        let v = self
+            .call(reqwest::Method::GET, "/admin/oauth/connections", None)?
+            .unwrap_or_default();
+        Ok(v["connections"].as_array().cloned().unwrap_or_default())
+    }
+
+    /// Forget a connected account.
+    pub fn oauth_disconnect(&self, provider: &str, account: &str) -> AnyResult<()> {
+        self.call(
+            reqwest::Method::DELETE,
+            &format!("/admin/oauth/connections/{provider}/{account}"),
+            None,
+        )?;
+        Ok(())
+    }
+
     /// Ask the daemon to exit.
     pub fn shutdown(&self) -> AnyResult<()> {
         self.call(reqwest::Method::POST, "/admin/shutdown", None)?;

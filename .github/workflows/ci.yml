@@ -6,7 +6,9 @@ on:
   pull_request:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Pushes to main get one group per commit, so no commit's run is dropped
+  # as "pending" by a later push; PR runs supersede each other.
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.ref) || format('ci-{0}', github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:

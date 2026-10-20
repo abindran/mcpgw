@@ -8,6 +8,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 
+mod auth;
 mod clients;
 mod control;
 mod daemon;
@@ -106,6 +107,9 @@ enum Cmd {
     /// Manage secrets in the vault.
     #[command(subcommand)]
     Secret(SecretCmd),
+    /// Connect accounts at OAuth apps (`[[oauth]]` in the config).
+    #[command(subcommand)]
+    Auth(AuthCmd),
     /// Connect MCP clients (Claude Code, Claude Desktop, Cursor, VS Code).
     #[command(subcommand)]
     Client(ClientCmd),
@@ -149,6 +153,31 @@ struct AddArgs {
     /// Arguments for the command (after `--`).
     #[arg(last = true)]
     args: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum AuthCmd {
+    /// Sign in to an OAuth app in the browser; tokens go to the vault.
+    Connect {
+        /// The `[[oauth]]` app name, e.g. github.
+        provider: String,
+        /// Account label, for several accounts at one provider (github@work).
+        #[arg(long, default_value = "default")]
+        account: String,
+        /// Print the sign-in URL instead of opening a browser.
+        #[arg(long)]
+        no_browser: bool,
+    },
+    /// List connected accounts.
+    Ls,
+    /// Forget a connected account.
+    Rm {
+        /// Provider.
+        provider: String,
+        /// Account label.
+        #[arg(long, default_value = "default")]
+        account: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -269,6 +298,13 @@ fn run(cli: Cli) -> AnyResult<()> {
             secrets::cmd::set(&config, &name, description)
         }
         Cmd::Secret(SecretCmd::Ls) => secrets::cmd::ls(&config),
+        Cmd::Auth(AuthCmd::Connect {
+            provider,
+            account,
+            no_browser,
+        }) => auth::connect(&config, &path, &provider, &account, !no_browser),
+        Cmd::Auth(AuthCmd::Ls) => auth::ls(&config),
+        Cmd::Auth(AuthCmd::Rm { provider, account }) => auth::rm(&config, &provider, &account),
         Cmd::Client(ClientCmd::Install {
             client,
             path,

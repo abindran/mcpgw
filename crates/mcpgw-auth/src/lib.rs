@@ -1,8 +1,11 @@
-//! `mcpgw-auth` — static loopback token.
+//! `mcpgw-auth` — the static loopback token, and the OAuth broker
+//! ([`oauth`]).
 //!
-//! A 256-bit random token stored in a file only the owner can read. Network
-//! front ends (Streamable HTTP, M2) require it as `Authorization: Bearer <token>`.
-//! The stdio front needs none: only the parent process can reach the pipe.
+//! The loopback token is 256 random bits in a file only the owner can read.
+//! The HTTP front door requires it as `Authorization: Bearer <token>`. The
+//! stdio front needs none: only the parent process can reach the pipe.
+
+pub mod oauth;
 
 use std::{
     fs,
