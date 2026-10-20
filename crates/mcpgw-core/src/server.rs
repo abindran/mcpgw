@@ -98,8 +98,31 @@ pub struct ServerSpec {
     pub secrets: BTreeMap<String, String>,
 }
 
+/// Stands for the caller's account in secret names:
+/// `secrets = { GITHUB_TOKEN = "oauth/github@{account}" }`.
+pub const ACCOUNT_PLACEHOLDER: &str = "{account}";
+
+/// Account used when a caller names none.
+pub const DEFAULT_ACCOUNT: &str = "default";
+
 /// Prefix of a secret placeholder in args and env values.
 pub const SECRET_PLACEHOLDER: &str = "${secret:";
+
+/// Where a `${secret:` placeholder's name ends (its closing `}`), stepping
+/// over a nested `{account}`.
+fn placeholder_end(after: &str) -> Option<usize> {
+    let mut i = 0;
+    while i < after.len() {
+        if after[i..].starts_with(ACCOUNT_PLACEHOLDER) {
+            i += ACCOUNT_PLACEHOLDER.len();
+        } else if after[i..].starts_with('}') {
+            return Some(i);
+        } else {
+            i += after[i..].chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    None
+}
 
 /// Names referenced by `${secret:<name>}` placeholders in `s`.
 pub fn secret_placeholders(s: &str) -> Vec<String> {
@@ -107,7 +130,7 @@ pub fn secret_placeholders(s: &str) -> Vec<String> {
     let mut rest = s;
     while let Some(i) = rest.find(SECRET_PLACEHOLDER) {
         let after = &rest[i + SECRET_PLACEHOLDER.len()..];
-        match after.find('}') {
+        match placeholder_end(after) {
             Some(j) => {
                 out.push(after[..j].to_string());
                 rest = &after[j + 1..];
@@ -125,7 +148,7 @@ pub fn fill_placeholders(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> St
     while let Some(i) = rest.find(SECRET_PLACEHOLDER) {
         out.push_str(&rest[..i]);
         let after = &rest[i + SECRET_PLACEHOLDER.len()..];
-        match after.find('}') {
+        match placeholder_end(after) {
             Some(j) => {
                 out.push_str(&lookup(&after[..j]).unwrap_or_default());
                 rest = &after[j + 1..];
@@ -168,6 +191,38 @@ impl ServerSpec {
         }
     }
 
+    /// Whether this server's secrets depend on the caller's account.
+    pub fn account_scoped(&self) -> bool {
+        self.secret_refs()
+            .iter()
+            .any(|r| r.contains(ACCOUNT_PLACEHOLDER))
+    }
+
+    /// This server with `{account}` filled in, for one account.
+    pub fn for_account(&self, account: &str) -> ServerSpec {
+        let fill = |s: &str| s.replace(ACCOUNT_PLACEHOLDER, account);
+        let mut s = self.clone();
+        for v in s.secrets.values_mut() {
+            *v = fill(v);
+        }
+        match &mut s.transport {
+            Transport::Stdio { args, env, .. } => {
+                for a in args.iter_mut() {
+                    *a = fill(a);
+                }
+                for v in env.values_mut() {
+                    *v = fill(v);
+                }
+            }
+            Transport::Http { headers, .. } => {
+                for v in headers.values_mut() {
+                    *v = fill(v);
+                }
+            }
+        }
+        s
+    }
+
     /// Every secret this server uses: bindings and placeholders.
     pub fn secret_refs(&self) -> std::collections::BTreeSet<String> {
         let mut refs: std::collections::BTreeSet<String> = self.secrets.values().cloned().collect();
@@ -198,15 +253,17 @@ impl ServerSpec {
                     self.name
                 )));
             }
-            crate::validate_secret_name(secret)?;
+            crate::validate_secret_name(&secret.replace(ACCOUNT_PLACEHOLDER, DEFAULT_ACCOUNT))?;
         }
         for r in self.secret_refs() {
-            crate::validate_secret_name(&r).map_err(|_| {
-                Error::Config(format!(
-                    "server {}: bad secret placeholder name {r:?}",
-                    self.name
-                ))
-            })?;
+            crate::validate_secret_name(&r.replace(ACCOUNT_PLACEHOLDER, DEFAULT_ACCOUNT)).map_err(
+                |_| {
+                    Error::Config(format!(
+                        "server {}: bad secret placeholder name {r:?}",
+                        self.name
+                    ))
+                },
+            )?;
         }
         if let Some(a) = &self.alias {
             validate_server_name(a).map_err(|_| {
@@ -306,6 +363,29 @@ mod tests {
         assert_eq!(filled, "a X b  ${secret:");
         s.secrets.insert("1BAD".into(), "k".into());
         assert!(s.validate().is_err());
+    }
+
+    #[test]
+    fn account_placeholders() {
+        let mut s = ServerSpec::new(
+            "gh",
+            Transport::Stdio {
+                command: "gh-mcp".into(),
+                args: vec!["--token=${secret:oauth/github@{account}}".into()],
+                env: Default::default(),
+                cwd: None,
+            },
+        );
+        assert!(!ServerSpec::new("x", Transport::stdio("x", vec![])).account_scoped());
+        assert!(s.account_scoped());
+        s.secrets
+            .insert("GITHUB_TOKEN".into(), "oauth/github@{account}".into());
+        s.validate().unwrap();
+        let w = s.for_account("work");
+        assert!(!w.account_scoped());
+        assert_eq!(w.secrets["GITHUB_TOKEN"], "oauth/github@work");
+        assert!(w.secret_refs().contains("oauth/github@work"));
+        assert_eq!(w.name, "gh");
     }
 
     #[test]

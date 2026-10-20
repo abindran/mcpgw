@@ -222,6 +222,16 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
             });
         }
     }
+    for (server, account) in &cfg.gateway.accounts {
+        if validate_server_name(account).is_err() {
+            return Err(Issue {
+                server: None,
+                field: "accounts",
+                message: format!("account {account:?} for server `{server}` is not a valid name"),
+                hint: Some("use letters, digits, '-' or '_'".into()),
+            });
+        }
+    }
     let mut apps = HashSet::new();
     for o in &cfg.oauth {
         let issue = |message: String, hint: &str| Issue {

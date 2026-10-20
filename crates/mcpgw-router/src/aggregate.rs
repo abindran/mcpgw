@@ -116,11 +116,22 @@ pub async fn resolve(manager: &BackendManager, public: &str) -> Option<(String, 
     (public_name(prefix, part) == public).then(|| (server, part.to_string()))
 }
 
-/// Route a call by public name to the owning backend.
+/// Route a call by public name to the owning backend (default accounts).
 pub async fn call_public(
     manager: &BackendManager,
     public: &str,
     arguments: Option<JsonObject>,
+) -> Result<JsonObject, ProtoError> {
+    call_public_as(manager, public, arguments, &Default::default()).await
+}
+
+/// Route a call by public name, using `accounts` (server → account) for
+/// account-scoped servers.
+pub async fn call_public_as(
+    manager: &BackendManager,
+    public: &str,
+    arguments: Option<JsonObject>,
+    accounts: &std::collections::BTreeMap<String, String>,
 ) -> Result<JsonObject, ProtoError> {
     let (server, tool) = resolve(manager, public)
         .await
@@ -129,7 +140,10 @@ pub async fn call_public(
             message: format!("tool not found: {public}"),
             data: None,
         })?;
-    manager.call_tool(&server, &tool, arguments).await
+    let account = accounts.get(&server).map(String::as_str);
+    manager
+        .call_tool_as(&server, account, &tool, arguments)
+        .await
 }
 
 #[cfg(test)]

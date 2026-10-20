@@ -17,6 +17,13 @@
       "additionalProperties": false,
       "description": "Gateway-wide settings.",
       "properties": {
+        "accounts": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Account per server on the default endpoint, for servers whose\nsecrets use `{account}`: `accounts = { github = \"work\" }`.\nProfiles (M2-07) set their own. Default: `default`.",
+          "type": "object"
+        },
         "allow_agent_add_servers": {
           "default": false,
           "description": "Whether the agent may add new backend servers itself. Default: `false`.",

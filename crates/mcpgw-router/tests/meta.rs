@@ -32,6 +32,7 @@ async fn serve(m: Arc<BackendManager>, mode: Mode) -> String {
             GatewayOptions {
                 mode,
                 pinned: vec!["fx__add".into()],
+                ..GatewayOptions::default()
             },
         ),
     );

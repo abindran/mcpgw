@@ -37,6 +37,7 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
     mcpgw_router::GatewayOptions {
         mode: config.gateway.mode,
         pinned: config.gateway.pinned_tools.clone(),
+        accounts: config.gateway.accounts.clone(),
     }
 }
 

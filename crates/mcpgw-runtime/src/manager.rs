@@ -114,7 +114,10 @@ pub struct BackendStatus {
 }
 
 struct Shared {
+    /// Status name: the server, or `server@account` for an account instance.
     name: String,
+    /// Whose manifest this is checked against: the base server's name.
+    catalog_key: String,
     /// Scrubs the secrets injected into the current connection.
     redactor: Arc<std::sync::RwLock<Arc<Redactor>>>,
     /// The live manifest that differs from the pin, while quarantined.
@@ -123,6 +126,19 @@ struct Shared {
     tools: RwLock<Vec<JsonObject>>,
     stderr: Arc<Mutex<VecDeque<String>>>,
     catalog: Arc<Catalog>,
+}
+
+impl Handle {
+    /// The error for calls to a disabled server, if it is one.
+    fn disabled_error(&self, server: &str) -> Option<ProtoError> {
+        let st = self.shared.snapshot();
+        (st.state == State::Disabled).then(|| {
+            ProtoError::Unavailable(format!(
+                "server {server} is {}",
+                st.last_error.unwrap_or_else(|| "disabled".into())
+            ))
+        })
+    }
 }
 
 impl Shared {
@@ -191,6 +207,8 @@ struct Handle {
     shared: Arc<Shared>,
     tx: mpsc::UnboundedSender<Cmd>,
     prefix: String,
+    /// For `server@account` instances, the base server.
+    instance_of: Option<String>,
 }
 
 /// What every actor knows about its peers, for `max_running` eviction.
@@ -237,6 +255,8 @@ impl Registry {
 /// disabled while the gateway runs.
 pub struct BackendManager {
     backends: std::sync::RwLock<BTreeMap<String, Handle>>,
+    /// Specs as configured (with `{account}` unresolved).
+    specs: std::sync::RwLock<BTreeMap<String, ServerSpec>>,
     opts: ManagerOptions,
     secrets: Option<Arc<dyn SecretResolver>>,
     catalog: Arc<Catalog>,
@@ -275,6 +295,7 @@ impl BackendManager {
         });
         let m = Self {
             backends: std::sync::RwLock::new(BTreeMap::new()),
+            specs: std::sync::RwLock::new(BTreeMap::new()),
             opts,
             secrets,
             catalog,
@@ -306,7 +327,98 @@ impl BackendManager {
 
     /// Add a server (and start its actor). Fails if the name exists. Its
     /// tool prefix falls back to the name if the alias is taken.
+    ///
+    /// A server whose secrets use `{account}` serves the `default` account
+    /// itself; other accounts get their own instance on first use
+    /// ([`BackendManager::call_tool_as`]).
     pub fn add_server(&self, cfg: &ServerSpec) -> Result<(), ProtoError> {
+        if self.read().contains_key(&cfg.name) {
+            return Err(ProtoError::Unavailable(format!(
+                "server {} already exists",
+                cfg.name
+            )));
+        }
+        self.specs
+            .write()
+            .expect("specs lock")
+            .insert(cfg.name.clone(), cfg.clone());
+        let launch = if cfg.account_scoped() {
+            cfg.for_account(mcpgw_core::DEFAULT_ACCOUNT)
+        } else {
+            cfg.clone()
+        };
+        self.insert(&cfg.name, &launch, None)
+    }
+
+    /// The backend key serving `server` for `account`, creating the
+    /// account's instance if needed.
+    fn instance(&self, server: &str, account: Option<&str>) -> Result<String, ProtoError> {
+        let account = account.unwrap_or(mcpgw_core::DEFAULT_ACCOUNT);
+        let spec = self.specs.read().expect("specs lock").get(server).cloned();
+        let Some(spec) = spec else {
+            return Err(ProtoError::Unavailable(format!("unknown server {server}")));
+        };
+        if account == mcpgw_core::DEFAULT_ACCOUNT || !spec.account_scoped() {
+            return Ok(server.to_string());
+        }
+        mcpgw_core::validate_server_name(account)
+            .map_err(|_| ProtoError::Unavailable(format!("invalid account name {account:?}")))?;
+        let key = format!("{server}@{account}");
+        if self.read().contains_key(&key) {
+            return Ok(key);
+        }
+        if let Some(e) = self.handle(server)?.disabled_error(server) {
+            return Err(e);
+        }
+        let mut inst = spec.for_account(account);
+        inst.name = key.clone();
+        match self.insert(&key, &inst, Some(server)) {
+            Ok(()) => Ok(key),
+            // another caller created it first
+            Err(_) if self.read().contains_key(&key) => Ok(key),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Call a tool as `account` (see [`BackendManager::add_server`]).
+    pub async fn call_tool_as(
+        &self,
+        server: &str,
+        account: Option<&str>,
+        tool: &str,
+        arguments: Option<JsonObject>,
+    ) -> Result<JsonObject, ProtoError> {
+        let key = self.instance(server, account)?;
+        self.call_tool(&key, tool, arguments).await
+    }
+
+    /// Account instances of `server` (`server@account` keys).
+    fn instances_of(&self, server: &str) -> Vec<String> {
+        self.read()
+            .iter()
+            .filter(|(_, h)| h.instance_of.as_deref() == Some(server))
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
+
+    async fn drop_backend(&self, key: &str) {
+        let h = self.backends.write().expect("backends lock").remove(key);
+        self.sync_registry();
+        if let Some(h) = h {
+            let (reply, rx) = oneshot::channel();
+            if h.tx.send(Cmd::Shutdown(reply)).is_ok() {
+                let _ = rx.await;
+            }
+        }
+    }
+
+    fn insert(
+        &self,
+        key: &str,
+        cfg: &ServerSpec,
+        instance_of: Option<&str>,
+    ) -> Result<(), ProtoError> {
+        let catalog_key = instance_of.unwrap_or(key).to_string();
         let (state, why) = match (&cfg.transport, cfg.enabled) {
             (_, false) => (State::Disabled, Some("disabled".to_string())),
             (Transport::Http { .. }, _) => (
@@ -316,23 +428,27 @@ impl BackendManager {
             (Transport::Stdio { .. }, true) => (State::Cold, None),
         };
         let mut backends = self.backends.write().expect("backends lock");
-        if backends.contains_key(&cfg.name) {
+        if backends.contains_key(key) {
             return Err(ProtoError::Unavailable(format!(
-                "server {} already exists",
-                cfg.name
+                "server {key} already exists"
             )));
         }
-        let mut prefix = cfg.prefix().to_string();
-        if backends.values().any(|h| h.prefix == prefix) {
+        // Instances aren't listed, so their prefix just has to be unique.
+        let mut prefix = match instance_of {
+            Some(_) => key.to_string(),
+            None => cfg.prefix().to_string(),
+        };
+        if instance_of.is_none() && backends.values().any(|h| h.prefix == prefix) {
             tracing::warn!(server = %cfg.name, %prefix, "tool prefix already used; using the server name");
             prefix = cfg.name.clone();
         }
         let shared = Arc::new(Shared {
-            name: cfg.name.clone(),
+            name: key.to_string(),
+            catalog_key,
             redactor: Arc::new(std::sync::RwLock::new(Arc::new(Redactor::default()))),
             pending: std::sync::Mutex::new(None),
             status: std::sync::RwLock::new(BackendStatus {
-                name: cfg.name.clone(),
+                name: key.to_string(),
                 state: state.clone(),
                 restarts: 0,
                 protocol_version: None,
@@ -393,7 +509,15 @@ impl BackendManager {
                 let _ = tx.send(Cmd::Ensure(reply));
             }
         }
-        backends.insert(cfg.name.clone(), Handle { shared, tx, prefix });
+        backends.insert(
+            key.to_string(),
+            Handle {
+                shared,
+                tx,
+                prefix,
+                instance_of: instance_of.map(str::to_string),
+            },
+        );
         drop(backends);
         self.sync_registry();
         Ok(())
@@ -402,17 +526,18 @@ impl BackendManager {
     /// Remove a server: stop it and forget it. Its manifest stays in the
     /// catalog unless removed there too.
     pub async fn remove_server(&self, server: &str) -> Result<(), ProtoError> {
-        let h = self
-            .backends
-            .write()
-            .expect("backends lock")
-            .remove(server)
-            .ok_or_else(|| ProtoError::Unavailable(format!("unknown server {server}")))?;
-        self.sync_registry();
-        let (reply, rx) = oneshot::channel();
-        if h.tx.send(Cmd::Shutdown(reply)).is_ok() {
-            let _ = rx.await;
+        if !self
+            .read()
+            .get(server)
+            .is_some_and(|h| h.instance_of.is_none())
+        {
+            return Err(ProtoError::Unavailable(format!("unknown server {server}")));
         }
+        self.specs.write().expect("specs lock").remove(server);
+        for key in self.instances_of(server) {
+            self.drop_backend(&key).await;
+        }
+        self.drop_backend(server).await;
         Ok(())
     }
 
@@ -420,6 +545,12 @@ impl BackendManager {
     /// disappear from listings until it is enabled again.
     pub async fn set_enabled(&self, server: &str, enabled: bool) -> Result<(), ProtoError> {
         let h = self.handle(server)?;
+        if !enabled {
+            // account instances go; they come back on demand once re-enabled
+            for key in self.instances_of(server) {
+                self.drop_backend(&key).await;
+            }
+        }
         let (reply, rx) = oneshot::channel();
         h.tx.send(Cmd::SetEnabled(enabled, reply)).map_err(|_| {
             ProtoError::Unavailable(format!(
@@ -449,9 +580,13 @@ impl BackendManager {
             .map(|(n, _)| n.clone())
     }
 
-    /// Names of all backends, sorted.
+    /// Names of all servers, sorted (account instances excluded).
     pub fn names(&self) -> Vec<String> {
-        self.read().keys().cloned().collect()
+        self.read()
+            .iter()
+            .filter(|(_, h)| h.instance_of.is_none())
+            .map(|(k, _)| k.clone())
+            .collect()
     }
 
     /// Status of every backend, ordered by name.
@@ -1121,8 +1256,8 @@ impl Actor {
                     self.ever_connected = true;
                     self.failures = 0;
                     self.touch();
-                    if !self.shared.catalog.contains(&self.shared.name) {
-                        let m = manifest_from(&self.shared.name, pv.clone(), &tools);
+                    if !self.shared.catalog.contains(&self.shared.catalog_key) {
+                        let m = manifest_from(&self.shared.catalog_key, pv.clone(), &tools);
                         tracing::info!(server = %self.shared.name, pin = %m.sha256, tools = m.tools.len(), "captured manifest");
                         self.shared.catalog.record(m);
                     }
@@ -1182,8 +1317,8 @@ impl Actor {
     /// Compare the tools a server reports on start with its pin. On a
     /// mismatch, keeps the live manifest for approval and returns the diff.
     fn drift(&mut self, pv: Option<String>, tools: &[JsonObject]) -> Option<ManifestDiff> {
-        let pinned = self.shared.catalog.get(&self.shared.name)?;
-        let live = manifest_from(&self.shared.name, pv, tools);
+        let pinned = self.shared.catalog.get(&self.shared.catalog_key)?;
+        let live = manifest_from(&self.shared.catalog_key, pv, tools);
         if live.sha256 == pinned.sha256 {
             return None;
         }

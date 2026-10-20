@@ -1509,6 +1509,7 @@ dependencies = [
  "mcpgw-runtime",
  "mcpgw-telemetry",
  "mcpgw-testkit",
+ "secrecy",
  "serde_json",
  "sha2 0.10.9",
  "tokio",

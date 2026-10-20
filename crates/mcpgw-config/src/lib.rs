@@ -65,6 +65,11 @@ pub struct GatewayConfig {
     /// or `hybrid` (meta-tools plus `pinned_tools`).
     #[serde(default)]
     pub mode: mcpgw_core::Mode,
+    /// Account per server on the default endpoint, for servers whose
+    /// secrets use `{account}`: `accounts = { github = "work" }`.
+    /// Profiles (M2-07) set their own. Default: `default`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub accounts: std::collections::BTreeMap<String, String>,
     /// Public tool names always listed in `hybrid` mode.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_tools: Vec<String>,

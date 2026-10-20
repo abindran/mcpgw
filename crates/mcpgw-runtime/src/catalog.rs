@@ -110,6 +110,14 @@ pub async fn introspect_with_secrets(
     timeout: Duration,
     secrets: Option<Arc<dyn crate::SecretResolver>>,
 ) -> Result<ToolManifest, ProtoError> {
+    // Account-scoped servers are introspected as the default account.
+    let owned;
+    let spec = if spec.account_scoped() {
+        owned = spec.for_account(mcpgw_core::DEFAULT_ACCOUNT);
+        &owned
+    } else {
+        spec
+    };
     let Transport::Stdio {
         command,
         args,

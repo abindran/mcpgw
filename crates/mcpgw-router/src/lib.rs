@@ -9,7 +9,9 @@ pub mod meta;
 
 use std::sync::Arc;
 
-pub use aggregate::{MAX_TOOL_NAME, call_public, list_all_tools, public_name, resolve, split_name};
+pub use aggregate::{
+    MAX_TOOL_NAME, call_public, call_public_as, list_all_tools, public_name, resolve, split_name,
+};
 use mcpgw_core::Mode;
 use mcpgw_proto::front::{self, BoxFuture, FrontInfo, ToolProvider};
 use mcpgw_runtime::{BackendManager, JsonObject, ProtoError};
@@ -27,6 +29,9 @@ pub struct GatewayOptions {
     pub mode: Mode,
     /// Public tool names listed directly in hybrid mode.
     pub pinned: Vec<String>,
+    /// Account per server (`github` → `work`) for servers whose secrets
+    /// use `{account}`; others use `default`.
+    pub accounts: std::collections::BTreeMap<String, String>,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -42,7 +47,7 @@ impl GatewayProvider {
             manager,
             GatewayOptions {
                 mode: Mode::Direct,
-                pinned: Vec::new(),
+                ..GatewayOptions::default()
             },
         )
     }
@@ -100,9 +105,9 @@ impl ToolProvider for GatewayProvider {
             };
             mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
                 if meta {
-                    meta::call(&self.manager, &name, arguments).await
+                    meta::call(&self.manager, &name, arguments, &self.opts.accounts).await
                 } else {
-                    call_public(&self.manager, &name, arguments).await
+                    call_public_as(&self.manager, &name, arguments, &self.opts.accounts).await
                 }
             })
             .await
