@@ -235,6 +235,13 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
+fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
+    mcpgw_router::GatewayOptions {
+        mode: config.gateway.mode,
+        pinned: config.gateway.pinned_tools.clone(),
+    }
+}
+
 /// A catalog seeded from the store that saves new manifests back to it.
 fn catalog(store: &Arc<SqliteStore>) -> AnyResult<Arc<mcpgw_runtime::Catalog>> {
     let s = store.clone();
@@ -292,7 +299,7 @@ fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult<()>
         let res: AnyResult<()> = if stdio {
             tracing::info!(servers = servers.len(), "mcpgw serving on stdio");
             tokio::select! {
-                r = mcpgw_router::serve_stdio(mgr.clone()) => r.map_err(|e| e.to_string().into()),
+                r = mcpgw_router::serve_stdio(mgr.clone(), gateway_options(config)) => r.map_err(|e| e.to_string().into()),
                 _ = shutdown_signal() => Ok(()),
             }
         } else {
@@ -310,7 +317,7 @@ async fn serve_http(config: &Config, token: Token, mgr: Arc<BackendManager>) -> 
         .map_err(|e| format!("cannot listen on {addr}: {e}"))?;
     let local = listener.local_addr()?;
     let app = mcpgw_api::edge(
-        mcpgw_router::http_router(mgr),
+        mcpgw_router::http_router(mgr, gateway_options(config)),
         mcpgw_api::EdgeOptions {
             token,
             port: local.port(),

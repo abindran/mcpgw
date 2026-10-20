@@ -673,3 +673,42 @@ async fn unchanged_tools_pass_the_drift_check() {
     assert!(m.pending_manifest("fx").is_none());
     m.shutdown().await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn disable_enable_and_remove_at_runtime() {
+    let m = BackendManager::start(&[server("fx", &[])], lazy());
+    m.call_tool("fx", "add", args(json!({"a": 1, "b": 1})))
+        .await
+        .unwrap();
+    let pid = m.status_of("fx").unwrap().pid.unwrap();
+
+    m.set_enabled("fx", false).await.unwrap();
+    assert_eq!(state(&m, "fx"), State::Disabled);
+    assert!(gone(pid).await, "disabled server {pid} still running");
+    let err = m
+        .call_tool("fx", "add", None)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("disabled"), "{err}");
+
+    m.set_enabled("fx", true).await.unwrap();
+    assert_eq!(state(&m, "fx"), State::Cold);
+    m.call_tool("fx", "add", args(json!({"a": 2, "b": 2})))
+        .await
+        .unwrap();
+
+    m.add_server(&server("extra", &[])).unwrap();
+    assert!(
+        m.add_server(&server("extra", &[])).is_err(),
+        "duplicate name"
+    );
+    assert_eq!(m.names(), ["extra", "fx"]);
+    m.remove_server("fx").await.unwrap();
+    assert_eq!(m.names(), ["extra"]);
+    assert!(matches!(
+        m.call_tool("fx", "add", None).await,
+        Err(ProtoError::Unavailable(_))
+    ));
+    m.shutdown().await;
+}

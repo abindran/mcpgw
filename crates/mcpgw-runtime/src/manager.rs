@@ -148,6 +148,7 @@ enum Cmd {
     Ensure(Reply<()>),
     Stop(oneshot::Sender<()>),
     Reset,
+    SetEnabled(bool, Reply<()>),
     Shutdown(oneshot::Sender<()>),
 }
 
@@ -171,11 +172,12 @@ enum Internal {
 struct Handle {
     shared: Arc<Shared>,
     tx: mpsc::UnboundedSender<Cmd>,
+    prefix: String,
 }
 
 /// What every actor knows about its peers, for `max_running` eviction.
 struct Registry {
-    peers: std::sync::OnceLock<Vec<Handle>>,
+    peers: std::sync::RwLock<Vec<Handle>>,
     max_running: usize,
 }
 
@@ -184,9 +186,7 @@ impl Registry {
     /// used idle, non-stateful peer. The cap is soft: when every running
     /// server is busy or stateful, `me` starts anyway.
     fn make_room(&self, me: &str) {
-        let Some(peers) = self.peers.get() else {
-            return;
-        };
+        let peers = self.peers.read().expect("registry").clone();
         let others: Vec<(BackendStatus, &Handle)> = peers
             .iter()
             .filter(|h| h.shared.name != me)
@@ -215,12 +215,13 @@ impl Registry {
     }
 }
 
-/// Owns all backend actors.
+/// Owns all backend actors. Servers can be added, removed, enabled and
+/// disabled while the gateway runs.
 pub struct BackendManager {
-    backends: BTreeMap<String, Handle>,
-    prefixes: BTreeMap<String, String>,
+    backends: std::sync::RwLock<BTreeMap<String, Handle>>,
     opts: ManagerOptions,
     catalog: Arc<Catalog>,
+    registry: Arc<Registry>,
     tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
 }
 
@@ -238,102 +239,159 @@ impl BackendManager {
         opts: ManagerOptions,
         catalog: Arc<Catalog>,
     ) -> Self {
-        let mut backends = BTreeMap::new();
-        let mut tasks = Vec::new();
         let registry = Arc::new(Registry {
-            peers: std::sync::OnceLock::new(),
+            peers: std::sync::RwLock::new(Vec::new()),
             max_running: opts.max_running.max(1),
         });
-        for cfg in servers {
-            let (state, why) = match (&cfg.transport, cfg.enabled) {
-                (_, false) => (State::Disabled, Some("disabled".to_string())),
-                (Transport::Http { .. }, _) => (
-                    State::Disabled,
-                    Some("http transport arrives in M2-04".to_string()),
-                ),
-                (Transport::Stdio { .. }, true) => (State::Cold, None),
-            };
-            let shared = Arc::new(Shared {
-                name: cfg.name.clone(),
-                pending: std::sync::Mutex::new(None),
-                status: std::sync::RwLock::new(BackendStatus {
-                    name: cfg.name.clone(),
-                    state: state.clone(),
-                    restarts: 0,
-                    protocol_version: None,
-                    last_error: why,
-                    pid: None,
-                    last_used: None,
-                    stateful: cfg.stateful,
-                }),
-                tools: RwLock::new(Vec::new()),
-                stderr: Arc::default(),
-                catalog: catalog.clone(),
-            });
-            let (tx, rx) = mpsc::unbounded_channel();
-            if let Transport::Stdio {
-                command,
-                args,
-                env,
-                cwd,
-            } = &cfg.transport
-            {
-                let spec = StdioSpec {
-                    command: command.clone(),
-                    args: args.clone(),
-                    env: env.clone(),
-                    cwd: cwd.clone(),
-                };
-                let connect_timeout = cfg
-                    .startup_timeout
-                    .map(|d| d.get())
-                    .unwrap_or(opts.connect_timeout);
-                let idle_timeout = cfg
-                    .idle_timeout
-                    .map(|d| d.get())
-                    .unwrap_or(opts.idle_timeout);
-                let actor = Actor::new(
-                    shared.clone(),
-                    spec,
-                    opts.clone(),
-                    Limits {
-                        connect_timeout,
-                        idle_timeout,
-                        stateful: cfg.stateful,
-                    },
-                    state,
-                    rx,
-                    registry.clone(),
-                );
-                tasks.push(tokio::spawn(actor.run()));
-                if opts.eager && cfg.enabled {
-                    let (reply, _) = oneshot::channel();
-                    let _ = tx.send(Cmd::Ensure(reply));
-                }
-            }
-            backends.insert(cfg.name.clone(), Handle { shared, tx });
-        }
-        let _ = registry.peers.set(backends.values().cloned().collect());
-        // Tool-name prefixes (alias or name); on a clash the later server
-        // falls back to its unique name.
-        let mut prefixes: BTreeMap<String, String> = BTreeMap::new();
-        let mut taken = std::collections::HashSet::new();
-        for cfg in servers {
-            let mut p = cfg.prefix().to_string();
-            if !taken.insert(p.clone()) {
-                tracing::warn!(server = %cfg.name, prefix = %p, "tool prefix already used; using the server name");
-                p = cfg.name.clone();
-                taken.insert(p.clone());
-            }
-            prefixes.insert(cfg.name.clone(), p);
-        }
-        Self {
-            backends,
-            prefixes,
+        let m = Self {
+            backends: std::sync::RwLock::new(BTreeMap::new()),
             opts,
             catalog,
-            tasks: std::sync::Mutex::new(tasks),
+            registry,
+            tasks: std::sync::Mutex::new(Vec::new()),
+        };
+        for cfg in servers {
+            if let Err(e) = m.add_server(cfg) {
+                tracing::warn!(server = %cfg.name, error = %e, "server not added");
+            }
         }
+        m
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, BTreeMap<String, Handle>> {
+        self.backends.read().expect("backends lock")
+    }
+
+    fn handle(&self, server: &str) -> Result<Handle, ProtoError> {
+        self.read()
+            .get(server)
+            .cloned()
+            .ok_or_else(|| ProtoError::Unavailable(format!("unknown server {server}")))
+    }
+
+    fn sync_registry(&self) {
+        *self.registry.peers.write().expect("registry") = self.read().values().cloned().collect();
+    }
+
+    /// Add a server (and start its actor). Fails if the name exists. Its
+    /// tool prefix falls back to the name if the alias is taken.
+    pub fn add_server(&self, cfg: &ServerSpec) -> Result<(), ProtoError> {
+        let (state, why) = match (&cfg.transport, cfg.enabled) {
+            (_, false) => (State::Disabled, Some("disabled".to_string())),
+            (Transport::Http { .. }, _) => (
+                State::Disabled,
+                Some("http transport arrives in M2-04".to_string()),
+            ),
+            (Transport::Stdio { .. }, true) => (State::Cold, None),
+        };
+        let mut backends = self.backends.write().expect("backends lock");
+        if backends.contains_key(&cfg.name) {
+            return Err(ProtoError::Unavailable(format!(
+                "server {} already exists",
+                cfg.name
+            )));
+        }
+        let mut prefix = cfg.prefix().to_string();
+        if backends.values().any(|h| h.prefix == prefix) {
+            tracing::warn!(server = %cfg.name, %prefix, "tool prefix already used; using the server name");
+            prefix = cfg.name.clone();
+        }
+        let shared = Arc::new(Shared {
+            name: cfg.name.clone(),
+            pending: std::sync::Mutex::new(None),
+            status: std::sync::RwLock::new(BackendStatus {
+                name: cfg.name.clone(),
+                state: state.clone(),
+                restarts: 0,
+                protocol_version: None,
+                last_error: why,
+                pid: None,
+                last_used: None,
+                stateful: cfg.stateful,
+            }),
+            tools: RwLock::new(Vec::new()),
+            stderr: Arc::default(),
+            catalog: self.catalog.clone(),
+        });
+        let (tx, rx) = mpsc::unbounded_channel();
+        if let Transport::Stdio {
+            command,
+            args,
+            env,
+            cwd,
+        } = &cfg.transport
+        {
+            let spec = StdioSpec {
+                command: command.clone(),
+                args: args.clone(),
+                env: env.clone(),
+                cwd: cwd.clone(),
+            };
+            let limits = Limits {
+                connect_timeout: cfg
+                    .startup_timeout
+                    .map(|d| d.get())
+                    .unwrap_or(self.opts.connect_timeout),
+                idle_timeout: cfg
+                    .idle_timeout
+                    .map(|d| d.get())
+                    .unwrap_or(self.opts.idle_timeout),
+                stateful: cfg.stateful,
+            };
+            let actor = Actor::new(
+                shared.clone(),
+                spec,
+                self.opts.clone(),
+                limits,
+                state,
+                rx,
+                self.registry.clone(),
+            );
+            self.tasks
+                .lock()
+                .expect("tasks mutex")
+                .push(tokio::spawn(actor.run()));
+            if self.opts.eager && cfg.enabled {
+                let (reply, _) = oneshot::channel();
+                let _ = tx.send(Cmd::Ensure(reply));
+            }
+        }
+        backends.insert(cfg.name.clone(), Handle { shared, tx, prefix });
+        drop(backends);
+        self.sync_registry();
+        Ok(())
+    }
+
+    /// Remove a server: stop it and forget it. Its manifest stays in the
+    /// catalog unless removed there too.
+    pub async fn remove_server(&self, server: &str) -> Result<(), ProtoError> {
+        let h = self
+            .backends
+            .write()
+            .expect("backends lock")
+            .remove(server)
+            .ok_or_else(|| ProtoError::Unavailable(format!("unknown server {server}")))?;
+        self.sync_registry();
+        let (reply, rx) = oneshot::channel();
+        if h.tx.send(Cmd::Shutdown(reply)).is_ok() {
+            let _ = rx.await;
+        }
+        Ok(())
+    }
+
+    /// Enable or disable a server. Disabling drains and stops it; its tools
+    /// disappear from listings until it is enabled again.
+    pub async fn set_enabled(&self, server: &str, enabled: bool) -> Result<(), ProtoError> {
+        let h = self.handle(server)?;
+        let (reply, rx) = oneshot::channel();
+        h.tx.send(Cmd::SetEnabled(enabled, reply)).map_err(|_| {
+            ProtoError::Unavailable(format!(
+                "server {server} can't be enabled: {}",
+                h.shared.snapshot().last_error.unwrap_or_default()
+            ))
+        })?;
+        rx.await
+            .map_err(|_| ProtoError::Unavailable(format!("server {server} is shut down")))?
     }
 
     /// The tool catalog.
@@ -342,34 +400,31 @@ impl BackendManager {
     }
 
     /// Prefix of a server's public tool names (its alias or name).
-    pub fn prefix(&self, server: &str) -> Option<&str> {
-        self.prefixes.get(server).map(String::as_str)
+    pub fn prefix(&self, server: &str) -> Option<String> {
+        self.read().get(server).map(|h| h.prefix.clone())
     }
 
     /// The server whose tools use `prefix`.
-    pub fn server_for_prefix(&self, prefix: &str) -> Option<&str> {
-        self.prefixes
+    pub fn server_for_prefix(&self, prefix: &str) -> Option<String> {
+        self.read()
             .iter()
-            .find(|(_, p)| p.as_str() == prefix)
-            .map(|(n, _)| n.as_str())
+            .find(|(_, h)| h.prefix == prefix)
+            .map(|(n, _)| n.clone())
     }
 
-    /// Names of all configured backends.
-    pub fn names(&self) -> impl Iterator<Item = &str> {
-        self.backends.keys().map(String::as_str)
+    /// Names of all backends, sorted.
+    pub fn names(&self) -> Vec<String> {
+        self.read().keys().cloned().collect()
     }
 
     /// Status of every backend, ordered by name.
     pub async fn status(&self) -> Vec<BackendStatus> {
-        self.backends
-            .values()
-            .map(|h| h.shared.snapshot())
-            .collect()
+        self.read().values().map(|h| h.shared.snapshot()).collect()
     }
 
     /// Status of one backend.
     pub fn status_of(&self, server: &str) -> Option<BackendStatus> {
-        self.backends.get(server).map(|h| h.shared.snapshot())
+        self.read().get(server).map(|h| h.shared.snapshot())
     }
 
     /// Wait until no backend is starting (and, when eager, none is still
@@ -377,7 +432,7 @@ impl BackendManager {
     pub async fn wait_ready(&self, timeout: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + timeout;
         loop {
-            let busy = self.backends.values().any(|h| {
+            let busy = self.read().values().any(|h| {
                 let s = h.shared.snapshot().state;
                 s == State::Starting || (self.opts.eager && s == State::Cold)
             });
@@ -394,24 +449,24 @@ impl BackendManager {
     /// A server's tools from its pinned manifest, without starting it.
     /// Disabled and unknown servers have none.
     pub async fn tools(&self, server: &str) -> Vec<JsonObject> {
-        match self.backends.get(server) {
-            Some(h) if h.shared.snapshot().state != State::Disabled => self.catalog.tools(server),
+        match self.handle(server) {
+            Ok(h) if h.shared.snapshot().state != State::Disabled => self.catalog.tools(server),
             _ => Vec::new(),
         }
     }
 
     /// The tools the running server reported on its last start.
     pub async fn live_tools(&self, server: &str) -> Vec<JsonObject> {
-        match self.backends.get(server) {
-            Some(h) => h.shared.tools.read().await.clone(),
-            None => Vec::new(),
+        match self.handle(server) {
+            Ok(h) => h.shared.tools.read().await.clone(),
+            Err(_) => Vec::new(),
         }
     }
 
     /// The last lines a server wrote to stderr (across restarts).
     pub fn stderr_tail(&self, server: &str) -> Vec<String> {
-        match self.backends.get(server) {
-            Some(h) => h
+        match self.handle(server) {
+            Ok(h) => h
                 .shared
                 .stderr
                 .lock()
@@ -419,14 +474,8 @@ impl BackendManager {
                 .iter()
                 .cloned()
                 .collect(),
-            None => Vec::new(),
+            Err(_) => Vec::new(),
         }
-    }
-
-    fn handle(&self, server: &str) -> Result<&Handle, ProtoError> {
-        self.backends
-            .get(server)
-            .ok_or_else(|| ProtoError::Unavailable(format!("unknown server {server}")))
     }
 
     /// Call a tool, starting the server first if it is cold.
@@ -443,7 +492,7 @@ impl BackendManager {
             args: arguments,
             reply,
         })
-        .map_err(|_| ProtoError::Unavailable(format!("server {server} is shut down")))?;
+        .map_err(|_| self.gone(server, &h))?;
         let limit = self.opts.connect_timeout + self.opts.call_timeout;
         match tokio::time::timeout(limit, rx).await {
             Ok(Ok(r)) => r,
@@ -454,12 +503,21 @@ impl BackendManager {
         }
     }
 
+    /// The error for a server whose actor isn't running (unsupported
+    /// transport, or shut down).
+    fn gone(&self, server: &str, h: &Handle) -> ProtoError {
+        match h.shared.snapshot().last_error {
+            Some(why) => ProtoError::Unavailable(format!("server {server} is {why}")),
+            None => ProtoError::Unavailable(format!("server {server} is shut down")),
+        }
+    }
+
     /// Start a server (if needed) and wait until it is connected.
     pub async fn ensure(&self, server: &str) -> Result<(), ProtoError> {
         let h = self.handle(server)?;
         let (reply, rx) = oneshot::channel();
         h.tx.send(Cmd::Ensure(reply))
-            .map_err(|_| ProtoError::Unavailable(format!("server {server} is shut down")))?;
+            .map_err(|_| self.gone(server, &h))?;
         let limit = self.opts.connect_timeout + Duration::from_secs(1);
         match tokio::time::timeout(limit, rx).await {
             Ok(Ok(r)) => r,
@@ -482,8 +540,8 @@ impl BackendManager {
 
     /// The tools a quarantined server reports now, which differ from its pin.
     pub fn pending_manifest(&self, server: &str) -> Option<ToolManifest> {
-        self.backends
-            .get(server)?
+        self.handle(server)
+            .ok()?
             .shared
             .pending
             .lock()
@@ -517,8 +575,9 @@ impl BackendManager {
 
     /// Stop every actor and terminate every backend process.
     pub async fn shutdown(&self) {
+        let handles: Vec<Handle> = self.read().values().cloned().collect();
         let mut waits = Vec::new();
-        for h in self.backends.values() {
+        for h in &handles {
             let (reply, rx) = oneshot::channel();
             if h.tx.send(Cmd::Shutdown(reply)).is_ok() {
                 waits.push(rx);
@@ -531,7 +590,7 @@ impl BackendManager {
         for t in tasks {
             let _ = t.await;
         }
-        for h in self.backends.values() {
+        for h in &handles {
             if h.shared.snapshot().state != State::Disabled {
                 h.shared.update(|s| s.state = State::Cold);
             }
@@ -565,6 +624,7 @@ struct Actor {
     retry_at: Option<tokio::time::Instant>,
     ping_inflight: bool,
     stop_replies: Vec<oneshot::Sender<()>>,
+    disable_replies: Vec<Reply<()>>,
     exiting: Option<oneshot::Sender<()>>,
 }
 
@@ -599,6 +659,7 @@ impl Actor {
             retry_at: None,
             ping_inflight: false,
             stop_replies: Vec::new(),
+            disable_replies: Vec::new(),
             exiting: None,
         }
     }
@@ -637,6 +698,20 @@ impl Actor {
                 }
             }
             self.rearm_idle();
+            // A disable completes once the server is stopped.
+            if !self.disable_replies.is_empty()
+                && matches!(
+                    self.state,
+                    State::Cold | State::Backoff { .. } | State::Failed | State::Quarantined
+                )
+            {
+                self.shared
+                    .update(|s| s.last_error = Some("disabled".into()));
+                self.apply(Event::Disable);
+                for r in self.disable_replies.drain(..) {
+                    let _ = r.send(Ok(()));
+                }
+            }
             // Calls that queued while the server drained start it again.
             if self.state == State::Cold && !self.waiters.is_empty() && self.exiting.is_none() {
                 self.apply(Event::Demand);
@@ -780,6 +855,27 @@ impl Actor {
             Cmd::Reset => {
                 self.failures = 0;
                 self.apply(Event::Reset);
+            }
+            Cmd::SetEnabled(true, reply) => {
+                self.disable_replies.clear();
+                if self.state == State::Disabled {
+                    self.shared.update(|s| s.last_error = None);
+                    self.apply(Event::Enable);
+                }
+                let _ = reply.send(Ok(()));
+            }
+            Cmd::SetEnabled(false, reply) => {
+                if self.state == State::Disabled {
+                    let _ = reply.send(Ok(()));
+                    return;
+                }
+                self.disable_replies.push(reply);
+                self.retry_at = None;
+                self.fail_waiters(&ProtoError::Unavailable(format!(
+                    "server {} was disabled",
+                    self.shared.name
+                )));
+                self.apply(Event::Stop);
             }
             Cmd::Shutdown(reply) => self.begin_exit(Some(reply)),
         }

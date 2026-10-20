@@ -94,16 +94,17 @@ where
 pub async fn list_all_tools(manager: &BackendManager) -> Vec<JsonObject> {
     let mut per = Vec::new();
     for name in manager.names() {
-        let prefix = manager.prefix(name).unwrap_or(name);
-        per.push((prefix, manager.tools(name).await));
+        let prefix = manager.prefix(&name).unwrap_or_else(|| name.clone());
+        let tools = manager.tools(&name).await;
+        per.push((prefix, tools));
     }
-    aggregate(per)
+    aggregate(per.iter().map(|(p, t)| (p.as_str(), t.clone())))
 }
 
 /// Map a public name back to `(server, backend tool name)`.
 pub async fn resolve(manager: &BackendManager, public: &str) -> Option<(String, String)> {
     let (prefix, part) = split_name(public)?;
-    let server = manager.server_for_prefix(prefix)?.to_string();
+    let server = manager.server_for_prefix(prefix)?;
     for t in manager.tools(&server).await {
         if let Some(name) = t.get("name").and_then(Value::as_str)
             && public_name(prefix, name) == public

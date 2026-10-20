@@ -56,6 +56,18 @@
             "null"
           ]
         },
+        "mode": {
+          "$ref": "#/$defs/Mode",
+          "default": "meta",
+          "description": "How tools are presented to clients: `meta` (default: only\n`search_tools`, `describe_tool`, `call_tool`), `direct` (every tool)\nor `hybrid` (meta-tools plus `pinned_tools`)."
+        },
+        "pinned_tools": {
+          "description": "Public tool names always listed in `hybrid` mode.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "store_path": {
           "default": null,
           "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",
@@ -74,6 +86,26 @@
         }
       },
       "type": "object"
+    },
+    "Mode": {
+      "description": "How a profile presents tools to the client.",
+      "oneOf": [
+        {
+          "const": "meta",
+          "description": "Only the meta-tools (`search_tools`, `describe_tool`, `call_tool`).",
+          "type": "string"
+        },
+        {
+          "const": "direct",
+          "description": "Every tool directly.",
+          "type": "string"
+        },
+        {
+          "const": "hybrid",
+          "description": "Meta-tools plus the profile's pinned tools.",
+          "type": "string"
+        }
+      ]
     },
     "ServerSpec": {
       "description": "One backend tool server (`[[server]]` in the config file).",
@@ -200,6 +232,7 @@
       "$ref": "#/$defs/GatewayConfig",
       "default": {
         "allow_agent_add_servers": false,
+        "mode": "meta",
         "store_path": null,
         "token_path": null
       },

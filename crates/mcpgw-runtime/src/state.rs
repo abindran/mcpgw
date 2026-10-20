@@ -16,7 +16,8 @@
 //!   Starting ──Drift──▶ Quarantined ──Reset (approve)──▶ Cold
 //! ```
 //!
-//! `Disabled` servers never leave `Disabled`.
+//! `Disabled` servers leave only on `Enable`; `Disable` applies once the
+//! server is stopped (the actor sends `Stop` first).
 
 /// Where a server is in its lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,6 +104,10 @@ pub enum Event {
     /// Operator reset of a failed server, or approval of a quarantined
     /// server's new tools.
     Reset,
+    /// The server was enabled.
+    Enable,
+    /// The server was disabled (the actor stops it first).
+    Disable,
 }
 
 /// What the actor must do after a transition.
@@ -147,7 +152,12 @@ pub fn step(
         }
     };
     let next = match (state, event) {
+        (S::Disabled, E::Enable) => (S::Cold, A::None),
         (S::Disabled, _) => (S::Disabled, A::None),
+        (S::Cold | S::Backoff { .. } | S::Failed | S::Quarantined, E::Disable) => {
+            (S::Disabled, A::None)
+        }
+        (_, E::Enable) => (state.clone(), A::None),
 
         (S::Cold, E::Demand) => (S::Starting, A::Spawn),
         (S::Cold, E::Stop) => (S::Cold, A::None),
@@ -224,7 +234,9 @@ mod tests {
     use Event as E;
     use State as S;
 
-    const ALL_EVENTS: [Event; 10] = [
+    const ALL_EVENTS: [Event; 12] = [
+        E::Enable,
+        E::Disable,
         E::Demand,
         E::StartOk,
         E::StartErr,
@@ -258,7 +270,12 @@ mod tests {
     /// The expected outcome of every (state, event) pair; `None` = invalid.
     fn expected(s: &State, e: Event) -> Option<(State, Action)> {
         Some(match (s, e) {
+            (S::Disabled, E::Enable) => (S::Cold, A::None),
             (S::Disabled, _) => (S::Disabled, A::None),
+            (S::Cold | S::Backoff { .. } | S::Failed | S::Quarantined, E::Disable) => {
+                (S::Disabled, A::None)
+            }
+            (_, E::Enable) => (s.clone(), A::None),
             (S::Cold, E::Demand) => (S::Starting, A::Spawn),
             (S::Cold, E::Stop) => (S::Cold, A::None),
             (S::Starting, E::Demand) => (S::Starting, A::None),
@@ -308,7 +325,7 @@ mod tests {
                 checked += 1;
             }
         }
-        assert_eq!(checked, 13 * 10);
+        assert_eq!(checked, 13 * 12);
     }
 
     #[test]

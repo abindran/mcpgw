@@ -60,7 +60,7 @@ fn daemon(tag: &str, gateway_extra: &str, servers: usize) -> (Daemon, PathBuf) {
     std::fs::write(
         dir.join("config.toml"),
         format!(
-            "[gateway]\nstore_path = {:?}\ntoken_path = {:?}\nlisten = \"127.0.0.1:0\"\n{gateway_extra}\n",
+            "[gateway]\nmode = \"direct\"\nstore_path = {:?}\ntoken_path = {:?}\nlisten = \"127.0.0.1:0\"\n{gateway_extra}\n",
             dir.join("db.sqlite"),
             dir.join("token")
         ),

@@ -53,6 +53,14 @@ pub struct GatewayConfig {
     /// Default: `127.0.0.1:7777`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listen: Option<std::net::SocketAddr>,
+    /// How tools are presented to clients: `meta` (default: only
+    /// `search_tools`, `describe_tool`, `call_tool`), `direct` (every tool)
+    /// or `hybrid` (meta-tools plus `pinned_tools`).
+    #[serde(default)]
+    pub mode: mcpgw_core::Mode,
+    /// Public tool names always listed in `hybrid` mode.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pinned_tools: Vec<String>,
     /// Stop a server after this long without calls (per-server
     /// `idle_timeout` overrides it). Default: `"10m"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

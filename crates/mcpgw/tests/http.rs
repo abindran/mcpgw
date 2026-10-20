@@ -21,7 +21,7 @@ impl Daemon {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let cfg = format!(
-            "[gateway]\nstore_path = {:?}\ntoken_path = {:?}\nlisten = \"127.0.0.1:0\"\n\n\
+            "[gateway]\nmode = \"direct\"\nstore_path = {:?}\ntoken_path = {:?}\nlisten = \"127.0.0.1:0\"\n\n\
              [[server]]\nname = \"fx\"\ntransport = \"stdio\"\ncommand = {:?}\n",
             dir.join("db.sqlite"),
             dir.join("token"),

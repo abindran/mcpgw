@@ -89,6 +89,12 @@ The daemon only listens on loopback, refuses requests whose `Host` is not a
 loopback name or whose `Origin` is a foreign web page (403), and requires the
 token on `/mcp` (401).
 
+By default (`gateway.mode = "meta"`) clients see three tools, `search_tools`,
+`describe_tool` and `call_tool`, and find backend tools by search. That keeps
+the client's context small and picks up servers enabled at runtime without
+a restart. Set `mode = "direct"` to list every tool, or `"hybrid"` for the
+meta-tools plus `pinned_tools`.
+
 Tools appear as `<server>__<tool>` (for example `fs__read_file`). Servers can also be declared in `~/.config/mcpgw/config.toml` (or `$MCPGW_CONFIG`, or `--config`); see [examples/config.toml](examples/config.toml). Config-file entries take precedence over stored ones with the same name. Logs go to stderr; `MCPGW_LOG` sets the level (default `warn`) and `--log-format pretty|compact|json` (or `MCPGW_LOG_FORMAT`) the format.
 
 Backends speaking `2025-11-25` or `2026-07-28` are both supported. Crashed or unresponsive backends are restarted with exponential backoff.
