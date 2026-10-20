@@ -175,14 +175,19 @@ async fn search_then_call_hides_the_cold_start() {
         "hidden in only {hidden}/{}: {cold:?}",
         TOPICS.len()
     );
+    // latency is a second, machine-dependent view of the same thing: on
+    // Windows runners a warm call alone can take a second, so there the
+    // start counters above are the check
     let slow = lat
         .iter()
         .filter(|d| **d >= Duration::from_millis(START_MS))
         .count();
-    assert!(
-        slow * 10 < TOPICS.len() * 2,
-        "{slow} calls still waited a full start: {lat:?}"
-    );
+    if !cfg!(windows) {
+        assert!(
+            slow * 10 < TOPICS.len() * 2,
+            "{slow} calls still waited a full start: {lat:?}"
+        );
+    }
 }
 
 #[tokio::test(flavor = "multi_thread")]
