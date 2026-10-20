@@ -225,18 +225,6 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
     let mut seen = HashSet::new();
     let mut prefixes = std::collections::HashMap::new();
     for (i, s) in cfg.servers.iter().enumerate() {
-        if let Some(other) = prefixes.insert(s.prefix().to_string(), s.name.clone()) {
-            return Err(Issue {
-                server: Some(i),
-                field: if s.alias.is_some() { "alias" } else { "name" },
-                message: format!(
-                    "tool prefix `{}` of server `{}` is already used by server `{other}`",
-                    s.prefix(),
-                    s.name
-                ),
-                hint: Some("give one of them a different alias".into()),
-            });
-        }
         let issue = |field, message: String, hint: &str| Issue {
             server: Some(i),
             field,
@@ -256,6 +244,18 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
                 format!("duplicate server name `{}`", s.name),
                 "server names must be unique",
             ));
+        }
+        if let Some(other) = prefixes.insert(s.prefix().to_string(), s.name.clone()) {
+            return Err(Issue {
+                server: Some(i),
+                field: if s.alias.is_some() { "alias" } else { "name" },
+                message: format!(
+                    "tool prefix `{}` of server `{}` is already used by server `{other}`",
+                    s.prefix(),
+                    s.name
+                ),
+                hint: Some("give one of them a different alias".into()),
+            });
         }
         match &s.transport {
             Transport::Stdio { command, .. } if command.trim().is_empty() => {
