@@ -12,7 +12,7 @@ description = "Serve an OpenAPI 3.x API as MCP tools, no MCP server needed"
 mcpgw-core.workspace = true
 reqwest.workspace = true
 serde_json.workspace = true
-serde_yaml_ng = "0.10"
+serde-saphyr = "2"
 jsonschema = { version = "0.59", default-features = false }
 base64 = "0.22"
 tracing.workspace = true

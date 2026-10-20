@@ -55,6 +55,9 @@ policy, approvals, audit and status like any server.
 - **Base URL:** `base_url`, else the spec's first server. A relative server
   (`/api/v3`) resolves against the spec's URL, or needs `base_url` when the
   spec is a file. Swagger 2.0 is refused, with a hint to convert it.
+- YAML is read with `serde-saphyr` (pure Rust, with limits on nesting and
+  alias expansion). The first parser, `serde_yaml_ng`, pulled in
+  `unsafe-libyaml`, which `cargo deny` flags as unmaintained.
 - Security schemes are mapped to vault credentials:
   [M4-06](M4-06-OpenAPI-Auth.md).
 

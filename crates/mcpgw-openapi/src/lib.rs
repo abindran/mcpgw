@@ -123,7 +123,7 @@ pub struct Api {
 pub fn parse(text: &str) -> Result<Value, String> {
     let v: Value = match serde_json::from_str(text) {
         Ok(v) => v,
-        Err(_) => serde_yaml_ng::from_str(text)
+        Err(_) => serde_saphyr::from_str::<Value>(text)
             .map_err(|e| format!("not a JSON or YAML document: {e}"))?,
     };
     let version = v["openapi"].as_str().unwrap_or_default();
