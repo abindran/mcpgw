@@ -2,7 +2,7 @@
 
 **Story:** US1 · **Estimate:** 2 days · **Depends on:** M1-07
 **Done when:** `mcpgw add io.github.github/github-mcp-server` installs and shows the tool list for approval.
-**Status:** ✅ Done (the real GitHub server needs a person to check it; see below)
+**Status:** ✅ Done (verified with the real GitHub server under Docker)
 
 ## Using it
 
@@ -54,8 +54,9 @@ The registry is `gateway.registry_url` (default
   (`mcpgw secret set github-mcp-server_token`, then add again). For a
   **required** secret that is missing, a terminal asks for it (hidden);
   otherwise the command stops and says what to set.
-- The first start may download a package or image, so reading the tools is
-  allowed 300 s. If they can't be read (a login is needed, or Docker isn't
+- OCI images are pulled (`docker pull`, progress on stderr) before the
+  first start, so a long download doesn't time out the handshake. Package
+  downloads (`npx`, `uvx`) happen at that start, which is allowed 300 s. If they can't be read (a login is needed, or Docker isn't
   running) the question is still asked, and the tools are pinned on the
   server's first start.
 
@@ -74,14 +75,27 @@ package and a remote.
   github-mcp-server`. With `github-mcp-server_authorization` set, the PAT is
   sent as a bearer token.
 
-**Checked here:** the fixture served by a local registry gives the docker
-plan above. With the Docker daemon stopped the tools can't be read, and the
+**Verified (macOS arm64, Docker 27.4 on colima, 20 Oct 2026):** the real
+entry, served by a local registry, starting with no image in the cache:
+
+```
+$ mcpgw add io.github.github/github-mcp-server
+io.github.github/github-mcp-server 2.0.2 via oci ghcr.io/github/github-mcp-server:2.0.2
+  runs: docker run -i --rm -p 127.0.0.1:8085:8085 -e GITHUB_OAUTH_CALLBACK_PORT=8085 ghcr.io/github/github-mcp-server:2.0.2
+  optional secret github-mcp-server_token is not set; …
+pulling ghcr.io/github/github-mcp-server:2.0.2            (stderr)
+github-mcp-server offers 46 tools:
+  add_comment_to_pending_review  Add review comment to the requester's latest pending pull request review…
+  …
+add github-mcp-server? [y/N] y
+added server github-mcp-server (46 tools, pin 9c7a0befb486)
+```
+
+No container is left behind after the tools are read. Before images were
+pulled first, a cold install failed because the download ran inside the
+handshake. With the Docker daemon stopped the tools can't be read, and the
 question still comes up. The remote plan reached the real endpoint and got
 its 401 and login hint.
-
-**Needs a person:** with Docker running (or a PAT stored as
-`github-mcp-server_authorization`), run `mcpgw add
-io.github.github/github-mcp-server`, see the tool list, and answer `y`.
 
 ## Tests
 

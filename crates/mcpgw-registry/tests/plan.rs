@@ -56,6 +56,10 @@ fn github_oci_package_is_pinned_and_skips_the_unset_optional_token() {
     );
     assert!(env.is_empty());
     assert_eq!(p.method, "oci ghcr.io/github/github-mcp-server:2.0.2");
+    assert_eq!(
+        p.image.as_deref(),
+        Some("ghcr.io/github/github-mcp-server:2.0.2")
+    );
     assert_eq!(p.skipped, ["github-mcp-server_token"]);
     assert!(p.secrets.is_empty() && p.spec.secrets.is_empty());
     assert_eq!(
@@ -101,6 +105,7 @@ fn github_falls_back_to_the_remote_without_docker() {
         panic!("not http: {:?}", p.spec.transport)
     };
     assert_eq!(url, "https://api.githubcopilot.com/mcp/");
+    assert_eq!(p.image, None);
     // optional secret header, unset: left out (log in with OAuth instead)
     assert!(headers.is_empty(), "{headers:?}");
     assert_eq!(p.skipped, ["github-mcp-server_authorization"]);

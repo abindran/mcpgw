@@ -27,6 +27,8 @@ passes the M1 test suite.
 
 ## Checked against real services (20 Oct 2026)
 
+- **Registry install** (M2-14): `mcpgw add io.github.github/github-mcp-server`
+  pulled the 2.0.2 image, listed 46 tools, asked, and pinned them.
 - **GitHub remote MCP** (`https://api.githubcopilot.com/mcp/`): it answers
   401 with resource metadata pointing at `https://github.com/login/oauth`,
   and `mcpgw add` reports that a login is needed. GitHub's authorization
@@ -43,5 +45,3 @@ passes the M1 test suite.
 - The approval round-trip from **Claude Code** and **Cursor**: add a server
   with `approve = ["*delete*"]` in a profile, call the tool from the client,
   and answer the prompt (or `mcpgw approve <id>`).
-- `mcpgw add io.github.github/github-mcp-server` with Docker running
-  (M2-14).

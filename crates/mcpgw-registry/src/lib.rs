@@ -233,6 +233,8 @@ pub struct InstallPlan {
     pub skipped: Vec<String>,
     /// Things the user should know (a missing runtime, a fallback).
     pub notes: Vec<String>,
+    /// For OCI packages: the pinned image, to pull before the first start.
+    pub image: Option<String>,
 }
 
 /// Choices for [`plan`].
@@ -489,6 +491,7 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
         bindings: BTreeMap::new(),
     };
     let mut notes = Vec::new();
+    let mut image = None;
     let order = ["npm", "pypi", "oci"];
     let mut candidates: Vec<&Package> = server
         .packages
@@ -595,7 +598,11 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
                     Some(v) => format!("{}=={v}", p.identifier),
                     None => p.identifier.clone(),
                 },
-                _ => pinned_image(&p.identifier, version.as_deref()),
+                _ => {
+                    let i = pinned_image(&p.identifier, version.as_deref());
+                    image = Some(i.clone());
+                    i
+                }
             });
             args.extend(r.args(&p.package_arguments, false)?);
             let command = p
@@ -668,5 +675,6 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
         secrets: r.secrets,
         skipped: r.skipped,
         notes,
+        image,
     })
 }

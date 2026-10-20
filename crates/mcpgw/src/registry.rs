@@ -160,6 +160,25 @@ pub fn add(config: &Config, path: &Path, i: Install) -> AnyResult<()> {
             .into());
         }
     }
+    // A first pull can take minutes and would time out the handshake.
+    if let (Some(image), mcpgw_core::Transport::Stdio { command, .. }) =
+        (&plan.image, &spec.transport)
+        && spec.enabled
+        && !i.no_introspect
+        && mcpgw_registry::on_path(command)
+    {
+        eprintln!("pulling {image}");
+        let ok = std::process::Command::new(command)
+            .args(["pull", image.as_str()])
+            .stdin(std::process::Stdio::null())
+            // progress goes to our stderr; stdout stays for results
+            .stdout(std::io::stderr())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !ok {
+            eprintln!("mcpgw: could not pull {image}; is the {command} daemon running?");
+        }
+    }
     let label = spec.name.clone();
     let yes = i.yes;
     let review = move |m: Option<&ToolManifest>| -> AnyResult<bool> {
