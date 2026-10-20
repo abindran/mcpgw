@@ -117,7 +117,7 @@ async fn template_to_working_call_in_under_15_minutes() {
         ),
     )
     .unwrap();
-    let _daemon = Daemon(dir.clone());
+    let daemon = Daemon(dir.clone());
     let mcpgw = |args: &[&str]| {
         let o = Command::new(env!("CARGO_BIN_EXE_mcpgw"))
             .arg("--config")
@@ -169,5 +169,7 @@ async fn template_to_working_call_in_under_15_minutes() {
     let took = started.elapsed();
     println!("template to working call: {took:?}");
     assert!(took < Duration::from_secs(15 * 60), "{took:?}");
+    // `mcpgw down` needs the config: stop the daemon before removing it
+    drop(daemon);
     let _ = std::fs::remove_dir_all(&dir);
 }
