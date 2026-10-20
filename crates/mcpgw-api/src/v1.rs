@@ -23,6 +23,21 @@ use serde_json::{Value, json};
 use crate::profiles::{Profiles, Source};
 
 /// Secret storage as the API sees it (the daemon backs it with the vault).
+/// Calls a tool as the default endpoint would, with its policy, approvals
+/// and audit (`POST /api/v1/tools/{name}/call`, the inspector, M4-10).
+pub type Invoke = Arc<
+    dyn Fn(
+            String,
+            Option<serde_json::Map<String, Value>>,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<serde_json::Map<String, Value>, String>>
+                    + Send,
+            >,
+        > + Send
+        + Sync,
+>;
+
 pub trait SecretBackend: Send + Sync {
     /// Metadata of every secret.
     fn list(&self) -> Result<Vec<SecretMeta>, String>;
@@ -55,6 +70,8 @@ pub struct ApiState {
     pub started_at: u64,
     /// MCP endpoint base, e.g. `http://127.0.0.1:7777/mcp`.
     pub mcp_url: String,
+    /// Calls tools for the inspector; `None` answers 501.
+    pub invoke: Option<Invoke>,
 }
 
 type R = Result<Response, ApiError>;
@@ -498,6 +515,30 @@ struct Limit {
     limit: Option<usize>,
 }
 
+#[derive(Deserialize, Default)]
+struct CallBody {
+    #[serde(default)]
+    arguments: Option<serde_json::Map<String, Value>>,
+}
+
+async fn call_tool(
+    State(s): State<ApiState>,
+    Path(name): Path<String>,
+    body: Option<Json<CallBody>>,
+) -> R {
+    let Some(invoke) = &s.invoke else {
+        return Err(fail(
+            StatusCode::NOT_IMPLEMENTED,
+            "tool calls aren't available here",
+        ));
+    };
+    let arguments = body.and_then(|b| b.0.arguments);
+    let result = invoke(name, arguments)
+        .await
+        .map_err(|e| fail(StatusCode::BAD_GATEWAY, e))?;
+    ok(Value::Object(result))
+}
+
 async fn recent_calls(State(s): State<ApiState>, Query(q): Query<Limit>) -> R {
     ok(
         json!({ "calls": s.calls.recent(q.limit.unwrap_or(50).min(mcpgw_runtime::calls::CALL_LOG_LEN)) }),
@@ -564,6 +605,7 @@ pub fn router(state: ApiState) -> Router {
         .route("/api/v1/servers/{name}/logs", get(server_logs))
         .route("/api/v1/servers/{name}/tools", get(server_tools))
         .route("/api/v1/tools", get(list_tools))
+        .route("/api/v1/tools/{name}/call", post(call_tool))
         .route("/api/v1/profiles", get(list_profiles))
         .route(
             "/api/v1/profiles/{name}",
@@ -655,6 +697,7 @@ pub fn openapi() -> Value {
             "/api/v1/servers/{name}/logs": {"get": op("servers", "Recent stderr (redacted)", lines, None, "200", resp("Lines", list("lines", json!({"type": "string"}))))},
             "/api/v1/servers/{name}/tools": {"get": op("servers", "A server's pinned tools", name.clone(), None, "200", resp("Tools", json!({"type": "object", "properties": {"pin": {"type": ["string", "null"]}, "tools": {"type": "array", "items": {"type": "object"}}}})))},
             "/api/v1/tools": {"get": op("tools", "Public tools, optionally as a profile sees them", profile_q, None, "200", resp("Tools", list("tools", json!({"type": "object"}))))},
+            "/api/v1/tools/{name}/call": {"post": op("tools", "Call a tool as the default endpoint does (policy, approvals and audit apply); the inspector uses it", name.clone(), Some(body(json!({"type": "object", "properties": {"arguments": {"type": "object"}}}))), "200", resp("The CallToolResult", json!({"type": "object"})))},
             "/api/v1/profiles": {"get": op("profiles", "List profiles", none.clone(), None, "200", resp("Profiles", list("profiles", r("Profile"))))},
             "/api/v1/profiles/{name}": {
                 "get": op("profiles", "One profile", name.clone(), None, "200", resp("Profile", r("Profile"))),

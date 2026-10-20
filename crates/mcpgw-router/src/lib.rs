@@ -24,6 +24,11 @@ pub fn client_facing_version() -> &'static str {
     mcpgw_proto::version::CLIENT_FACING
 }
 
+/// Sees every finished call (M4-10, `mcpgw dev`'s request log): the tool,
+/// its arguments, the outcome (`ok`, `tool_error`, `error`), milliseconds,
+/// and the result's text (or the error).
+pub type CallTap = Arc<dyn Fn(&str, Option<&serde_json::Value>, &str, u64, &str) + Send + Sync>;
+
 /// How the gateway presents tools.
 #[derive(Clone, Default)]
 pub struct GatewayOptions {
@@ -56,6 +61,8 @@ pub struct GatewayOptions {
     pub audit: Option<mcpgw_core::audit::Auditor>,
     /// Don't prewarm the servers behind `search_tools` results (M3-07).
     pub no_prewarm: bool,
+    /// Sees every finished call (M4-10).
+    pub tap: Option<CallTap>,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -347,6 +354,19 @@ impl ToolProvider for GatewayProvider {
                     );
                     ev.args_digest = Some(mcpgw_core::audit::args_digest(args));
                     a(ev);
+                }
+                if let Some(tap) = &self.opts.tap {
+                    let text = match &out {
+                        Ok(r) => r
+                            .get("content")
+                            .and_then(|c| c.get(0))
+                            .and_then(|c| c.get("text"))
+                            .and_then(|t| t.as_str())
+                            .map(str::to_string)
+                            .unwrap_or_else(|| serde_json::Value::Object(r.clone()).to_string()),
+                        Err(e) => e.to_string(),
+                    };
+                    tap(&label, audit_args.as_ref(), outcome, ms, &text);
                 }
                 log.record(&self.opts.label, &label, outcome, ms, client);
             }

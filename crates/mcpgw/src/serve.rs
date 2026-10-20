@@ -47,6 +47,7 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         calls: Some(call_log()),
         audit: auditor(),
         no_prewarm: config.gateway.prewarm == Some(false),
+        tap: None,
     }
 }
 
@@ -119,6 +120,7 @@ fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::Ga
         calls: Some(call_log()),
         audit: auditor(),
         no_prewarm: config.gateway.prewarm == Some(false),
+        tap: None,
     }
 }
 
@@ -270,12 +272,32 @@ async fn capture_missing(mgr: &Arc<BackendManager>, servers: &[ServerSpec], time
     .await;
 }
 
+/// A `mcpgw dev` session (M4-10): the server under development and what
+/// to watch for edits.
+pub struct Dev {
+    /// The server's name.
+    pub name: String,
+    /// Files and directories whose changes restart it.
+    pub watch: Vec<std::path::PathBuf>,
+}
+
 /// Run the gateway until a signal (or `mcpgw down`) stops it.
 pub fn serve(
     config: &Config,
     store: Arc<SqliteStore>,
     stdio: bool,
     profile: Option<&str>,
+) -> AnyResult<()> {
+    serve_with(config, store, stdio, profile, None)
+}
+
+/// [`serve`], optionally as a `mcpgw dev` session.
+pub fn serve_with(
+    config: &Config,
+    store: Arc<SqliteStore>,
+    stdio: bool,
+    profile: Option<&str>,
+    dev: Option<Dev>,
 ) -> AnyResult<()> {
     let token = Token::load_or_create(&config.gateway.token_path())?;
     let servers = effective_servers(&config.servers, store.as_ref())?;
@@ -319,6 +341,12 @@ pub fn serve(
             max_running: config.gateway.max_running(),
             call_timeout: config.gateway.call_timeout(),
             max_call_time: config.gateway.max_call_time(),
+            // `cargo run` may build first
+            connect_timeout: if dev.is_some() {
+                Duration::from_secs(300)
+            } else {
+                ManagerOptions::default().connect_timeout
+            },
             ..ManagerOptions::default()
         };
         let vault = vault(config);
@@ -333,7 +361,18 @@ pub fn serve(
         ));
         let refresher = tokio::spawn(refresh_loop(broker.clone(), config.gateway.oauth_refresh_interval()));
         // Servers start on first use; only those never seen are started now.
-        capture_missing(&mgr, &servers, Duration::from_secs(30)).await;
+        // A dev session starts its server itself and restarts it on edits.
+        let watcher = match &dev {
+            Some(d) => Some(tokio::spawn(crate::dev::watch(
+                mgr.clone(),
+                d.name.clone(),
+                d.watch.clone(),
+            ))),
+            None => {
+                capture_missing(&mgr, &servers, Duration::from_secs(30)).await;
+                None
+            }
+        };
         let res: AnyResult<()> = if stdio {
             tracing::info!(servers = servers.len(), "mcpgw serving on stdio");
             tokio::select! {
@@ -342,8 +381,22 @@ pub fn serve(
             }
         } else {
             let login = remote_login(config, &mgr, vault.clone());
-            serve_http(config, token, mgr.clone(), broker, login, store.clone(), vault.clone()).await
+            serve_http(
+                config,
+                mgr.clone(),
+                Http {
+                    token,
+                    broker,
+                    login,
+                    store: store.clone(),
+                    vault: vault.clone(),
+                },
+                dev.as_ref(),
+            ).await
         };
+        if let Some(w) = watcher {
+            w.abort();
+        }
         refresher.abort();
         mgr.shutdown().await;
         res
@@ -395,16 +448,30 @@ fn reset_after_login(mgr: &BackendManager, provider: &str, account: &str) {
     }
 }
 
-async fn serve_http(
-    config: &Config,
+/// What the HTTP front door is built from.
+struct Http {
     token: Token,
-    mgr: Arc<BackendManager>,
     broker: Arc<mcpgw_auth::oauth::Broker>,
     login: mcpgw_api::oauth::RemoteLogin,
     store: Arc<SqliteStore>,
     vault: Arc<secrets::SharedVault>,
+}
+
+async fn serve_http(
+    config: &Config,
+    mgr: Arc<BackendManager>,
+    http: Http,
+    dev: Option<&Dev>,
 ) -> AnyResult<()> {
+    let Http {
+        token,
+        broker,
+        login,
+        store,
+        vault,
+    } = http;
     let addr = config.gateway.listen();
+    let token_text = token.expose().to_string();
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .map_err(|e| format!("cannot listen on {addr}: {e}"))?;
@@ -439,7 +506,24 @@ async fn serve_http(
     });
     let opts = mcpgw_router::GatewayOptions {
         login: Some(link.clone()),
+        tap: dev.map(|_| crate::dev::tap()),
         ..gateway_options(config)
+    };
+    // the inspector calls tools as the default endpoint (M4-10)
+    let invoke: mcpgw_api::v1::Invoke = {
+        let p = Arc::new(mcpgw_router::GatewayProvider::with_options(
+            mgr.clone(),
+            opts.clone(),
+        ));
+        Arc::new(move |name, args| {
+            let p = p.clone();
+            Box::pin(async move {
+                use mcpgw_proto::front::ToolProvider;
+                p.call_tool(name, args, mcpgw_proto::front::CallContext::default())
+                    .await
+                    .map_err(|e| e.to_string())
+            })
+        })
     };
     // /mcp is the default endpoint; /mcp/p/<name> resolves profiles per
     // request, so profiles added through the API work at once
@@ -470,6 +554,7 @@ async fn serve_http(
             .map(|d| d.as_secs())
             .unwrap_or(0),
         mcp_url: format!("http://{local}{}", mcpgw_api::MCP_PATH),
+        invoke: Some(invoke),
     });
     let app = mcpgw_api::edge_full(
         mcp,
@@ -486,6 +571,18 @@ async fn serve_http(
     let info_path = daemon::info_path(config);
     daemon::DaemonInfo::current(local).write(&info_path)?;
     eprintln!("mcpgw: listening on http://{local}{}", mcpgw_api::MCP_PATH);
+    if let Some(d) = dev {
+        use std::io::Write;
+        let watched: Vec<String> = d.watch.iter().map(|p| p.display().to_string()).collect();
+        println!(
+            "mcpgw dev: serving {} at http://{local}{}",
+            d.name,
+            mcpgw_api::MCP_PATH
+        );
+        println!("inspector: http://{local}/ui#token={}", token_text);
+        println!("watching {} (Ctrl-C to stop)", watched.join(", "));
+        let _ = std::io::stdout().flush();
+    }
     tracing::info!(%local, "mcpgw serving on http");
     let shutdown = async move {
         tokio::select! {

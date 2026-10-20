@@ -293,6 +293,28 @@ async fn every_endpoint_works_and_is_documented() {
             .any(|t| t["server"] == "extra")
     );
 
+    // the inspector's call (M4-10), as the default endpoint
+    let (s, v) = a
+        .call(
+            "POST",
+            "/api/v1/tools/{name}/call",
+            "/api/v1/tools/fx__add/call",
+            Some(json!({"arguments": {"a": 2, "b": 3}})),
+        )
+        .await;
+    assert_eq!(s, S::OK, "{v}");
+    assert_eq!(v["content"][0]["text"], "5", "{v}");
+    let (s, v) = a
+        .call(
+            "POST",
+            "/api/v1/tools/{name}/call",
+            "/api/v1/tools/fx__nope/call",
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(s, S::BAD_GATEWAY, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("unknown tool"), "{v}");
+
     // profiles: created through the API, usable at once
     let web = json!({"name": "web", "servers": ["extra"], "mode": "direct"});
     let (s, v) = a

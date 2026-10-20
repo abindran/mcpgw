@@ -125,7 +125,12 @@ fn settings() -> Settings {
         Some("modern") => Protocol::Modern,
         _ => Protocol::Both,
     };
-    let mut tools = match env("FAKE_TOOLS") {
+    // FAKE_TOOLS_FILE: the tools from a file, read at start (M4-10: an
+    // "edit" to the server is an edit to this file)
+    let from_file = env("FAKE_TOOLS_FILE").map(|p| {
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("FAKE_TOOLS_FILE {p}: {e}"))
+    });
+    let mut tools = match from_file.or_else(|| env("FAKE_TOOLS")) {
         Some(j) => serde_json::from_str::<Vec<Value>>(&j).expect("FAKE_TOOLS must be a JSON array"),
         None => builtin_tools(),
     };

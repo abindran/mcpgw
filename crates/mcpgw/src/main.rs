@@ -13,6 +13,7 @@ mod auth;
 mod clients;
 mod control;
 mod daemon;
+mod dev;
 mod doctor;
 mod policy;
 mod registry;
@@ -160,6 +161,9 @@ enum Cmd {
     /// Search the MCP Registry (gateway.registry_url).
     #[command(subcommand)]
     Registry(RegistryCmd),
+    /// Work on a server: run it under a private gateway, restart it on
+    /// every edit, log each call, and open the inspector.
+    Dev(Box<DevCmd>),
     /// Tool policies: write Cedar from glob rules, check decisions.
     #[command(subcommand)]
     Policy(PolicyCmd),
@@ -329,6 +333,33 @@ enum RuntimesCmd {
     },
     /// List cached packages.
     Ls,
+}
+
+/// `mcpgw dev` (M4-10).
+#[derive(clap::Args)]
+struct DevCmd {
+    /// The server: a directory (package.json, server.py, main.py or
+    /// Cargo.toml), a `.wasm` component, or an OpenAPI spec.
+    path: Option<PathBuf>,
+    /// Server name (default: from the path).
+    #[arg(long)]
+    name: Option<String>,
+    /// Port for the session's gateway (default: any free port).
+    #[arg(long, default_value_t = 0)]
+    port: u16,
+    /// Also restart when this file or directory changes (repeatable).
+    #[arg(long, value_name = "PATH")]
+    watch: Vec<PathBuf>,
+    /// Environment variable for the server, KEY=VALUE (repeatable).
+    #[arg(long = "env", value_parser = parse_kv)]
+    env: Vec<(String, String)>,
+    /// For an OpenAPI spec: where requests go.
+    #[arg(long, value_name = "URL")]
+    base_url: Option<String>,
+    /// How to run the server, when it isn't detected
+    /// (`mcpgw dev ./srv -- deno run main.ts`).
+    #[arg(last = true)]
+    command: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -581,6 +612,21 @@ fn run(cli: Cli) -> AnyResult<()> {
             registry::search(&config, &query.join(" "), limit)
         }
         Cmd::Registry(RegistryCmd::Show { name }) => registry::show(&config, &name),
+        Cmd::Dev(d) => {
+            let d = *d;
+            dev::run(
+                &config,
+                dev::DevArgs {
+                    path: d.path,
+                    name: d.name,
+                    port: d.port,
+                    watch: d.watch,
+                    env: d.env,
+                    base_url: d.base_url,
+                    command: d.command,
+                },
+            )
+        }
         Cmd::Policy(PolicyCmd::Convert { profile, output }) => {
             policy::convert(&config, profile.as_deref(), output.as_deref())
         }

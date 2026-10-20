@@ -23,10 +23,13 @@
     return;
   }
 
-  async function api(method, path) {
+  async function api(method, path, payload) {
+    const headers = { Authorization: "Bearer " + token };
+    if (payload !== undefined) headers["Content-Type"] = "application/json";
     const r = await fetch("/api/v1" + path, {
       method,
-      headers: { Authorization: "Bearer " + token },
+      headers,
+      body: payload === undefined ? undefined : JSON.stringify(payload),
     });
     if (r.status === 401) throw new Error("The token was rejected; open the page again with `mcpgw ui`.");
     const body = r.status === 204 ? null : await r.json().catch(() => null);
@@ -103,6 +106,55 @@
     )));
   }
 
+  // Inspector (M4-10): call any tool with arguments typed as JSON. The list
+  // is rebuilt only when the tools change, so typing isn't interrupted.
+  let shownTools = "";
+  function inspector(list) {
+    const key = JSON.stringify(list.map((t) => [t.name, t.inputSchema]));
+    if (key === shownTools) return;
+    shownTools = key;
+    $("inspector-empty").hidden = list.length > 0;
+    $("inspector").replaceChildren(...list.map((t) => {
+      const props = (t.inputSchema && t.inputSchema.properties) || {};
+      const sample = {};
+      for (const [k, v] of Object.entries(props)) {
+        sample[k] = v.type === "integer" || v.type === "number" ? 0 : v.type === "boolean" ? false : v.type === "object" ? {} : v.type === "array" ? [] : "";
+      }
+      const args = el("textarea", { rows: 3, spellcheck: "false", "aria-label": `Arguments for ${t.name}` }, JSON.stringify(sample));
+      const out = el("pre", { class: "result", hidden: true });
+      const run = el("button", {
+        class: "primary", "data-action": "call", "data-tool": t.name,
+        onclick: async (ev) => {
+          const b = ev.currentTarget;
+          let parsed;
+          try {
+            parsed = JSON.parse(args.value || "{}");
+          } catch (e) {
+            out.hidden = false;
+            out.textContent = "Arguments aren't valid JSON: " + e.message;
+            return;
+          }
+          b.disabled = true;
+          out.hidden = false;
+          out.textContent = "calling…";
+          try {
+            const r = await api("POST", `/tools/${encodeURIComponent(t.name)}/call`, { arguments: parsed });
+            const text = (r.content || []).map((c) => c.text ?? JSON.stringify(c)).join("\n");
+            out.textContent = (r.isError ? "error: " : "") + (text || JSON.stringify(r, null, 2));
+          } catch (e) {
+            out.textContent = "failed: " + e.message;
+          } finally {
+            b.disabled = false;
+          }
+        },
+      }, "Call");
+      return el("li", { "data-tool": t.name },
+        el("div", { class: "tool" }, t.name),
+        t.description ? el("div", { class: "meta" }, t.description) : null,
+        args, run, out);
+    }));
+  }
+
   function calls(list) {
     $("calls-empty").hidden = list.length > 0;
     $("calls-table").hidden = list.length === 0;
@@ -117,8 +169,9 @@
 
   async function refresh() {
     try {
-      const [rt, s, a, c] = await Promise.all([
+      const [rt, s, a, c, t] = await Promise.all([
         api("GET", "/runtime"), api("GET", "/servers"), api("GET", "/approvals"), api("GET", "/calls?limit=20"),
+        api("GET", "/tools"),
       ]);
       $("runtime").textContent =
         `v${rt.version} · ${rt.servers.running} of ${rt.servers.total} servers running · ` +
@@ -126,6 +179,7 @@
       servers(s.servers);
       approvals(a.approvals);
       calls(c.calls);
+      inspector(t.tools);
     } catch (e) {
       notice(e.message);
     }

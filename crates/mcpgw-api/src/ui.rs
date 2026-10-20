@@ -75,6 +75,8 @@ mod tests {
             "/restart",
             "/approve",
             "/deny",
+            "/tools",
+            "/call",
         ] {
             assert!(js.contains(needle), "{needle} not used");
             assert!(
