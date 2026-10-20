@@ -94,6 +94,8 @@ M2 exit check: [M2-Exit](M2-Exit.md).
 | [M3-11](M3-11-OpenTelemetry.md) | OpenTelemetry OTLP export | ✅ |
 | [M3-12](M3-12-Doctor.md) | `mcpgw doctor` | ✅ |
 
+M3 exit check: [M3-Exit](M3-Exit.md).
+
 ### M4 — Extensions and v1.0
 
 | ID | Item | Status |
