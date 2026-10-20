@@ -1509,6 +1509,18 @@ impl Actor {
                     }
                     return;
                 }
+                // Record the connection's facts before `Ready` is published,
+                // so a reader never sees Ready without them.
+                let started_ms = self
+                    .start_began
+                    .take()
+                    .map(|t| t.elapsed().as_millis() as u64);
+                self.shared.update(|s| {
+                    s.protocol_version = pv.clone();
+                    if started_ms.is_some() {
+                        s.last_start_ms = started_ms;
+                    }
+                });
                 if !self.apply(Event::StartOk) {
                     if let Some(c) = self.conn.take() {
                         self.closing(close(c));
@@ -1516,10 +1528,6 @@ impl Actor {
                     return;
                 }
                 if self.state == State::Ready {
-                    if let Some(t) = self.start_began.take() {
-                        let ms = t.elapsed().as_millis() as u64;
-                        self.shared.update(|s| s.last_start_ms = Some(ms));
-                    }
                     tracing::info!(server = %self.shared.name, protocol = ?pv, tools = tools.len(), "backend connected");
                     if self.ever_connected {
                         self.shared.update(|s| s.restarts += 1);
@@ -1532,10 +1540,7 @@ impl Actor {
                         tracing::info!(server = %self.shared.name, pin = %m.sha256, tools = m.tools.len(), "captured manifest");
                         self.shared.catalog.record(m);
                     }
-                    self.shared.update(|s| {
-                        s.protocol_version = pv;
-                        s.last_error = None;
-                    });
+                    self.shared.update(|s| s.last_error = None);
                     if let Ok(mut t) = self.shared.tools.try_write() {
                         *t = tools;
                     } else {
