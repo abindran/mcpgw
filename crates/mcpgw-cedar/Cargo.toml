@@ -1,0 +1,15 @@
+[package]
+name = "mcpgw-cedar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Cedar policies as an optional mcpgw policy engine"
+
+[dependencies]
+mcpgw-core.workspace = true
+cedar-policy = { version = "4.14", default-features = false }
+miette = "7.6"
+tracing.workspace = true

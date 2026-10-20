@@ -164,7 +164,7 @@ async fn every_scheme_type_against_a_mock() {
     // AND: both schemes are needed
     let (err, text) = call("both", only_bearer).await;
     assert!(
-        err && text.contains("needs credentials for bearer + hdr"),
+        err && text.contains("needs credentials for hdr + bearer"),
         "{text}"
     );
     // an open operation needs nothing

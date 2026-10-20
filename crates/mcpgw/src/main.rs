@@ -14,6 +14,7 @@ mod clients;
 mod control;
 mod daemon;
 mod doctor;
+mod policy;
 mod registry;
 mod secrets;
 mod serve;
@@ -159,6 +160,9 @@ enum Cmd {
     /// Search the MCP Registry (gateway.registry_url).
     #[command(subcommand)]
     Registry(RegistryCmd),
+    /// Tool policies: write Cedar from glob rules, check decisions.
+    #[command(subcommand)]
+    Policy(PolicyCmd),
     /// The package cache for npm and PyPI servers.
     #[command(subcommand)]
     Runtimes(RuntimesCmd),
@@ -325,6 +329,29 @@ enum RuntimesCmd {
     },
     /// List cached packages.
     Ls,
+}
+
+#[derive(Subcommand)]
+enum PolicyCmd {
+    /// Print an endpoint's allow/deny/approve rules as Cedar policies that
+    /// give the same decisions.
+    Convert {
+        /// The profile (default: the default endpoint).
+        #[arg(long)]
+        profile: Option<String>,
+        /// Write to this file instead of stdout.
+        #[arg(long, short)]
+        output: Option<PathBuf>,
+    },
+    /// Load an endpoint's policy (Cedar files are validated) and show what
+    /// it decides for each tool given.
+    Check {
+        /// The profile (default: the default endpoint).
+        #[arg(long)]
+        profile: Option<String>,
+        /// Public tool names (`<server>__<tool>`).
+        tools: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -554,6 +581,12 @@ fn run(cli: Cli) -> AnyResult<()> {
             registry::search(&config, &query.join(" "), limit)
         }
         Cmd::Registry(RegistryCmd::Show { name }) => registry::show(&config, &name),
+        Cmd::Policy(PolicyCmd::Convert { profile, output }) => {
+            policy::convert(&config, profile.as_deref(), output.as_deref())
+        }
+        Cmd::Policy(PolicyCmd::Check { profile, tools }) => {
+            policy::check(&config, profile.as_deref(), &tools)
+        }
         Cmd::Runtimes(RuntimesCmd::Install { server }) => {
             servers::runtimes_install(&config, server.as_deref())
         }

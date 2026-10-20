@@ -376,6 +376,15 @@ async fn put_profile(
             format!("profile {name:?} is defined in the config file"),
         ));
     }
+    if let Err(e) = p.policy.check() {
+        return Err(fail(StatusCode::BAD_REQUEST, e));
+    }
+    if p.policy.cedar.as_ref().is_some_and(|f| f.is_relative()) {
+        return Err(fail(
+            StatusCode::BAD_REQUEST,
+            "policy.cedar must be an absolute path",
+        ));
+    }
     if let Some(unknown) = p.servers.iter().find(|x| s.manager.spec(x).is_none()) {
         return Err(fail(
             StatusCode::BAD_REQUEST,

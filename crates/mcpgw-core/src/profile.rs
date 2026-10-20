@@ -3,7 +3,7 @@
 //! A profile is a named view of the gateway (`/mcp/p/{profile}`): which
 //! servers it exposes, how tools are presented, and what policy applies.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, path::PathBuf, sync::Arc};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -26,6 +26,9 @@ pub enum Mode {
 ///
 /// Precedence: `deny` beats `approve`, which beats `allow`. When `allow` is
 /// empty every tool not denied is allowed.
+///
+/// `cedar` names a Cedar policy file instead (M4-07); the lists must then
+/// be empty.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Policy {
@@ -38,7 +41,34 @@ pub struct Policy {
     /// Tools that need a human approval per call.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub approve: Vec<String>,
+    /// A Cedar policy file (M4-07) in place of the lists; relative to the
+    /// config file. `mcpgw policy convert` writes one from the lists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cedar: Option<PathBuf>,
+    /// The loaded `cedar` engine, attached by the binary. Until it is, a
+    /// Cedar policy denies everything.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub engine: Option<Engine>,
 }
+
+/// A policy engine other than the glob lists (Cedar, M4-07).
+pub trait PolicyEngine: Send + Sync + std::fmt::Debug {
+    /// Decide for a public tool name.
+    fn decide(&self, tool: &str) -> Decision;
+}
+
+/// A shared [`PolicyEngine`]; two are equal when they are the same one.
+#[derive(Clone, Debug)]
+pub struct Engine(pub Arc<dyn PolicyEngine>);
+
+impl PartialEq for Engine {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for Engine {}
 
 /// What a policy says about one tool.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,6 +116,15 @@ impl Policy {
     /// Decide for a public tool name: deny beats approve, which beats allow;
     /// an empty `allow` list allows everything not denied.
     pub fn decide(&self, tool: &str) -> Decision {
+        if let Some(cedar) = &self.cedar {
+            return match &self.engine {
+                Some(e) => e.0.decide(tool),
+                // fail closed: a policy that didn't load allows nothing
+                None => Decision::Deny {
+                    pattern: Some(format!("{} (not loaded)", cedar.display())),
+                },
+            };
+        }
         let first = |list: &[String]| list.iter().find(|p| glob_match(p, tool)).cloned();
         if let Some(p) = first(&self.deny) {
             return Decision::Deny { pattern: Some(p) };
@@ -105,9 +144,22 @@ impl Policy {
         !matches!(self.decide(tool), Decision::Deny { .. })
     }
 
+    /// Check the policy's own invariants: a Cedar file replaces the lists.
+    pub fn check(&self) -> Result<(), String> {
+        if self.cedar.is_some()
+            && !(self.allow.is_empty() && self.deny.is_empty() && self.approve.is_empty())
+        {
+            return Err("a Cedar policy replaces allow/deny/approve: keep one or the other (`mcpgw policy convert` writes Cedar from the lists)".into());
+        }
+        Ok(())
+    }
+
     /// Whether the policy restricts anything.
     pub fn is_empty(&self) -> bool {
-        self.allow.is_empty() && self.deny.is_empty() && self.approve.is_empty()
+        self.allow.is_empty()
+            && self.deny.is_empty()
+            && self.approve.is_empty()
+            && self.cedar.is_none()
     }
 }
 
@@ -185,6 +237,7 @@ mod tests {
             allow: vec!["gh__*".into(), "fs__read_*".into()],
             deny: vec!["gh__delete_*".into()],
             approve: vec!["gh__merge_*".into(), "gh__delete_repo".into()],
+            ..Default::default()
         };
         assert_eq!(p.decide("gh__list_issues"), Decision::Allow);
         assert_eq!(
@@ -210,6 +263,34 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(only_deny.decide("fs__read"), Decision::Allow);
+    }
+
+    #[test]
+    fn cedar_policies_fail_closed_until_loaded() {
+        #[derive(Debug)]
+        struct OnlyFs;
+        impl PolicyEngine for OnlyFs {
+            fn decide(&self, tool: &str) -> Decision {
+                if tool.starts_with("fs__") {
+                    Decision::Allow
+                } else {
+                    Decision::Deny { pattern: None }
+                }
+            }
+        }
+        let mut p: Policy = toml::from_str(r#"cedar = "p.cedar""#).unwrap();
+        assert!(!p.is_empty());
+        assert_eq!(
+            p.decide("fs__read"),
+            Decision::Deny {
+                pattern: Some("p.cedar (not loaded)".into())
+            }
+        );
+        p.engine = Some(Engine(Arc::new(OnlyFs)));
+        assert_eq!(p.decide("fs__read"), Decision::Allow);
+        assert!(!p.visible("gh__add"));
+        // the engine isn't config: it doesn't serialize
+        assert_eq!(toml::to_string(&p).unwrap().trim(), r#"cedar = "p.cedar""#);
     }
 
     #[test]

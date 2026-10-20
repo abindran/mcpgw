@@ -18,7 +18,7 @@ pub use audit::{AuditEntry, AuditEvent};
 pub use duration::Duration;
 pub use manifest::{ManifestDiff, ToolDef, ToolManifest};
 pub use oauth::{OAuthEndpoints, OAuthProvider, oauth_secret_name};
-pub use profile::{Decision, Mode, Policy, Profile, glob_match};
+pub use profile::{Decision, Engine, Mode, Policy, PolicyEngine, Profile, glob_match};
 pub use sandbox::{ByteSize, Limits, Sandbox};
 pub use secret::{SecretMeta, validate_secret_name};
 pub use server::{

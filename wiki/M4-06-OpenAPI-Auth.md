@@ -87,7 +87,7 @@ username = "bob@example.com"             # basic: the secret is the password
   operation per scheme type, plus OR, AND and open operations. It checks:
   - the exact header, query or cookie for each operation;
   - that nothing leaks to other operations;
-  - the missing-credentials hint, including AND order (`bearer + hdr`).
+  - the missing-credentials hint, including AND order, in the spec's order (`hdr + bearer`).
 - `crates/mcpgw/tests/openapi.rs::security_schemes_from_the_vault`:
   - vault secrets go to the fake Petstore as `api_key` (getInventory) and
     `Bearer` (addPet, oauth2), and nothing goes to logoutUser;

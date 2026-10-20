@@ -1,444 +1,1682 @@
 {
-  "components": {
-    "schemas": {
-      "Approval": {
-        "properties": {
-          "arguments": {
-            "type": "string"
-          },
-          "client": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "created_at": {
-            "type": "integer"
-          },
-          "endpoint": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "enum": [
-              "pending",
-              "approved",
-              "denied"
-            ]
-          },
-          "tool": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "AuditEntry": {
-        "description": "One stored, chained entry.",
-        "properties": {
-          "actor": {
-            "description": "Who: an endpoint and client (`profile web / Cursor`), `cli`, `api`.",
-            "type": "string"
-          },
-          "args_digest": {
-            "description": "SHA-256 of the canonical JSON of the arguments, for tool calls.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "at_ms": {
-            "description": "Time, Unix milliseconds.",
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "detail": {
-            "default": null,
-            "description": "Small, non-secret details (outcome, duration, pin, …)."
-          },
-          "hash": {
-            "description": "This entry's hash.",
-            "type": "string"
-          },
-          "kind": {
-            "description": "What happened: `tool.call`, `server.add`, `approval.decide`, …",
-            "type": "string"
-          },
-          "prev_hash": {
-            "description": "Hash of the previous entry (64 zeros for the first).",
-            "type": "string"
-          },
-          "seq": {
-            "description": "Position in the chain, from 1.",
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "subject": {
-            "description": "What it was done to: a tool, server, profile, secret name, approval id.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "seq",
-          "at_ms",
-          "kind",
-          "actor",
-          "subject",
-          "prev_hash",
-          "hash"
+  "openapi": "3.1.0",
+  "info": {
+    "title": "mcpgw admin API",
+    "version": "1",
+    "description": "Manage the local MCP gateway: servers, tools, profiles, secrets (metadata only), runtime and approvals. Send `Authorization: Bearer <token>` (`mcpgw token`)."
+  },
+  "servers": [
+    {
+      "url": "http://127.0.0.1:7777"
+    }
+  ],
+  "security": [
+    {
+      "bearer": []
+    }
+  ],
+  "paths": {
+    "/api/v1/openapi.json": {
+      "get": {
+        "tags": [
+          "meta"
         ],
-        "title": "AuditEntry",
-        "type": "object"
+        "summary": "This document",
+        "responses": {
+          "200": {
+            "description": "OpenAPI document"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/runtime": {
+      "get": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Daemon status",
+        "responses": {
+          "200": {
+            "description": "Runtime",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runtime"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/servers": {
+      "get": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "List servers with their state",
+        "responses": {
+          "200": {
+            "description": "Servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "servers": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Server"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
       },
-      "Call": {
-        "properties": {
-          "at_ms": {
-            "type": "integer"
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Add a server (stored, started on first use)",
+        "responses": {
+          "201": {
+            "description": "Added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Server"
+                }
+              }
+            }
           },
-          "client": {
-            "type": [
-              "string",
-              "null"
-            ]
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
-          "duration_ms": {
-            "type": "integer"
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           },
-          "endpoint": {
-            "type": "string"
-          },
-          "outcome": {
-            "enum": [
-              "ok",
-              "tool_error",
-              "error"
-            ]
-          },
-          "tool": {
-            "type": "string"
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
           }
         },
-        "type": "object"
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServerSpec"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/servers/{name}": {
+      "get": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "One server, with its spec",
+        "responses": {
+          "200": {
+            "description": "Server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Server"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
       },
+      "delete": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Remove a server",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/servers/{name}/enable": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Enable a server",
+        "responses": {
+          "200": {
+            "description": "Server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Server"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/servers/{name}/disable": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Disable a server (stops it, hides its tools)",
+        "responses": {
+          "200": {
+            "description": "Server",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Server"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/servers/{name}/restart": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Clear failures and stop; starts fresh on its next call",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/servers/{name}/pin": {
+      "post": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Accept a quarantined server's new tools",
+        "responses": {
+          "200": {
+            "description": "New pin",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sha256": {
+                      "type": "string"
+                    },
+                    "tools": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/servers/{name}/logs": {
+      "get": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "Recent stderr (redacted)",
+        "responses": {
+          "200": {
+            "description": "Lines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "lines": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lines",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/servers/{name}/tools": {
+      "get": {
+        "tags": [
+          "servers"
+        ],
+        "summary": "A server's pinned tools",
+        "responses": {
+          "200": {
+            "description": "Tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "pin": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/tools": {
+      "get": {
+        "tags": [
+          "tools"
+        ],
+        "summary": "Public tools, optionally as a profile sees them",
+        "responses": {
+          "200": {
+            "description": "Tools",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tools": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/profiles": {
+      "get": {
+        "tags": [
+          "profiles"
+        ],
+        "summary": "List profiles",
+        "responses": {
+          "200": {
+            "description": "Profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "profiles": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Profile"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/profiles/{name}": {
+      "get": {
+        "tags": [
+          "profiles"
+        ],
+        "summary": "One profile",
+        "responses": {
+          "200": {
+            "description": "Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "profiles"
+        ],
+        "summary": "Create or replace a profile; its endpoint works at once",
+        "responses": {
+          "200": {
+            "description": "Profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Profile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Profile"
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "profiles"
+        ],
+        "summary": "Remove a profile",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/secrets": {
+      "get": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Secret metadata (never values)",
+        "responses": {
+          "200": {
+            "description": "Secrets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "secrets": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SecretMeta"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/secrets/{name}": {
+      "put": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Store a secret",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "value"
+                ],
+                "properties": {
+                  "value": {
+                    "type": "string",
+                    "writeOnly": true
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "secrets"
+        ],
+        "summary": "Delete a secret",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Audit log entries, oldest first",
+        "responses": {
+          "200": {
+            "description": "Entries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "entries": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEntry"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/audit/verify": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "Verify the audit hash chain",
+        "responses": {
+          "200": {
+            "description": "Result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "entries": {
+                      "type": "integer"
+                    },
+                    "broken_at": {
+                      "type": "integer"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/calls": {
+      "get": {
+        "tags": [
+          "runtime"
+        ],
+        "summary": "Recent tool calls, newest first (names and outcomes only)",
+        "responses": {
+          "200": {
+            "description": "Calls",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "calls": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Call"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/approvals": {
+      "get": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Tool calls waiting for approval",
+        "responses": {
+          "200": {
+            "description": "Approvals",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "approvals": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Approval"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/approvals/{id}/approve": {
+      "post": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Approve a waiting call",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/v1/approvals/{id}/deny": {
+      "post": {
+        "tags": [
+          "approvals"
+        ],
+        "summary": "Refuse a waiting call",
+        "responses": {
+          "204": {
+            "description": "Done"
+          },
+          "400": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
       "Error": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
         "properties": {
           "error": {
             "type": "string"
           }
-        },
-        "required": [
-          "error"
-        ],
-        "type": "object"
-      },
-      "Profile": {
-        "$defs": {
-          "Mode": {
-            "description": "How a profile presents tools to the client.",
-            "oneOf": [
-              {
-                "const": "meta",
-                "description": "Only the meta-tools (`search_tools`, `describe_tool`, `call_tool`).",
-                "type": "string"
-              },
-              {
-                "const": "direct",
-                "description": "Every tool directly.",
-                "type": "string"
-              },
-              {
-                "const": "hybrid",
-                "description": "Meta-tools plus the profile's pinned tools.",
-                "type": "string"
-              }
-            ]
-          },
-          "Policy": {
-            "additionalProperties": false,
-            "description": "Tool policy: glob lists matched against public tool names\n(`<server>__<tool>`). `*` matches any run of characters, `?` one.\n\nPrecedence: `deny` beats `approve`, which beats `allow`. When `allow` is\nempty every tool not denied is allowed.",
-            "properties": {
-              "allow": {
-                "description": "Tools that may be called. Empty means all.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "approve": {
-                "description": "Tools that need a human approval per call.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "deny": {
-                "description": "Tools that are never called.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              }
-            },
-            "type": "object"
-          }
-        },
-        "additionalProperties": false,
-        "description": "A named profile (`[[profile]]` in the config file).",
-        "properties": {
-          "accounts": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Account bindings: server name → account label (`github` → `work`).",
-            "type": "object"
-          },
-          "mode": {
-            "$ref": "#/$defs/Mode",
-            "default": "meta",
-            "description": "Tool presentation. Default: `meta`."
-          },
-          "name": {
-            "description": "Profile name (URL segment).",
-            "type": "string"
-          },
-          "pinned_tools": {
-            "description": "Public tool names always listed directly in `hybrid` mode.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "policy": {
-            "$ref": "#/$defs/Policy",
-            "default": {},
-            "description": "Tool policy."
-          },
-          "servers": {
-            "description": "Servers in this profile. Empty means every enabled server.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "Profile",
-        "type": "object"
-      },
-      "Runtime": {
-        "properties": {
-          "approvals_pending": {
-            "type": "integer"
-          },
-          "endpoints": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "pid": {
-            "type": "integer"
-          },
-          "servers": {
-            "properties": {
-              "running": {
-                "type": "integer"
-              },
-              "total": {
-                "type": "integer"
-              }
-            },
-            "type": "object"
-          },
-          "started_at": {
-            "type": "integer"
-          },
-          "uptime_secs": {
-            "type": "integer"
-          },
-          "version": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "SecretMeta": {
-        "description": "What the gateway knows about a secret without decrypting it.",
-        "properties": {
-          "created_at": {
-            "description": "Creation time, Unix seconds.",
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "description": {
-            "description": "Free-text note shown in listings.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "last_used_at": {
-            "description": "Last time the value was injected into a server, Unix seconds.",
-            "format": "uint64",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "name": {
-            "description": "Secret name, e.g. `github_token` or `oauth/github@work`.",
-            "type": "string"
-          },
-          "updated_at": {
-            "description": "Last change of the value, Unix seconds.",
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "name",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "SecretMeta",
-        "type": "object"
-      },
-      "Server": {
-        "properties": {
-          "alias": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "cold_starts": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "container": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "properties": {
-                  "image": {
-                    "type": "string"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "rootless": {
-                    "type": "boolean"
-                  },
-                  "runtime": {
-                    "type": "string"
-                  }
-                },
-                "type": "object"
-              }
-            ]
-          },
-          "enabled": {
-            "type": "boolean"
-          },
-          "last_error": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "last_start_ms": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "name": {
-            "type": "string"
-          },
-          "pid": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "pin": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "prewarms": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "protocol_version": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "restarts": {
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "source": {
-            "enum": [
-              "config",
-              "store"
-            ]
-          },
-          "spec": {
-            "$ref": "#/components/schemas/ServerSpec"
-          },
-          "state": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "stateful": {
-            "type": "boolean"
-          },
-          "target": {
-            "type": "string"
-          },
-          "tools": {
-            "type": "integer"
-          },
-          "transport": {
-            "enum": [
-              "stdio",
-              "http",
-              "container"
-            ]
-          },
-          "warm": {
-            "type": "boolean"
-          }
-        },
-        "type": "object"
+        }
       },
       "ServerSpec": {
         "$defs": {
-          "AuthBinding": {
+          "Sandbox": {
+            "description": "How tightly a container server is confined.",
+            "oneOf": [
+              {
+                "description": "No restrictions beyond the server's own [`Limits`].",
+                "type": "string",
+                "const": "off"
+              },
+              {
+                "description": "All capabilities dropped, no privilege escalation, 1 GiB memory and\n512 processes unless set.",
+                "type": "string",
+                "const": "standard"
+              },
+              {
+                "description": "`standard`, plus a read-only root filesystem with a 64 MiB tmpfs at\n`/tmp`, running as uid/gid 65534 (nobody), and defaults of 512 MiB,\n1 CPU and 128 processes.",
+                "type": "string",
+                "const": "strict"
+              }
+            ]
+          },
+          "DirAccess": {
+            "description": "A host directory granted to a Wasm server.",
+            "type": "object",
+            "properties": {
+              "path": {
+                "description": "The directory on the host.",
+                "type": "string"
+              },
+              "guest": {
+                "description": "Where the component sees it. Default: the same path.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "write": {
+                "description": "May create and change files. Default: read-only.",
+                "type": "boolean"
+              }
+            },
             "additionalProperties": false,
+            "required": [
+              "path"
+            ]
+          },
+          "Duration": {
+            "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]+(ms|s|m|h|d)?$"
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              }
+            ]
+          },
+          "AuthBinding": {
             "description": "A vault secret bound to an OpenAPI security scheme.",
+            "type": "object",
             "properties": {
               "secret": {
                 "description": "The secret: API key, token, password, or `oauth/<provider>@<account>`.",
@@ -452,75 +1690,33 @@
                 ]
               }
             },
+            "additionalProperties": false,
             "required": [
               "secret"
-            ],
-            "type": "object"
+            ]
           },
-          "ByteSize": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9]+ ?([kKmMgG]i?[bB]?|[bB])?$",
-                "type": "string"
-              },
-              {
-                "minimum": 0,
-                "type": "integer"
-              }
-            ],
-            "description": "A size such as \"256MiB\", \"512m\" or \"1GiB\", or bytes."
-          },
-          "DirAccess": {
-            "additionalProperties": false,
-            "description": "A host directory granted to a Wasm server.",
+          "WarmPool": {
+            "description": "How many instances of a server to keep started.",
+            "type": "object",
             "properties": {
-              "guest": {
-                "description": "Where the component sees it. Default: the same path.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "path": {
-                "description": "The directory on the host.",
-                "type": "string"
-              },
-              "write": {
-                "description": "May create and change files. Default: read-only.",
-                "type": "boolean"
+              "min": {
+                "description": "Instances kept warm: 0 (start on demand) or 1. Calls share one\nconnection per server, so larger pools aren't supported.",
+                "type": "integer",
+                "format": "uint32",
+                "minimum": 0
               }
             },
+            "additionalProperties": false,
             "required": [
-              "path"
-            ],
-            "type": "object"
-          },
-          "Duration": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9]+(ms|s|m|h|d)?$",
-                "type": "string"
-              },
-              {
-                "minimum": 0,
-                "type": "integer"
-              }
-            ],
-            "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds."
+              "min"
+            ]
           },
           "Limits": {
-            "additionalProperties": false,
             "description": "Resource limits for a server.",
+            "type": "object",
             "properties": {
-              "cpus": {
-                "description": "CPU cap in cores, e.g. `0.5`.",
-                "format": "double",
-                "type": [
-                  "number",
-                  "null"
-                ]
-              },
               "memory": {
+                "description": "Memory cap; exceeding it kills the server (no swap).",
                 "anyOf": [
                   {
                     "$ref": "#/$defs/ByteSize"
@@ -528,23 +1724,44 @@
                   {
                     "type": "null"
                   }
+                ]
+              },
+              "cpus": {
+                "description": "CPU cap in cores, e.g. `0.5`.",
+                "type": [
+                  "number",
+                  "null"
                 ],
-                "description": "Memory cap; exceeding it kills the server (no swap)."
+                "format": "double"
               },
               "pids": {
                 "description": "Most processes (and threads) at once.",
-                "format": "uint32",
-                "minimum": 0,
                 "type": [
                   "integer",
                   "null"
-                ]
+                ],
+                "format": "uint32",
+                "minimum": 0
               }
             },
-            "type": "object"
+            "additionalProperties": false
+          },
+          "ByteSize": {
+            "description": "A size such as \"256MiB\", \"512m\" or \"1GiB\", or bytes.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]+ ?([kKmMgG]i?[bB]?|[bB])?$"
+              },
+              {
+                "type": "integer",
+                "minimum": 0
+              }
+            ]
           },
           "RegistryRef": {
             "description": "A pinned MCP Registry entry.",
+            "type": "object",
             "properties": {
               "name": {
                 "description": "Registry name, e.g. `io.github.github/github-mcp-server`.",
@@ -558,270 +1775,17 @@
             "required": [
               "name",
               "version"
-            ],
-            "type": "object"
-          },
-          "Sandbox": {
-            "description": "How tightly a container server is confined.",
-            "oneOf": [
-              {
-                "const": "off",
-                "description": "No restrictions beyond the server's own [`Limits`].",
-                "type": "string"
-              },
-              {
-                "const": "standard",
-                "description": "All capabilities dropped, no privilege escalation, 1 GiB memory and\n512 processes unless set.",
-                "type": "string"
-              },
-              {
-                "const": "strict",
-                "description": "`standard`, plus a read-only root filesystem with a 64 MiB tmpfs at\n`/tmp`, running as uid/gid 65534 (nobody), and defaults of 512 MiB,\n1 CPU and 128 processes.",
-                "type": "string"
-              }
             ]
-          },
-          "WarmPool": {
-            "additionalProperties": false,
-            "description": "How many instances of a server to keep started.",
-            "properties": {
-              "min": {
-                "description": "Instances kept warm: 0 (start on demand) or 1. Calls share one\nconnection per server, so larger pools aren't supported.",
-                "format": "uint32",
-                "minimum": 0,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "min"
-            ],
-            "type": "object"
           }
         },
+        "title": "ServerSpec",
         "description": "One backend tool server (`[[server]]` in the config file).",
-        "oneOf": [
-          {
-            "description": "Spawn a local child process speaking MCP over stdio.",
-            "properties": {
-              "args": {
-                "description": "Arguments.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "command": {
-                "description": "Executable to run.",
-                "type": "string"
-              },
-              "cwd": {
-                "description": "Working directory. Default: the gateway's.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "env": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "description": "Extra environment variables for the child.",
-                "type": "object"
-              },
-              "transport": {
-                "const": "stdio",
-                "type": "string"
-              }
-            },
-            "required": [
-              "transport",
-              "command"
-            ],
-            "type": "object"
-          },
-          {
-            "description": "Connect to a remote Streamable HTTP endpoint.",
-            "properties": {
-              "headers": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "description": "Extra request headers.",
-                "type": "object"
-              },
-              "transport": {
-                "const": "http",
-                "type": "string"
-              },
-              "url": {
-                "description": "Endpoint URL.",
-                "type": "string"
-              }
-            },
-            "required": [
-              "transport",
-              "url"
-            ],
-            "type": "object"
-          },
-          {
-            "description": "Run an OCI image with Docker or Podman, speaking MCP over the\ncontainer's stdin/stdout (`run -i`, attached). The container is\nremoved when the server stops.",
-            "properties": {
-              "args": {
-                "description": "Arguments for the image's entrypoint.",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "digest": {
-                "description": "Pinned content digest (`sha256:…`): the container always runs\nexactly this image, pulled by digest. `mcpgw add` fills it in.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "egress": {
-                "description": "Network allowlist, `[\"api.github.com:443\"]`: the container can\nreach these host:port pairs and nothing else. `[]` means no\nnetwork at all. Unset: unrestricted.",
-                "items": {
-                  "type": "string"
-                },
-                "type": [
-                  "array",
-                  "null"
-                ]
-              },
-              "env": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "description": "Environment variables set inside the container (values are passed\nthrough the runtime's environment, never on its command line).",
-                "type": "object"
-              },
-              "image": {
-                "description": "Image, e.g. `ghcr.io/github/github-mcp-server:2.0.2`.",
-                "type": "string"
-              },
-              "run_args": {
-                "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`. They\ncome after the sandbox's flags, so they can add to them\n(`--cap-add=…`).",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "runtime": {
-                "description": "`docker` or `podman`. Default: whichever is installed, Docker first.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "sandbox": {
-                "$ref": "#/$defs/Sandbox",
-                "description": "Confinement: `standard` (default), `strict` or `off`."
-              },
-              "transport": {
-                "const": "container",
-                "type": "string"
-              }
-            },
-            "required": [
-              "transport",
-              "image"
-            ],
-            "type": "object"
-          },
-          {
-            "description": "A Wasm component exporting the `mcpgw:tool` world, run in-process\nwith wasmtime (M4-01).",
-            "properties": {
-              "allow_dirs": {
-                "description": "Host directories it may use. Default: none.",
-                "items": {
-                  "$ref": "#/$defs/DirAccess"
-                },
-                "type": "array"
-              },
-              "allow_network": {
-                "description": "TCP destinations it may connect to, `[\"api.github.com:443\"]`, or\n`[\"*\"]` for any. Default: no network at all (M4-02).",
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "env": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "description": "Environment variables it sees (secrets bind through `secrets`).\nDefault: none; the host's environment never leaks in.",
-                "type": "object"
-              },
-              "path": {
-                "description": "The component file (`.wasm`).",
-                "type": "string"
-              },
-              "time_budget": {
-                "anyOf": [
-                  {
-                    "$ref": "#/$defs/Duration"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Longest one call may run before it's stopped (M4-03). Default:\n30s. The memory cap is `limits.memory` (default and maximum\n256MiB)."
-              },
-              "transport": {
-                "const": "wasm",
-                "type": "string"
-              }
-            },
-            "required": [
-              "transport",
-              "path"
-            ],
-            "type": "object"
-          },
-          {
-            "description": "An HTTP API described by an OpenAPI 3.x spec, served as tools by\nmcpgw itself, no MCP server needed (M4-05).",
-            "properties": {
-              "auth": {
-                "additionalProperties": {
-                  "$ref": "#/$defs/AuthBinding"
-                },
-                "description": "Credentials for the spec's security schemes, by scheme name\n(M4-06): `{ api_key = { secret = \"petstore_key\" } }`. OAuth logins\nuse their vault name, `oauth/<provider>@{account}`.",
-                "type": "object"
-              },
-              "base_url": {
-                "description": "Where requests go. Default: the spec's first server URL\n(relative ones resolve against the spec's URL).",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "headers": {
-                "additionalProperties": {
-                  "type": "string"
-                },
-                "description": "Headers on every request; values may use `${secret:<name>}`.",
-                "type": "object"
-              },
-              "spec": {
-                "description": "The spec: a file path or an http(s) URL (JSON or YAML).",
-                "type": "string"
-              },
-              "transport": {
-                "const": "openapi",
-                "type": "string"
-              }
-            },
-            "required": [
-              "transport",
-              "spec"
-            ],
-            "type": "object"
-          }
-        ],
+        "type": "object",
         "properties": {
+          "name": {
+            "description": "Unique server name.",
+            "type": "string"
+          },
           "alias": {
             "description": "Shorter prefix for its tools' public names (`<alias>__<tool>`).\nDefault: the name.",
             "type": [
@@ -833,14 +1797,8 @@
             "description": "Whether the gateway may start this server. Default: `true`.",
             "type": "boolean"
           },
-          "files": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Secrets written to files (container servers): container path →\nvault secret, e.g. `{ \"/run/secrets/sa.json\" = \"gcp_sa\" }`. Each is\na read-only file in tmpfs, gone when the server stops.",
-            "type": "object"
-          },
           "idle_timeout": {
+            "description": "Stop the server after this long without calls. Default: gateway-wide.",
             "anyOf": [
               {
                 "$ref": "#/$defs/Duration"
@@ -848,51 +1806,14 @@
               {
                 "type": "null"
               }
-            ],
-            "description": "Stop the server after this long without calls. Default: gateway-wide."
-          },
-          "limits": {
-            "$ref": "#/$defs/Limits",
-            "description": "Resource limits: `{ memory = \"256MiB\", cpus = 0.5, pids = 64 }`.\nContainer servers take all three (unset ones come from the sandbox\nprofile); stdio servers take `memory`, a cap on the process tree."
-          },
-          "name": {
-            "description": "Unique server name.",
-            "type": "string"
-          },
-          "registry": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/RegistryRef"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Where it was installed from, when `mcpgw add` took it from the MCP\nRegistry."
-          },
-          "secrets": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Secrets injected at spawn: environment variable → vault secret name,\ne.g. `{ GITHUB_TOKEN = \"github_token\" }`. Args and env values may\nalso contain `${secret:<name>}`. Injected values are redacted from\neverything the server sends back.",
-            "type": "object"
-          },
-          "startup_timeout": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/Duration"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Deadline for start-up and the MCP handshake. Default: gateway-wide."
+            ]
           },
           "stateful": {
             "description": "The server keeps user state (browser, database session): it is never\nstopped for idleness or evicted.",
             "type": "boolean"
           },
           "warm_pool": {
+            "description": "Keep this server started: `{ min = 1 }` starts it with the gateway,\nnever stops it for idleness or evicts it, and restarts it after a\ncrash, so calls never wait for a cold start.",
             "anyOf": [
               {
                 "$ref": "#/$defs/WarmPool"
@@ -900,1618 +1821,704 @@
               {
                 "type": "null"
               }
-            ],
-            "description": "Keep this server started: `{ min = 1 }` starts it with the gateway,\nnever stops it for idleness or evicts it, and restarts it after a\ncrash, so calls never wait for a cold start."
+            ]
+          },
+          "startup_timeout": {
+            "description": "Deadline for start-up and the MCP handshake. Default: gateway-wide.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Duration"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "secrets": {
+            "description": "Secrets injected at spawn: environment variable → vault secret name,\ne.g. `{ GITHUB_TOKEN = \"github_token\" }`. Args and env values may\nalso contain `${secret:<name>}`. Injected values are redacted from\neverything the server sends back.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "files": {
+            "description": "Secrets written to files (container servers): container path →\nvault secret, e.g. `{ \"/run/secrets/sa.json\" = \"gcp_sa\" }`. Each is\na read-only file in tmpfs, gone when the server stops.",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "description": "Resource limits: `{ memory = \"256MiB\", cpus = 0.5, pids = 64 }`.\nContainer servers take all three (unset ones come from the sandbox\nprofile); stdio servers take `memory`, a cap on the process tree.",
+            "$ref": "#/$defs/Limits"
+          },
+          "registry": {
+            "description": "Where it was installed from, when `mcpgw add` took it from the MCP\nRegistry.",
+            "anyOf": [
+              {
+                "$ref": "#/$defs/RegistryRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "name"
         ],
-        "title": "ServerSpec",
-        "type": "object"
-      }
-    },
-    "securitySchemes": {
-      "bearer": {
-        "scheme": "bearer",
-        "type": "http"
-      }
-    }
-  },
-  "info": {
-    "description": "Manage the local MCP gateway: servers, tools, profiles, secrets (metadata only), runtime and approvals. Send `Authorization: Bearer <token>` (`mcpgw token`).",
-    "title": "mcpgw admin API",
-    "version": "1"
-  },
-  "openapi": "3.1.0",
-  "paths": {
-    "/api/v1/approvals": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "approvals": {
-                      "items": {
-                        "$ref": "#/components/schemas/Approval"
-                      },
-                      "type": "array"
-                    }
+        "oneOf": [
+          {
+            "description": "Spawn a local child process speaking MCP over stdio.",
+            "type": "object",
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "stdio"
+              },
+              "command": {
+                "description": "Executable to run.",
+                "type": "string"
+              },
+              "args": {
+                "description": "Arguments.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "description": "Extra environment variables for the child.",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "cwd": {
+                "description": "Working directory. Default: the gateway's.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "transport",
+              "command"
+            ]
+          },
+          {
+            "description": "Connect to a remote Streamable HTTP endpoint.",
+            "type": "object",
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "http"
+              },
+              "url": {
+                "description": "Endpoint URL.",
+                "type": "string"
+              },
+              "headers": {
+                "description": "Extra request headers.",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "transport",
+              "url"
+            ]
+          },
+          {
+            "description": "Run an OCI image with Docker or Podman, speaking MCP over the\ncontainer's stdin/stdout (`run -i`, attached). The container is\nremoved when the server stops.",
+            "type": "object",
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "container"
+              },
+              "image": {
+                "description": "Image, e.g. `ghcr.io/github/github-mcp-server:2.0.2`.",
+                "type": "string"
+              },
+              "digest": {
+                "description": "Pinned content digest (`sha256:…`): the container always runs\nexactly this image, pulled by digest. `mcpgw add` fills it in.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "runtime": {
+                "description": "`docker` or `podman`. Default: whichever is installed, Docker first.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "args": {
+                "description": "Arguments for the image's entrypoint.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "env": {
+                "description": "Environment variables set inside the container (values are passed\nthrough the runtime's environment, never on its command line).",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "run_args": {
+                "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`. They\ncome after the sandbox's flags, so they can add to them\n(`--cap-add=…`).",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "sandbox": {
+                "description": "Confinement: `standard` (default), `strict` or `off`.",
+                "$ref": "#/$defs/Sandbox"
+              },
+              "egress": {
+                "description": "Network allowlist, `[\"api.github.com:443\"]`: the container can\nreach these host:port pairs and nothing else. `[]` means no\nnetwork at all. Unset: unrestricted.",
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "type": "string"
+                }
+              }
+            },
+            "required": [
+              "transport",
+              "image"
+            ]
+          },
+          {
+            "description": "A Wasm component exporting the `mcpgw:tool` world, run in-process\nwith wasmtime (M4-01).",
+            "type": "object",
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "wasm"
+              },
+              "path": {
+                "description": "The component file (`.wasm`).",
+                "type": "string"
+              },
+              "allow_network": {
+                "description": "TCP destinations it may connect to, `[\"api.github.com:443\"]`, or\n`[\"*\"]` for any. Default: no network at all (M4-02).",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "allow_dirs": {
+                "description": "Host directories it may use. Default: none.",
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/DirAccess"
+                }
+              },
+              "env": {
+                "description": "Environment variables it sees (secrets bind through `secrets`).\nDefault: none; the host's environment never leaks in.",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "time_budget": {
+                "description": "Longest one call may run before it's stopped (M4-03). Default:\n30s. The memory cap is `limits.memory` (default and maximum\n256MiB).",
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/Duration"
                   },
-                  "type": "object"
-                }
+                  {
+                    "type": "null"
+                  }
+                ]
               }
             },
-            "description": "Approvals"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Tool calls waiting for approval",
-        "tags": [
-          "approvals"
-        ]
-      }
-    },
-    "/api/v1/approvals/{id}/approve": {
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Done"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Approve a waiting call",
-        "tags": [
-          "approvals"
-        ]
-      }
-    },
-    "/api/v1/approvals/{id}/deny": {
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "id",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Done"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Refuse a waiting call",
-        "tags": [
-          "approvals"
-        ]
-      }
-    },
-    "/api/v1/audit": {
-      "get": {
-        "parameters": [
-          {
-            "in": "query",
-            "name": "after",
-            "required": false,
-            "schema": {
-              "minimum": 0,
-              "type": "integer"
-            }
+            "required": [
+              "transport",
+              "path"
+            ]
           },
           {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "maximum": 1000,
-              "minimum": 1,
-              "type": "integer"
-            }
+            "description": "An HTTP API described by an OpenAPI 3.x spec, served as tools by\nmcpgw itself, no MCP server needed (M4-05).",
+            "type": "object",
+            "properties": {
+              "transport": {
+                "type": "string",
+                "const": "openapi"
+              },
+              "spec": {
+                "description": "The spec: a file path or an http(s) URL (JSON or YAML).",
+                "type": "string"
+              },
+              "base_url": {
+                "description": "Where requests go. Default: the spec's first server URL\n(relative ones resolve against the spec's URL).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "headers": {
+                "description": "Headers on every request; values may use `${secret:<name>}`.",
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
+              },
+              "auth": {
+                "description": "Credentials for the spec's security schemes, by scheme name\n(M4-06): `{ api_key = { secret = \"petstore_key\" } }`. OAuth logins\nuse their vault name, `oauth/<provider>@{account}`.",
+                "type": "object",
+                "additionalProperties": {
+                  "$ref": "#/$defs/AuthBinding"
+                }
+              }
+            },
+            "required": [
+              "transport",
+              "spec"
+            ]
           }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "entries": {
-                      "items": {
-                        "$ref": "#/components/schemas/AuditEntry"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Entries"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Audit log entries, oldest first",
-        "tags": [
-          "audit"
-        ]
-      }
-    },
-    "/api/v1/audit/verify": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "broken_at": {
-                      "type": "integer"
-                    },
-                    "entries": {
-                      "type": "integer"
-                    },
-                    "ok": {
-                      "type": "boolean"
-                    },
-                    "reason": {
-                      "type": "string"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Result"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Verify the audit hash chain",
-        "tags": [
-          "audit"
-        ]
-      }
-    },
-    "/api/v1/calls": {
-      "get": {
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "maximum": 200,
-              "minimum": 1,
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "calls": {
-                      "items": {
-                        "$ref": "#/components/schemas/Call"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Calls"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Recent tool calls, newest first (names and outcomes only)",
-        "tags": [
-          "runtime"
-        ]
-      }
-    },
-    "/api/v1/openapi.json": {
-      "get": {
-        "responses": {
-          "200": {
-            "description": "OpenAPI document"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "This document",
-        "tags": [
-          "meta"
-        ]
-      }
-    },
-    "/api/v1/profiles": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "profiles": {
-                      "items": {
-                        "$ref": "#/components/schemas/Profile"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Profiles"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "List profiles",
-        "tags": [
-          "profiles"
-        ]
-      }
-    },
-    "/api/v1/profiles/{name}": {
-      "delete": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Done"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Remove a profile",
-        "tags": [
-          "profiles"
         ]
       },
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Profile"
-                }
+      "Profile": {
+        "$defs": {
+          "Mode": {
+            "description": "How a profile presents tools to the client.",
+            "oneOf": [
+              {
+                "description": "Only the meta-tools (`search_tools`, `describe_tool`, `call_tool`).",
+                "type": "string",
+                "const": "meta"
+              },
+              {
+                "description": "Every tool directly.",
+                "type": "string",
+                "const": "direct"
+              },
+              {
+                "description": "Meta-tools plus the profile's pinned tools.",
+                "type": "string",
+                "const": "hybrid"
               }
-            },
-            "description": "Profile"
+            ]
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
+          "Policy": {
+            "description": "Tool policy: glob lists matched against public tool names\n(`<server>__<tool>`). `*` matches any run of characters, `?` one.\n\nPrecedence: `deny` beats `approve`, which beats `allow`. When `allow` is\nempty every tool not denied is allowed.\n\n`cedar` names a Cedar policy file instead (M4-07); the lists must then\nbe empty.",
+            "type": "object",
+            "properties": {
+              "allow": {
+                "description": "Tools that may be called. Empty means all.",
+                "type": "array",
+                "items": {
+                  "type": "string"
                 }
+              },
+              "deny": {
+                "description": "Tools that are never called.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "approve": {
+                "description": "Tools that need a human approval per call.",
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "cedar": {
+                "description": "A Cedar policy file (M4-07) in place of the lists; relative to the\nconfig file. `mcpgw policy convert` writes one from the lists.",
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+            "additionalProperties": false
           }
         },
-        "summary": "One profile",
-        "tags": [
-          "profiles"
+        "title": "Profile",
+        "description": "A named profile (`[[profile]]` in the config file).",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Profile name (URL segment).",
+            "type": "string"
+          },
+          "servers": {
+            "description": "Servers in this profile. Empty means every enabled server.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "mode": {
+            "description": "Tool presentation. Default: `meta`.",
+            "$ref": "#/$defs/Mode",
+            "default": "meta"
+          },
+          "pinned_tools": {
+            "description": "Public tool names always listed directly in `hybrid` mode.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "accounts": {
+            "description": "Account bindings: server name → account label (`github` → `work`).",
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "policy": {
+            "description": "Tool policy.",
+            "$ref": "#/$defs/Policy",
+            "default": {}
+          }
+        },
+        "additionalProperties": false,
+        "required": [
+          "name"
         ]
       },
-      "put": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
+      "SecretMeta": {
+        "required": [
+          "name",
+          "created_at",
+          "updated_at"
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Profile"
-              }
-            }
+        "title": "SecretMeta",
+        "description": "What the gateway knows about a secret without decrypting it.",
+        "type": "object",
+        "properties": {
+          "name": {
+            "description": "Secret name, e.g. `github_token` or `oauth/github@work`.",
+            "type": "string"
           },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Profile"
-                }
-              }
-            },
-            "description": "Profile"
+          "description": {
+            "description": "Free-text note shown in listings.",
+            "type": [
+              "string",
+              "null"
+            ]
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "created_at": {
+            "description": "Creation time, Unix seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "updated_at": {
+            "description": "Last change of the value, Unix seconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "last_used_at": {
+            "description": "Last time the value was injected into a server, Unix seconds.",
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "uint64",
+            "minimum": 0
           }
-        },
-        "summary": "Create or replace a profile; its endpoint works at once",
-        "tags": [
-          "profiles"
-        ]
-      }
-    },
-    "/api/v1/runtime": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Runtime"
-                }
-              }
-            },
-            "description": "Runtime"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Daemon status",
-        "tags": [
-          "runtime"
-        ]
-      }
-    },
-    "/api/v1/secrets": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "secrets": {
-                      "items": {
-                        "$ref": "#/components/schemas/SecretMeta"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Secrets"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Secret metadata (never values)",
-        "tags": [
-          "secrets"
-        ]
-      }
-    },
-    "/api/v1/secrets/{name}": {
-      "delete": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Done"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Delete a secret",
-        "tags": [
-          "secrets"
-        ]
+        }
       },
-      "put": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
+      "Server": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "transport": {
+            "enum": [
+              "stdio",
+              "http",
+              "container"
+            ]
+          },
+          "target": {
+            "type": "string"
+          },
+          "alias": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "stateful": {
+            "type": "boolean"
+          },
+          "source": {
+            "enum": [
+              "config",
+              "store"
+            ]
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pid": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "restarts": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "warm": {
+            "type": "boolean"
+          },
+          "cold_starts": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "last_start_ms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "prewarms": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "container": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
                 "properties": {
-                  "description": {
+                  "runtime": {
                     "type": "string"
                   },
-                  "value": {
-                    "type": "string",
-                    "writeOnly": true
+                  "name": {
+                    "type": "string"
+                  },
+                  "image": {
+                    "type": "string"
+                  },
+                  "rootless": {
+                    "type": "boolean"
                   }
-                },
-                "required": [
-                  "value"
-                ],
-                "type": "object"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Done"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
                 }
               }
-            },
-            "description": "Error"
+            ]
           },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "protocol_version": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": "integer"
+          },
+          "pin": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "spec": {
+            "$ref": "#/components/schemas/ServerSpec"
           }
-        },
-        "summary": "Store a secret",
-        "tags": [
-          "secrets"
-        ]
-      }
-    },
-    "/api/v1/servers": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "servers": {
-                      "items": {
-                        "$ref": "#/components/schemas/Server"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Servers"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "List servers with their state",
-        "tags": [
-          "servers"
-        ]
+        }
       },
-      "post": {
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ServerSpec"
+      "Runtime": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "string"
+          },
+          "pid": {
+            "type": "integer"
+          },
+          "started_at": {
+            "type": "integer"
+          },
+          "uptime_secs": {
+            "type": "integer"
+          },
+          "approvals_pending": {
+            "type": "integer"
+          },
+          "servers": {
+            "type": "object",
+            "properties": {
+              "total": {
+                "type": "integer"
+              },
+              "running": {
+                "type": "integer"
               }
             }
           },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Server"
-                }
-              }
-            },
-            "description": "Added"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Add a server (stored, started on first use)",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/servers/{name}": {
-      "delete": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
+          "endpoints": {
+            "type": "array",
+            "items": {
               "type": "string"
             }
           }
-        ],
-        "responses": {
-          "204": {
-            "description": "Done"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Remove a server",
-        "tags": [
-          "servers"
-        ]
+        }
       },
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
+      "AuditEntry": {
+        "required": [
+          "seq",
+          "at_ms",
+          "kind",
+          "actor",
+          "subject",
+          "prev_hash",
+          "hash"
         ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Server"
-                }
-              }
-            },
-            "description": "Server"
+        "title": "AuditEntry",
+        "description": "One stored, chained entry.",
+        "type": "object",
+        "properties": {
+          "seq": {
+            "description": "Position in the chain, from 1.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "at_ms": {
+            "description": "Time, Unix milliseconds.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
           },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "kind": {
+            "description": "What happened: `tool.call`, `server.add`, `approval.decide`, …",
+            "type": "string"
           },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "actor": {
+            "description": "Who: an endpoint and client (`profile web / Cursor`), `cli`, `api`.",
+            "type": "string"
+          },
+          "subject": {
+            "description": "What it was done to: a tool, server, profile, secret name, approval id.",
+            "type": "string"
+          },
+          "args_digest": {
+            "description": "SHA-256 of the canonical JSON of the arguments, for tool calls.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "detail": {
+            "description": "Small, non-secret details (outcome, duration, pin, …).",
+            "default": null
+          },
+          "prev_hash": {
+            "description": "Hash of the previous entry (64 zeros for the first).",
+            "type": "string"
+          },
+          "hash": {
+            "description": "This entry's hash.",
+            "type": "string"
           }
-        },
-        "summary": "One server, with its spec",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/servers/{name}/disable": {
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
+        }
+      },
+      "Call": {
+        "type": "object",
+        "properties": {
+          "at_ms": {
+            "type": "integer"
+          },
+          "endpoint": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "outcome": {
+            "enum": [
+              "ok",
+              "tool_error",
+              "error"
+            ]
+          },
+          "duration_ms": {
+            "type": "integer"
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Server"
-                }
-              }
-            },
-            "description": "Server"
+        }
+      },
+      "Approval": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "tool": {
+            "type": "string"
           },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "arguments": {
+            "type": "string"
           },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
+          "endpoint": {
+            "type": "string"
+          },
+          "client": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "denied"
+            ]
           }
-        },
-        "summary": "Disable a server (stops it, hides its tools)",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/servers/{name}/enable": {
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Server"
-                }
-              }
-            },
-            "description": "Server"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Enable a server",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/servers/{name}/logs": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "lines",
-            "required": false,
-            "schema": {
-              "minimum": 0,
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "lines": {
-                      "items": {
-                        "type": "string"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Lines"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Recent stderr (redacted)",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/servers/{name}/pin": {
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "sha256": {
-                      "type": "string"
-                    },
-                    "tools": {
-                      "type": "integer"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "New pin"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Accept a quarantined server's new tools",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/servers/{name}/restart": {
-      "post": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Done"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Clear failures and stop; starts fresh on its next call",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/servers/{name}/tools": {
-      "get": {
-        "parameters": [
-          {
-            "in": "path",
-            "name": "name",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "pin": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "tools": {
-                      "items": {
-                        "type": "object"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Tools"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "A server's pinned tools",
-        "tags": [
-          "servers"
-        ]
-      }
-    },
-    "/api/v1/tools": {
-      "get": {
-        "parameters": [
-          {
-            "in": "query",
-            "name": "profile",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "properties": {
-                    "tools": {
-                      "items": {
-                        "type": "object"
-                      },
-                      "type": "array"
-                    }
-                  },
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Tools"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          },
-          "409": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            },
-            "description": "Error"
-          }
-        },
-        "summary": "Public tools, optionally as a profile sees them",
-        "tags": [
-          "tools"
-        ]
+        }
       }
     }
-  },
-  "security": [
-    {
-      "bearer": []
-    }
-  ],
-  "servers": [
-    {
-      "url": "http://127.0.0.1:7777"
-    }
-  ]
+  }
 }

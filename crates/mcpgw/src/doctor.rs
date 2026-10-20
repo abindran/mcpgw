@@ -536,6 +536,29 @@ fn oauth(v: &Vault, r: &mut Report) {
 fn profiles(config: &Config, store: &SqliteStore, servers: &[ServerSpec], r: &mut Report) {
     let mut all = config.profiles.clone();
     all.extend(store.profiles().unwrap_or_default());
+    // M4-07: Cedar files load and validate
+    let policies = std::iter::once(("default".to_string(), config.gateway.policy.clone()))
+        .chain(all.iter().map(|p| (p.name.clone(), p.policy.clone())));
+    for (endpoint, mut policy) in policies {
+        let Some(file) = policy.cedar.clone() else {
+            continue;
+        };
+        let at = if endpoint == "default" && !all.iter().any(|p| p.name == "default") {
+            "gateway policy".to_string()
+        } else {
+            format!("profile {endpoint}")
+        };
+        match crate::policy::attach(&mut policy, &endpoint) {
+            Ok(()) => r.ok("policy_cedar", at, format!("{} loads", file.display())),
+            Err(e) => r.add(
+                "policy_cedar",
+                at,
+                Level::Fail,
+                format!("Cedar policy doesn't load, so every tool is denied: {e}"),
+                Some("fix the file; `mcpgw policy check` shows the error".into()),
+            ),
+        }
+    }
     for p in all {
         for s in p
             .servers

@@ -11,6 +11,11 @@ repository.workspace = true
 name = "mcpgw"
 path = "src/main.rs"
 
+[features]
+default = ["cedar"]
+# Cedar policies as an optional policy engine (M4-07)
+cedar = ["dep:mcpgw-cedar"]
+
 [dependencies]
 mcpgw-core.workspace = true
 mcpgw-config.workspace = true
@@ -23,6 +28,7 @@ mcpgw-api.workspace = true
 mcpgw-proto.workspace = true
 mcpgw-vault.workspace = true
 mcpgw-registry.workspace = true
+mcpgw-cedar = { workspace = true, optional = true }
 secrecy = "0.10"
 rpassword = "7"
 reqwest.workspace = true

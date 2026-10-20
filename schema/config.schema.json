@@ -1,8 +1,620 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "Root configuration.",
+  "type": "object",
+  "properties": {
+    "gateway": {
+      "description": "Gateway-wide behaviour.",
+      "$ref": "#/$defs/GatewayConfig",
+      "default": {
+        "allow_agent_add_servers": false,
+        "store_path": null,
+        "token_path": null,
+        "mode": "meta"
+      }
+    },
+    "server": {
+      "description": "Backend tool servers.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ServerSpec"
+      }
+    },
+    "oauth": {
+      "description": "OAuth apps for `mcpgw auth connect`.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/OAuthProvider"
+      }
+    },
+    "profile": {
+      "description": "Profiles: named endpoints at `/mcp/p/<name>` (M2-07).",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Profile"
+      }
+    }
+  },
+  "additionalProperties": false,
   "$defs": {
-    "AuthBinding": {
+    "GatewayConfig": {
+      "description": "Gateway-wide settings.",
+      "type": "object",
+      "properties": {
+        "allow_agent_add_servers": {
+          "description": "Whether the agent may add new backend servers itself. Default: `false`.",
+          "type": "boolean",
+          "default": false
+        },
+        "store_path": {
+          "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "token_path": {
+          "description": "Path of the static loopback auth token file.\nDefault: `<data dir>/mcpgw/token`.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "vault_path": {
+          "description": "Path of the secret vault. Default: `vault.json` next to the store.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "client_metadata_url": {
+          "description": "HTTPS URL of a client ID metadata document describing mcpgw, used as\nthe OAuth client id for remote MCP servers that accept them\n(otherwise mcpgw registers itself dynamically).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "listen": {
+          "description": "Address of the HTTP front door; must be a loopback address.\nDefault: `127.0.0.1:7777`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mode": {
+          "description": "How tools are presented to clients: `meta` (default: only\n`search_tools`, `describe_tool`, `call_tool`), `direct` (every tool)\nor `hybrid` (meta-tools plus `pinned_tools`).",
+          "$ref": "#/$defs/Mode",
+          "default": "meta"
+        },
+        "accounts": {
+          "description": "Account per server on the default endpoint, for servers whose\nsecrets use `{account}`: `accounts = { github = \"work\" }`.\nProfiles (M2-07) set their own. Default: `default`.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "policy": {
+          "description": "Tool policy for the default endpoint (profiles have their own):\n`policy = { deny = [\"*__delete_*\"], approve = [\"gh__merge_*\"] }`.",
+          "$ref": "#/$defs/Policy"
+        },
+        "approval_timeout": {
+          "description": "How long a call to an `approve`-listed tool waits for `mcpgw approve`\nwhen the client can't be asked. Default: `\"2m\"`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pinned_tools": {
+          "description": "Public tool names always listed in `hybrid` mode.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "oauth_refresh_interval": {
+          "description": "How often the daemon checks for OAuth tokens to refresh.\nDefault: `\"60s\"`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "idle_timeout": {
+          "description": "Stop a server after this long without calls (per-server\n`idle_timeout` overrides it). Default: `\"10m\"`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_running": {
+          "description": "Most servers running at once; starting one more stops the least\nrecently used idle server. Default: 16.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0
+        },
+        "allowed_origins": {
+          "description": "Extra browser origins allowed to call the daemon, e.g.\n`\"http://localhost:5173\"`. The daemon's own origin is always allowed.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "prewarm": {
+          "description": "Start servers in the background when `search_tools` returns their\ntools, hiding their cold start from the call that usually follows.\nDefault: `true`.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "otlp_endpoint": {
+          "description": "OTLP/HTTP endpoint for traces, metrics and logs of the daemon, e.g.\n`http://127.0.0.1:4318` (M3-11). `OTEL_EXPORTER_OTLP_ENDPOINT`\noverrides it. Default: no export.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "runtimes_path": {
+          "description": "Package cache for npm and PyPI servers (M3-08). Default: `runtimes`\nnext to the store.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "registry_url": {
+          "description": "MCP Registry used by `mcpgw add <name>` and `mcpgw registry search`.\nDefault: `https://registry.modelcontextprotocol.io`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Mode": {
+      "description": "How a profile presents tools to the client.",
+      "oneOf": [
+        {
+          "description": "Only the meta-tools (`search_tools`, `describe_tool`, `call_tool`).",
+          "type": "string",
+          "const": "meta"
+        },
+        {
+          "description": "Every tool directly.",
+          "type": "string",
+          "const": "direct"
+        },
+        {
+          "description": "Meta-tools plus the profile's pinned tools.",
+          "type": "string",
+          "const": "hybrid"
+        }
+      ]
+    },
+    "Policy": {
+      "description": "Tool policy: glob lists matched against public tool names\n(`<server>__<tool>`). `*` matches any run of characters, `?` one.\n\nPrecedence: `deny` beats `approve`, which beats `allow`. When `allow` is\nempty every tool not denied is allowed.\n\n`cedar` names a Cedar policy file instead (M4-07); the lists must then\nbe empty.",
+      "type": "object",
+      "properties": {
+        "allow": {
+          "description": "Tools that may be called. Empty means all.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "deny": {
+          "description": "Tools that are never called.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "approve": {
+          "description": "Tools that need a human approval per call.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cedar": {
+          "description": "A Cedar policy file (M4-07) in place of the lists; relative to the\nconfig file. `mcpgw policy convert` writes one from the lists.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "Duration": {
+      "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds.",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m|h|d)?$"
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ]
+    },
+    "ServerSpec": {
+      "description": "One backend tool server (`[[server]]` in the config file).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Unique server name.",
+          "type": "string"
+        },
+        "alias": {
+          "description": "Shorter prefix for its tools' public names (`<alias>__<tool>`).\nDefault: the name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "description": "Whether the gateway may start this server. Default: `true`.",
+          "type": "boolean"
+        },
+        "idle_timeout": {
+          "description": "Stop the server after this long without calls. Default: gateway-wide.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stateful": {
+          "description": "The server keeps user state (browser, database session): it is never\nstopped for idleness or evicted.",
+          "type": "boolean"
+        },
+        "warm_pool": {
+          "description": "Keep this server started: `{ min = 1 }` starts it with the gateway,\nnever stops it for idleness or evicts it, and restarts it after a\ncrash, so calls never wait for a cold start.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WarmPool"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startup_timeout": {
+          "description": "Deadline for start-up and the MCP handshake. Default: gateway-wide.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "secrets": {
+          "description": "Secrets injected at spawn: environment variable → vault secret name,\ne.g. `{ GITHUB_TOKEN = \"github_token\" }`. Args and env values may\nalso contain `${secret:<name>}`. Injected values are redacted from\neverything the server sends back.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "description": "Secrets written to files (container servers): container path →\nvault secret, e.g. `{ \"/run/secrets/sa.json\" = \"gcp_sa\" }`. Each is\na read-only file in tmpfs, gone when the server stops.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "limits": {
+          "description": "Resource limits: `{ memory = \"256MiB\", cpus = 0.5, pids = 64 }`.\nContainer servers take all three (unset ones come from the sandbox\nprofile); stdio servers take `memory`, a cap on the process tree.",
+          "$ref": "#/$defs/Limits"
+        },
+        "registry": {
+          "description": "Where it was installed from, when `mcpgw add` took it from the MCP\nRegistry.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegistryRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "oneOf": [
+        {
+          "description": "Spawn a local child process speaking MCP over stdio.",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "stdio"
+            },
+            "command": {
+              "description": "Executable to run.",
+              "type": "string"
+            },
+            "args": {
+              "description": "Arguments.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "env": {
+              "description": "Extra environment variables for the child.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "description": "Working directory. Default: the gateway's.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "transport",
+            "command"
+          ]
+        },
+        {
+          "description": "Connect to a remote Streamable HTTP endpoint.",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "http"
+            },
+            "url": {
+              "description": "Endpoint URL.",
+              "type": "string"
+            },
+            "headers": {
+              "description": "Extra request headers.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "transport",
+            "url"
+          ]
+        },
+        {
+          "description": "Run an OCI image with Docker or Podman, speaking MCP over the\ncontainer's stdin/stdout (`run -i`, attached). The container is\nremoved when the server stops.",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "container"
+            },
+            "image": {
+              "description": "Image, e.g. `ghcr.io/github/github-mcp-server:2.0.2`.",
+              "type": "string"
+            },
+            "digest": {
+              "description": "Pinned content digest (`sha256:…`): the container always runs\nexactly this image, pulled by digest. `mcpgw add` fills it in.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "runtime": {
+              "description": "`docker` or `podman`. Default: whichever is installed, Docker first.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "args": {
+              "description": "Arguments for the image's entrypoint.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "env": {
+              "description": "Environment variables set inside the container (values are passed\nthrough the runtime's environment, never on its command line).",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "run_args": {
+              "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`. They\ncome after the sandbox's flags, so they can add to them\n(`--cap-add=…`).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "sandbox": {
+              "description": "Confinement: `standard` (default), `strict` or `off`.",
+              "$ref": "#/$defs/Sandbox"
+            },
+            "egress": {
+              "description": "Network allowlist, `[\"api.github.com:443\"]`: the container can\nreach these host:port pairs and nothing else. `[]` means no\nnetwork at all. Unset: unrestricted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "transport",
+            "image"
+          ]
+        },
+        {
+          "description": "A Wasm component exporting the `mcpgw:tool` world, run in-process\nwith wasmtime (M4-01).",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "wasm"
+            },
+            "path": {
+              "description": "The component file (`.wasm`).",
+              "type": "string"
+            },
+            "allow_network": {
+              "description": "TCP destinations it may connect to, `[\"api.github.com:443\"]`, or\n`[\"*\"]` for any. Default: no network at all (M4-02).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allow_dirs": {
+              "description": "Host directories it may use. Default: none.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DirAccess"
+              }
+            },
+            "env": {
+              "description": "Environment variables it sees (secrets bind through `secrets`).\nDefault: none; the host's environment never leaks in.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "time_budget": {
+              "description": "Longest one call may run before it's stopped (M4-03). Default:\n30s. The memory cap is `limits.memory` (default and maximum\n256MiB).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "transport",
+            "path"
+          ]
+        },
+        {
+          "description": "An HTTP API described by an OpenAPI 3.x spec, served as tools by\nmcpgw itself, no MCP server needed (M4-05).",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "openapi"
+            },
+            "spec": {
+              "description": "The spec: a file path or an http(s) URL (JSON or YAML).",
+              "type": "string"
+            },
+            "base_url": {
+              "description": "Where requests go. Default: the spec's first server URL\n(relative ones resolve against the spec's URL).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "headers": {
+              "description": "Headers on every request; values may use `${secret:<name>}`.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "auth": {
+              "description": "Credentials for the spec's security schemes, by scheme name\n(M4-06): `{ api_key = { secret = \"petstore_key\" } }`. OAuth logins\nuse their vault name, `oauth/<provider>@{account}`.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/AuthBinding"
+              }
+            }
+          },
+          "required": [
+            "transport",
+            "spec"
+          ]
+        }
+      ]
+    },
+    "Sandbox": {
+      "description": "How tightly a container server is confined.",
+      "oneOf": [
+        {
+          "description": "No restrictions beyond the server's own [`Limits`].",
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "description": "All capabilities dropped, no privilege escalation, 1 GiB memory and\n512 processes unless set.",
+          "type": "string",
+          "const": "standard"
+        },
+        {
+          "description": "`standard`, plus a read-only root filesystem with a 64 MiB tmpfs at\n`/tmp`, running as uid/gid 65534 (nobody), and defaults of 512 MiB,\n1 CPU and 128 processes.",
+          "type": "string",
+          "const": "strict"
+        }
+      ]
+    },
+    "DirAccess": {
+      "description": "A host directory granted to a Wasm server.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The directory on the host.",
+          "type": "string"
+        },
+        "guest": {
+          "description": "Where the component sees it. Default: the same path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "write": {
+          "description": "May create and change files. Default: read-only.",
+          "type": "boolean"
+        }
+      },
       "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "AuthBinding": {
       "description": "A vault secret bound to an OpenAPI security scheme.",
+      "type": "object",
       "properties": {
         "secret": {
           "description": "The secret: API key, token, password, or `oauth/<provider>@<account>`.",
@@ -16,224 +628,33 @@
           ]
         }
       },
+      "additionalProperties": false,
       "required": [
         "secret"
-      ],
-      "type": "object"
+      ]
     },
-    "ByteSize": {
-      "anyOf": [
-        {
-          "pattern": "^[0-9]+ ?([kKmMgG]i?[bB]?|[bB])?$",
-          "type": "string"
-        },
-        {
-          "minimum": 0,
-          "type": "integer"
-        }
-      ],
-      "description": "A size such as \"256MiB\", \"512m\" or \"1GiB\", or bytes."
-    },
-    "DirAccess": {
-      "additionalProperties": false,
-      "description": "A host directory granted to a Wasm server.",
+    "WarmPool": {
+      "description": "How many instances of a server to keep started.",
+      "type": "object",
       "properties": {
-        "guest": {
-          "description": "Where the component sees it. Default: the same path.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "path": {
-          "description": "The directory on the host.",
-          "type": "string"
-        },
-        "write": {
-          "description": "May create and change files. Default: read-only.",
-          "type": "boolean"
+        "min": {
+          "description": "Instances kept warm: 0 (start on demand) or 1. Calls share one\nconnection per server, so larger pools aren't supported.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
         }
       },
+      "additionalProperties": false,
       "required": [
-        "path"
-      ],
-      "type": "object"
-    },
-    "Duration": {
-      "anyOf": [
-        {
-          "pattern": "^[0-9]+(ms|s|m|h|d)?$",
-          "type": "string"
-        },
-        {
-          "minimum": 0,
-          "type": "integer"
-        }
-      ],
-      "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds."
-    },
-    "GatewayConfig": {
-      "additionalProperties": false,
-      "description": "Gateway-wide settings.",
-      "properties": {
-        "accounts": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Account per server on the default endpoint, for servers whose\nsecrets use `{account}`: `accounts = { github = \"work\" }`.\nProfiles (M2-07) set their own. Default: `default`.",
-          "type": "object"
-        },
-        "allow_agent_add_servers": {
-          "default": false,
-          "description": "Whether the agent may add new backend servers itself. Default: `false`.",
-          "type": "boolean"
-        },
-        "allowed_origins": {
-          "description": "Extra browser origins allowed to call the daemon, e.g.\n`\"http://localhost:5173\"`. The daemon's own origin is always allowed.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "approval_timeout": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "How long a call to an `approve`-listed tool waits for `mcpgw approve`\nwhen the client can't be asked. Default: `\"2m\"`."
-        },
-        "client_metadata_url": {
-          "description": "HTTPS URL of a client ID metadata document describing mcpgw, used as\nthe OAuth client id for remote MCP servers that accept them\n(otherwise mcpgw registers itself dynamically).",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "idle_timeout": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Stop a server after this long without calls (per-server\n`idle_timeout` overrides it). Default: `\"10m\"`."
-        },
-        "listen": {
-          "description": "Address of the HTTP front door; must be a loopback address.\nDefault: `127.0.0.1:7777`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "max_running": {
-          "description": "Most servers running at once; starting one more stops the least\nrecently used idle server. Default: 16.",
-          "format": "uint",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "mode": {
-          "$ref": "#/$defs/Mode",
-          "default": "meta",
-          "description": "How tools are presented to clients: `meta` (default: only\n`search_tools`, `describe_tool`, `call_tool`), `direct` (every tool)\nor `hybrid` (meta-tools plus `pinned_tools`)."
-        },
-        "oauth_refresh_interval": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "How often the daemon checks for OAuth tokens to refresh.\nDefault: `\"60s\"`."
-        },
-        "otlp_endpoint": {
-          "description": "OTLP/HTTP endpoint for traces, metrics and logs of the daemon, e.g.\n`http://127.0.0.1:4318` (M3-11). `OTEL_EXPORTER_OTLP_ENDPOINT`\noverrides it. Default: no export.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pinned_tools": {
-          "description": "Public tool names always listed in `hybrid` mode.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "policy": {
-          "$ref": "#/$defs/Policy",
-          "description": "Tool policy for the default endpoint (profiles have their own):\n`policy = { deny = [\"*__delete_*\"], approve = [\"gh__merge_*\"] }`."
-        },
-        "prewarm": {
-          "description": "Start servers in the background when `search_tools` returns their\ntools, hiding their cold start from the call that usually follows.\nDefault: `true`.",
-          "type": [
-            "boolean",
-            "null"
-          ]
-        },
-        "registry_url": {
-          "description": "MCP Registry used by `mcpgw add <name>` and `mcpgw registry search`.\nDefault: `https://registry.modelcontextprotocol.io`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "runtimes_path": {
-          "description": "Package cache for npm and PyPI servers (M3-08). Default: `runtimes`\nnext to the store.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "store_path": {
-          "default": null,
-          "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "token_path": {
-          "default": null,
-          "description": "Path of the static loopback auth token file.\nDefault: `<data dir>/mcpgw/token`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "vault_path": {
-          "description": "Path of the secret vault. Default: `vault.json` next to the store.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "type": "object"
+        "min"
+      ]
     },
     "Limits": {
-      "additionalProperties": false,
       "description": "Resource limits for a server.",
+      "type": "object",
       "properties": {
-        "cpus": {
-          "description": "CPU cap in cores, e.g. `0.5`.",
-          "format": "double",
-          "type": [
-            "number",
-            "null"
-          ]
-        },
         "memory": {
+          "description": "Memory cap; exceeding it kills the server (no swap).",
           "anyOf": [
             {
               "$ref": "#/$defs/ByteSize"
@@ -241,47 +662,83 @@
             {
               "type": "null"
             }
+          ]
+        },
+        "cpus": {
+          "description": "CPU cap in cores, e.g. `0.5`.",
+          "type": [
+            "number",
+            "null"
           ],
-          "description": "Memory cap; exceeding it kills the server (no swap)."
+          "format": "double"
         },
         "pids": {
           "description": "Most processes (and threads) at once.",
-          "format": "uint32",
-          "minimum": 0,
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "format": "uint32",
+          "minimum": 0
         }
       },
-      "type": "object"
+      "additionalProperties": false
     },
-    "Mode": {
-      "description": "How a profile presents tools to the client.",
-      "oneOf": [
+    "ByteSize": {
+      "description": "A size such as \"256MiB\", \"512m\" or \"1GiB\", or bytes.",
+      "anyOf": [
         {
-          "const": "meta",
-          "description": "Only the meta-tools (`search_tools`, `describe_tool`, `call_tool`).",
-          "type": "string"
+          "type": "string",
+          "pattern": "^[0-9]+ ?([kKmMgG]i?[bB]?|[bB])?$"
         },
         {
-          "const": "direct",
-          "description": "Every tool directly.",
-          "type": "string"
-        },
-        {
-          "const": "hybrid",
-          "description": "Meta-tools plus the profile's pinned tools.",
-          "type": "string"
+          "type": "integer",
+          "minimum": 0
         }
       ]
     },
-    "OAuthProvider": {
-      "additionalProperties": false,
-      "description": "One OAuth app (`[[oauth]]` in the config file).",
+    "RegistryRef": {
+      "description": "A pinned MCP Registry entry.",
+      "type": "object",
       "properties": {
+        "name": {
+          "description": "Registry name, e.g. `io.github.github/github-mcp-server`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Installed version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ]
+    },
+    "OAuthProvider": {
+      "description": "One OAuth app (`[[oauth]]` in the config file).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Name used in `mcpgw auth connect <name>` and secret names.",
+          "type": "string"
+        },
+        "preset": {
+          "description": "Built-in endpoints to start from: `github`, `google` or `atlassian`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "authorize_url": {
           "description": "Authorization endpoint (overrides the preset).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "token_url": {
+          "description": "Token endpoint (overrides the preset).",
           "type": [
             "string",
             "null"
@@ -298,521 +755,71 @@
             "null"
           ]
         },
-        "extra_params": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Extra authorization parameters (`audience`, `prompt`, ...).",
-          "type": "object"
-        },
-        "name": {
-          "description": "Name used in `mcpgw auth connect <name>` and secret names.",
-          "type": "string"
-        },
-        "preset": {
-          "description": "Built-in endpoints to start from: `github`, `google` or `atlassian`.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "scopes": {
           "description": "Scopes to request (the preset's when empty).",
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
+          }
         },
-        "token_url": {
-          "description": "Token endpoint (overrides the preset).",
-          "type": [
-            "string",
-            "null"
-          ]
+        "extra_params": {
+          "description": "Extra authorization parameters (`audience`, `prompt`, ...).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       },
+      "additionalProperties": false,
       "required": [
         "name",
         "client_id"
-      ],
-      "type": "object"
-    },
-    "Policy": {
-      "additionalProperties": false,
-      "description": "Tool policy: glob lists matched against public tool names\n(`<server>__<tool>`). `*` matches any run of characters, `?` one.\n\nPrecedence: `deny` beats `approve`, which beats `allow`. When `allow` is\nempty every tool not denied is allowed.",
-      "properties": {
-        "allow": {
-          "description": "Tools that may be called. Empty means all.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "approve": {
-          "description": "Tools that need a human approval per call.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "deny": {
-          "description": "Tools that are never called.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "type": "object"
+      ]
     },
     "Profile": {
-      "additionalProperties": false,
       "description": "A named profile (`[[profile]]` in the config file).",
+      "type": "object",
       "properties": {
-        "accounts": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Account bindings: server name → account label (`github` → `work`).",
-          "type": "object"
-        },
-        "mode": {
-          "$ref": "#/$defs/Mode",
-          "default": "meta",
-          "description": "Tool presentation. Default: `meta`."
-        },
         "name": {
           "description": "Profile name (URL segment).",
           "type": "string"
         },
-        "pinned_tools": {
-          "description": "Public tool names always listed directly in `hybrid` mode.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "policy": {
-          "$ref": "#/$defs/Policy",
-          "default": {},
-          "description": "Tool policy."
-        },
         "servers": {
           "description": "Servers in this profile. Empty means every enabled server.",
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
-    "RegistryRef": {
-      "description": "A pinned MCP Registry entry.",
-      "properties": {
-        "name": {
-          "description": "Registry name, e.g. `io.github.github/github-mcp-server`.",
-          "type": "string"
+          }
         },
-        "version": {
-          "description": "Installed version.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "name",
-        "version"
-      ],
-      "type": "object"
-    },
-    "Sandbox": {
-      "description": "How tightly a container server is confined.",
-      "oneOf": [
-        {
-          "const": "off",
-          "description": "No restrictions beyond the server's own [`Limits`].",
-          "type": "string"
+        "mode": {
+          "description": "Tool presentation. Default: `meta`.",
+          "$ref": "#/$defs/Mode",
+          "default": "meta"
         },
-        {
-          "const": "standard",
-          "description": "All capabilities dropped, no privilege escalation, 1 GiB memory and\n512 processes unless set.",
-          "type": "string"
+        "pinned_tools": {
+          "description": "Public tool names always listed directly in `hybrid` mode.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         },
-        {
-          "const": "strict",
-          "description": "`standard`, plus a read-only root filesystem with a 64 MiB tmpfs at\n`/tmp`, running as uid/gid 65534 (nobody), and defaults of 512 MiB,\n1 CPU and 128 processes.",
-          "type": "string"
-        }
-      ]
-    },
-    "ServerSpec": {
-      "description": "One backend tool server (`[[server]]` in the config file).",
-      "oneOf": [
-        {
-          "description": "Spawn a local child process speaking MCP over stdio.",
-          "properties": {
-            "args": {
-              "description": "Arguments.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "command": {
-              "description": "Executable to run.",
-              "type": "string"
-            },
-            "cwd": {
-              "description": "Working directory. Default: the gateway's.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "env": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Extra environment variables for the child.",
-              "type": "object"
-            },
-            "transport": {
-              "const": "stdio",
-              "type": "string"
-            }
-          },
-          "required": [
-            "transport",
-            "command"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Connect to a remote Streamable HTTP endpoint.",
-          "properties": {
-            "headers": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Extra request headers.",
-              "type": "object"
-            },
-            "transport": {
-              "const": "http",
-              "type": "string"
-            },
-            "url": {
-              "description": "Endpoint URL.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "transport",
-            "url"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "Run an OCI image with Docker or Podman, speaking MCP over the\ncontainer's stdin/stdout (`run -i`, attached). The container is\nremoved when the server stops.",
-          "properties": {
-            "args": {
-              "description": "Arguments for the image's entrypoint.",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "digest": {
-              "description": "Pinned content digest (`sha256:…`): the container always runs\nexactly this image, pulled by digest. `mcpgw add` fills it in.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "egress": {
-              "description": "Network allowlist, `[\"api.github.com:443\"]`: the container can\nreach these host:port pairs and nothing else. `[]` means no\nnetwork at all. Unset: unrestricted.",
-              "items": {
-                "type": "string"
-              },
-              "type": [
-                "array",
-                "null"
-              ]
-            },
-            "env": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Environment variables set inside the container (values are passed\nthrough the runtime's environment, never on its command line).",
-              "type": "object"
-            },
-            "image": {
-              "description": "Image, e.g. `ghcr.io/github/github-mcp-server:2.0.2`.",
-              "type": "string"
-            },
-            "run_args": {
-              "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`. They\ncome after the sandbox's flags, so they can add to them\n(`--cap-add=…`).",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "runtime": {
-              "description": "`docker` or `podman`. Default: whichever is installed, Docker first.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "sandbox": {
-              "$ref": "#/$defs/Sandbox",
-              "description": "Confinement: `standard` (default), `strict` or `off`."
-            },
-            "transport": {
-              "const": "container",
-              "type": "string"
-            }
-          },
-          "required": [
-            "transport",
-            "image"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "A Wasm component exporting the `mcpgw:tool` world, run in-process\nwith wasmtime (M4-01).",
-          "properties": {
-            "allow_dirs": {
-              "description": "Host directories it may use. Default: none.",
-              "items": {
-                "$ref": "#/$defs/DirAccess"
-              },
-              "type": "array"
-            },
-            "allow_network": {
-              "description": "TCP destinations it may connect to, `[\"api.github.com:443\"]`, or\n`[\"*\"]` for any. Default: no network at all (M4-02).",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "env": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Environment variables it sees (secrets bind through `secrets`).\nDefault: none; the host's environment never leaks in.",
-              "type": "object"
-            },
-            "path": {
-              "description": "The component file (`.wasm`).",
-              "type": "string"
-            },
-            "time_budget": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/Duration"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Longest one call may run before it's stopped (M4-03). Default:\n30s. The memory cap is `limits.memory` (default and maximum\n256MiB)."
-            },
-            "transport": {
-              "const": "wasm",
-              "type": "string"
-            }
-          },
-          "required": [
-            "transport",
-            "path"
-          ],
-          "type": "object"
-        },
-        {
-          "description": "An HTTP API described by an OpenAPI 3.x spec, served as tools by\nmcpgw itself, no MCP server needed (M4-05).",
-          "properties": {
-            "auth": {
-              "additionalProperties": {
-                "$ref": "#/$defs/AuthBinding"
-              },
-              "description": "Credentials for the spec's security schemes, by scheme name\n(M4-06): `{ api_key = { secret = \"petstore_key\" } }`. OAuth logins\nuse their vault name, `oauth/<provider>@{account}`.",
-              "type": "object"
-            },
-            "base_url": {
-              "description": "Where requests go. Default: the spec's first server URL\n(relative ones resolve against the spec's URL).",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "headers": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "Headers on every request; values may use `${secret:<name>}`.",
-              "type": "object"
-            },
-            "spec": {
-              "description": "The spec: a file path or an http(s) URL (JSON or YAML).",
-              "type": "string"
-            },
-            "transport": {
-              "const": "openapi",
-              "type": "string"
-            }
-          },
-          "required": [
-            "transport",
-            "spec"
-          ],
-          "type": "object"
-        }
-      ],
-      "properties": {
-        "alias": {
-          "description": "Shorter prefix for its tools' public names (`<alias>__<tool>`).\nDefault: the name.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "enabled": {
-          "description": "Whether the gateway may start this server. Default: `true`.",
-          "type": "boolean"
-        },
-        "files": {
+        "accounts": {
+          "description": "Account bindings: server name → account label (`github` → `work`).",
+          "type": "object",
           "additionalProperties": {
             "type": "string"
-          },
-          "description": "Secrets written to files (container servers): container path →\nvault secret, e.g. `{ \"/run/secrets/sa.json\" = \"gcp_sa\" }`. Each is\na read-only file in tmpfs, gone when the server stops.",
-          "type": "object"
+          }
         },
-        "idle_timeout": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Stop the server after this long without calls. Default: gateway-wide."
-        },
-        "limits": {
-          "$ref": "#/$defs/Limits",
-          "description": "Resource limits: `{ memory = \"256MiB\", cpus = 0.5, pids = 64 }`.\nContainer servers take all three (unset ones come from the sandbox\nprofile); stdio servers take `memory`, a cap on the process tree."
-        },
-        "name": {
-          "description": "Unique server name.",
-          "type": "string"
-        },
-        "registry": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/RegistryRef"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Where it was installed from, when `mcpgw add` took it from the MCP\nRegistry."
-        },
-        "secrets": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "description": "Secrets injected at spawn: environment variable → vault secret name,\ne.g. `{ GITHUB_TOKEN = \"github_token\" }`. Args and env values may\nalso contain `${secret:<name>}`. Injected values are redacted from\neverything the server sends back.",
-          "type": "object"
-        },
-        "startup_timeout": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/Duration"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Deadline for start-up and the MCP handshake. Default: gateway-wide."
-        },
-        "stateful": {
-          "description": "The server keeps user state (browser, database session): it is never\nstopped for idleness or evicted.",
-          "type": "boolean"
-        },
-        "warm_pool": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WarmPool"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Keep this server started: `{ min = 1 }` starts it with the gateway,\nnever stops it for idleness or evicts it, and restarts it after a\ncrash, so calls never wait for a cold start."
+        "policy": {
+          "description": "Tool policy.",
+          "$ref": "#/$defs/Policy",
+          "default": {}
         }
       },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
-    "WarmPool": {
       "additionalProperties": false,
-      "description": "How many instances of a server to keep started.",
-      "properties": {
-        "min": {
-          "description": "Instances kept warm: 0 (start on demand) or 1. Calls share one\nconnection per server, so larger pools aren't supported.",
-          "format": "uint32",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
       "required": [
-        "min"
-      ],
-      "type": "object"
+        "name"
+      ]
     }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "description": "Root configuration.",
-  "properties": {
-    "gateway": {
-      "$ref": "#/$defs/GatewayConfig",
-      "default": {
-        "allow_agent_add_servers": false,
-        "mode": "meta",
-        "store_path": null,
-        "token_path": null
-      },
-      "description": "Gateway-wide behaviour."
-    },
-    "oauth": {
-      "description": "OAuth apps for `mcpgw auth connect`.",
-      "items": {
-        "$ref": "#/$defs/OAuthProvider"
-      },
-      "type": "array"
-    },
-    "profile": {
-      "description": "Profiles: named endpoints at `/mcp/p/<name>` (M2-07).",
-      "items": {
-        "$ref": "#/$defs/Profile"
-      },
-      "type": "array"
-    },
-    "server": {
-      "description": "Backend tool servers.",
-      "items": {
-        "$ref": "#/$defs/ServerSpec"
-      },
-      "type": "array"
-    }
-  },
-  "title": "Config",
-  "type": "object"
+  }
 }

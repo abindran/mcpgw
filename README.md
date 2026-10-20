@@ -27,6 +27,12 @@ that protocol churn stays contained behind a single seam.
 | `mcpgw-auth` | Loopback client token, OAuth broker, upstream OAuth. |
 | `mcpgw-api` | Admin REST API, SSE events, static web UI. |
 | `mcpgw-telemetry` | Tracing, metrics, audit log writer. |
+| `mcpgw-registry` | MCP Registry client: entries to pinned server specs. |
+| `mcpgw-wasm` | Wasm tool servers: wasmtime components, grants, limits. |
+| `mcpgw-tool` | SDK for writing Wasm tools (with the `sdk/template` cargo-generate template). |
+| `mcpgw-openapi` | OpenAPI 3.x APIs as tools, with security schemes mapped to vault credentials. |
+| `mcpgw-cedar` | Cedar policies as an optional policy engine (the `cedar` feature, on by default). |
+| `mcpgw-testkit` | Test-only fakes: MCP servers, registry, Petstore, OTLP, containers. |
 | `xtask` | Build, release, conformance and e2e helpers (`cargo xtask ci`). |
 
 ### Dependency rule

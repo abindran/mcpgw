@@ -124,6 +124,7 @@ impl Scope {
         };
         let why = match pattern {
             Some(p) => format!("{at} denies `{p}`"),
+            None if self.policy.cedar.is_some() => format!("no Cedar policy of {at} permits it"),
             None => format!("{at} only allows {}", self.policy.allow.join(", ")),
         };
         tracing::warn!(tool = public, scope = at, "call refused by policy");

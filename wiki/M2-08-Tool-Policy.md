@@ -56,3 +56,7 @@ accounts:
   - the default endpoint is unaffected
 - Core: glob cases (prefix, infix, `?`, empty, backtracking) and
   deny > approve > allow precedence.
+
+## Cedar
+
+[M4-07](M4-07-Cedar-Policies.md) adds Cedar as an alternative engine: `policy = { cedar = "file.cedar" }`, and `mcpgw policy convert` writes Cedar from these lists with the same decisions.

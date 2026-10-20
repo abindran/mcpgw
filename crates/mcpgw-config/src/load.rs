@@ -81,6 +81,17 @@ pub(crate) fn parse(
     if !env.is_empty() {
         cfg = apply_env(src, env)?;
     }
+    // Cedar files are named relative to the config file
+    let base = path.parent().unwrap_or(Path::new(""));
+    let policies = std::iter::once(&mut cfg.gateway.policy)
+        .chain(cfg.profiles.iter_mut().map(|p| &mut p.policy));
+    for policy in policies {
+        if let Some(f) = &mut policy.cedar
+            && f.is_relative()
+        {
+            *f = base.join(&*f);
+        }
+    }
     Ok(cfg)
 }
 
@@ -252,6 +263,14 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
             });
         }
     }
+    if let Err(e) = cfg.gateway.policy.check() {
+        return Err(Issue {
+            server: None,
+            field: "policy",
+            message: format!("gateway.policy: {e}"),
+            hint: None,
+        });
+    }
     let mut profiles = HashSet::new();
     for pr in &cfg.profiles {
         let issue = |message: String, hint: &str| Issue {
@@ -271,6 +290,14 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
                 format!("duplicate profile `{}`", pr.name),
                 "profile names must be unique",
             ));
+        }
+        if let Err(e) = pr.policy.check() {
+            return Err(Issue {
+                server: None,
+                field: "profile",
+                message: format!("profile `{}`: {e}", pr.name),
+                hint: None,
+            });
         }
         for (server, account) in &pr.accounts {
             if validate_server_name(account).is_err() {

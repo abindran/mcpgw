@@ -1,97 +1,104 @@
 {
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Profile",
+  "description": "A named profile (`[[profile]]` in the config file).",
+  "type": "object",
+  "properties": {
+    "name": {
+      "description": "Profile name (URL segment).",
+      "type": "string"
+    },
+    "servers": {
+      "description": "Servers in this profile. Empty means every enabled server.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "mode": {
+      "description": "Tool presentation. Default: `meta`.",
+      "$ref": "#/$defs/Mode",
+      "default": "meta"
+    },
+    "pinned_tools": {
+      "description": "Public tool names always listed directly in `hybrid` mode.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "accounts": {
+      "description": "Account bindings: server name → account label (`github` → `work`).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "policy": {
+      "description": "Tool policy.",
+      "$ref": "#/$defs/Policy",
+      "default": {}
+    }
+  },
+  "additionalProperties": false,
+  "required": [
+    "name"
+  ],
   "$defs": {
     "Mode": {
       "description": "How a profile presents tools to the client.",
       "oneOf": [
         {
-          "const": "meta",
           "description": "Only the meta-tools (`search_tools`, `describe_tool`, `call_tool`).",
-          "type": "string"
+          "type": "string",
+          "const": "meta"
         },
         {
-          "const": "direct",
           "description": "Every tool directly.",
-          "type": "string"
+          "type": "string",
+          "const": "direct"
         },
         {
-          "const": "hybrid",
           "description": "Meta-tools plus the profile's pinned tools.",
-          "type": "string"
+          "type": "string",
+          "const": "hybrid"
         }
       ]
     },
     "Policy": {
-      "additionalProperties": false,
-      "description": "Tool policy: glob lists matched against public tool names\n(`<server>__<tool>`). `*` matches any run of characters, `?` one.\n\nPrecedence: `deny` beats `approve`, which beats `allow`. When `allow` is\nempty every tool not denied is allowed.",
+      "description": "Tool policy: glob lists matched against public tool names\n(`<server>__<tool>`). `*` matches any run of characters, `?` one.\n\nPrecedence: `deny` beats `approve`, which beats `allow`. When `allow` is\nempty every tool not denied is allowed.\n\n`cedar` names a Cedar policy file instead (M4-07); the lists must then\nbe empty.",
+      "type": "object",
       "properties": {
         "allow": {
           "description": "Tools that may be called. Empty means all.",
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
-        },
-        "approve": {
-          "description": "Tools that need a human approval per call.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+          }
         },
         "deny": {
           "description": "Tools that are never called.",
+          "type": "array",
           "items": {
             "type": "string"
-          },
-          "type": "array"
+          }
+        },
+        "approve": {
+          "description": "Tools that need a human approval per call.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "cedar": {
+          "description": "A Cedar policy file (M4-07) in place of the lists; relative to the\nconfig file. `mcpgw policy convert` writes one from the lists.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
-      "type": "object"
+      "additionalProperties": false
     }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "description": "A named profile (`[[profile]]` in the config file).",
-  "properties": {
-    "accounts": {
-      "additionalProperties": {
-        "type": "string"
-      },
-      "description": "Account bindings: server name → account label (`github` → `work`).",
-      "type": "object"
-    },
-    "mode": {
-      "$ref": "#/$defs/Mode",
-      "default": "meta",
-      "description": "Tool presentation. Default: `meta`."
-    },
-    "name": {
-      "description": "Profile name (URL segment).",
-      "type": "string"
-    },
-    "pinned_tools": {
-      "description": "Public tool names always listed directly in `hybrid` mode.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    },
-    "policy": {
-      "$ref": "#/$defs/Policy",
-      "default": {},
-      "description": "Tool policy."
-    },
-    "servers": {
-      "description": "Servers in this profile. Empty means every enabled server.",
-      "items": {
-        "type": "string"
-      },
-      "type": "array"
-    }
-  },
-  "required": [
-    "name"
-  ],
-  "title": "Profile",
-  "type": "object"
+  }
 }
