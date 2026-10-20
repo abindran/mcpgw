@@ -324,6 +324,7 @@ pub mod cmd {
             updated_at: updated,
             last_used_at: None,
         })?;
+        crate::audit::record(config, "secret.set", name, serde_json::json!({}));
         println!("stored secret {name} (vault: {})", v.key_source());
         Ok(())
     }
@@ -358,6 +359,7 @@ pub mod cmd {
         let existed = v.remove(name)?;
         SqliteStore::open(config.gateway.store_path())?.remove_secret_meta(name)?;
         if existed {
+            crate::audit::record(config, "secret.delete", name, serde_json::json!({}));
             println!("removed secret {name}");
             Ok(())
         } else {

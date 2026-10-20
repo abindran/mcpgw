@@ -50,6 +50,9 @@ pub struct GatewayOptions {
     pub approval_timeout: std::time::Duration,
     /// Where finished calls are recorded (M2-12).
     pub calls: Option<Arc<mcpgw_runtime::CallLog>>,
+    /// The audit log (M2-13): every finished tool call, with a digest of its
+    /// arguments.
+    pub audit: Option<mcpgw_core::audit::Auditor>,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -251,6 +254,18 @@ impl ToolProvider for GatewayProvider {
             };
             let started = std::time::Instant::now();
             let client = ctx.client_name.clone();
+            // what the tool ran with, for the audit digest
+            let audit_args = match (meta, name.as_str()) {
+                (false, _) => Some(serde_json::Value::Object(
+                    arguments.clone().unwrap_or_default(),
+                )),
+                (true, meta::CALL) => arguments.as_ref().map(|a| {
+                    a.get("arguments")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({}))
+                }),
+                _ => None,
+            };
             let out = mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
                 // the tool actually being run: the name, or call_tool's target
                 let target = match (meta, name.as_str()) {
@@ -292,13 +307,22 @@ impl ToolProvider for GatewayProvider {
                     Ok(_) => "ok",
                     Err(_) => "error",
                 };
-                log.record(
-                    &self.opts.label,
-                    &label,
-                    outcome,
-                    started.elapsed().as_millis() as u64,
-                    client,
-                );
+                let ms = started.elapsed().as_millis() as u64;
+                if let (Some(a), Some(args)) = (&self.opts.audit, &audit_args) {
+                    let actor = match &client {
+                        Some(c) => format!("{} / {c}", self.opts.label),
+                        None => self.opts.label.clone(),
+                    };
+                    let mut ev = mcpgw_core::AuditEvent::new(
+                        "tool.call",
+                        &actor,
+                        &label,
+                        serde_json::json!({"outcome": outcome, "duration_ms": ms}),
+                    );
+                    ev.args_digest = Some(mcpgw_core::audit::args_digest(args));
+                    a(ev);
+                }
+                log.record(&self.opts.label, &label, outcome, ms, client);
             }
             out
         })

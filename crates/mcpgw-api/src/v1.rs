@@ -49,6 +49,8 @@ pub struct ApiState {
     pub approvals: Arc<Approvals>,
     /// Recent calls.
     pub calls: Arc<mcpgw_runtime::CallLog>,
+    /// Records changes made through this API (M2-13).
+    pub audit: Option<mcpgw_core::audit::Auditor>,
     /// Daemon start, Unix seconds.
     pub started_at: u64,
     /// MCP endpoint base, e.g. `http://127.0.0.1:7777/mcp`.
@@ -87,6 +89,12 @@ fn now() -> u64 {
 }
 
 impl ApiState {
+    fn record(&self, kind: &str, subject: &str, detail: Value) {
+        if let Some(a) = &self.audit {
+            a(mcpgw_core::AuditEvent::new(kind, "api", subject, detail));
+        }
+    }
+
     fn server_json(&self, spec: &ServerSpec) -> Value {
         let st = self.manager.status_of(&spec.name);
         let (transport, target) = match &spec.transport {
@@ -205,6 +213,11 @@ async fn add_server(State(s): State<ApiState>, Json(spec): Json<ServerSpec>) -> 
     }
     s.store.upsert_server(&spec).map_err(store_err)?;
     s.manager.add_server(&spec).map_err(proto)?;
+    s.record(
+        "server.add",
+        &spec.name,
+        json!({"transport": spec.transport.kind()}),
+    );
     Ok((StatusCode::CREATED, Json(s.server_json(&spec))).into_response())
 }
 
@@ -215,6 +228,7 @@ async fn delete_server(State(s): State<ApiState>, Path(name): Path<String>) -> R
     s.store.remove_server(&name).map_err(store_err)?;
     s.store.remove_manifest(&name).map_err(store_err)?;
     s.manager.catalog().remove(&name);
+    s.record("server.remove", &name, json!({}));
     no_content()
 }
 
@@ -224,6 +238,15 @@ async fn set_enabled(s: ApiState, name: String, on: bool) -> R {
     spec.enabled = on;
     s.store.upsert_server(&spec).map_err(store_err)?;
     s.manager.set_enabled(&name, on).await.map_err(proto)?;
+    s.record(
+        if on {
+            "server.enable"
+        } else {
+            "server.disable"
+        },
+        &name,
+        json!({}),
+    );
     ok(s.server_json(&spec))
 }
 
@@ -245,6 +268,11 @@ async fn restart_server(State(s): State<ApiState>, Path(name): Path<String>) -> 
 async fn pin_server(State(s): State<ApiState>, Path(name): Path<String>) -> R {
     s.spec(&name)?;
     let m = s.manager.approve_tools(&name).map_err(proto)?;
+    s.record(
+        "server.pin",
+        &name,
+        json!({"sha256": m.sha256, "tools": m.tools.len()}),
+    );
     ok(json!({"sha256": m.sha256, "tools": m.tools.len()}))
 }
 
@@ -361,6 +389,7 @@ async fn put_profile(
     let created = s.profiles.get(&name).is_none();
     s.store.upsert_profile(&p).map_err(store_err)?;
     s.profiles.put(p.clone());
+    s.record("profile.put", &name, json!({"servers": p.servers}));
     let status = if created {
         StatusCode::CREATED
     } else {
@@ -382,6 +411,7 @@ async fn delete_profile(State(s): State<ApiState>, Path(name): Path<String>) -> 
         Some(_) => {
             s.store.remove_profile(&name).map_err(store_err)?;
             s.profiles.remove(&name);
+            s.record("profile.delete", &name, json!({}));
             no_content()
         }
     }
@@ -416,12 +446,16 @@ async fn put_secret(
     s.secrets
         .set(&name, &b.value, b.description)
         .map_err(|e| fail(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    s.record("secret.set", &name, json!({}));
     no_content()
 }
 
 async fn delete_secret(State(s): State<ApiState>, Path(name): Path<String>) -> R {
     match s.secrets.remove(&name) {
-        Ok(true) => no_content(),
+        Ok(true) => {
+            s.record("secret.delete", &name, json!({}));
+            no_content()
+        }
         Ok(false) => Err(fail(
             StatusCode::NOT_FOUND,
             format!("no secret named {name:?}"),
@@ -483,6 +517,27 @@ async fn deny(State(s): State<ApiState>, Path(id): Path<String>) -> R {
     no_content()
 }
 
+#[derive(Deserialize)]
+struct AuditQuery {
+    after: Option<u64>,
+    limit: Option<usize>,
+}
+
+async fn audit_list(State(s): State<ApiState>, Query(q): Query<AuditQuery>) -> R {
+    let entries = s
+        .store
+        .audit_entries(q.after.unwrap_or(0), q.limit.unwrap_or(100).min(1000))
+        .map_err(store_err)?;
+    ok(json!({ "entries": entries }))
+}
+
+async fn audit_verify(State(s): State<ApiState>) -> R {
+    match s.store.verify_audit().map_err(store_err)? {
+        Ok(n) => ok(json!({"ok": true, "entries": n})),
+        Err(b) => ok(json!({"ok": false, "broken_at": b.seq, "reason": b.reason})),
+    }
+}
+
 async fn spec() -> Json<Value> {
     Json(openapi())
 }
@@ -515,6 +570,8 @@ pub fn router(state: ApiState) -> Router {
             axum::routing::put(put_secret).delete(delete_secret),
         )
         .route("/api/v1/calls", get(recent_calls))
+        .route("/api/v1/audit", get(audit_list))
+        .route("/api/v1/audit/verify", get(audit_verify))
         .route("/api/v1/approvals", get(list_approvals))
         .route("/api/v1/approvals/{id}/approve", post(approve))
         .route("/api/v1/approvals/{id}/deny", post(deny))
@@ -604,6 +661,11 @@ pub fn openapi() -> Value {
                 "put": op("secrets", "Store a secret", name.clone(), Some(body(json!({"type": "object", "required": ["value"], "properties": {"value": {"type": "string", "writeOnly": true}, "description": {"type": "string"}}}))), "204", empty.clone()),
                 "delete": op("secrets", "Delete a secret", name.clone(), None, "204", empty.clone())
             },
+            "/api/v1/audit": {"get": op("audit", "Audit log entries, oldest first", json!([
+                {"name": "after", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0}},
+                {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 1000}}
+            ]), None, "200", resp("Entries", list("entries", r("AuditEntry"))))},
+            "/api/v1/audit/verify": {"get": op("audit", "Verify the audit hash chain", none.clone(), None, "200", resp("Result", json!({"type": "object", "properties": {"ok": {"type": "boolean"}, "entries": {"type": "integer"}, "broken_at": {"type": "integer"}, "reason": {"type": "string"}}})))},
             "/api/v1/calls": {"get": op("runtime", "Recent tool calls, newest first (names and outcomes only)", json!([{"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 200}}]), None, "200", resp("Calls", list("calls", r("Call"))))},
             "/api/v1/approvals": {"get": op("approvals", "Tool calls waiting for approval", none, None, "200", resp("Approvals", list("approvals", r("Approval"))))},
             "/api/v1/approvals/{id}/approve": {"post": op("approvals", "Approve a waiting call", id.clone(), None, "204", empty.clone())},
@@ -630,6 +692,7 @@ pub fn openapi() -> Value {
                     "servers": {"type": "object", "properties": {"total": {"type": "integer"}, "running": {"type": "integer"}}},
                     "endpoints": {"type": "array", "items": {"type": "string"}}
                 }},
+                "AuditEntry": schema::<mcpgw_core::AuditEntry>(),
                 "Call": {"type": "object", "properties": {
                     "at_ms": {"type": "integer"}, "endpoint": {"type": "string"}, "tool": {"type": "string"},
                     "outcome": {"enum": ["ok", "tool_error", "error"]}, "duration_ms": {"type": "integer"},

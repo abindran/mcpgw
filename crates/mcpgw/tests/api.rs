@@ -479,6 +479,48 @@ async fn every_endpoint_works_and_is_documented() {
         .await;
     assert_eq!(s, S::NOT_FOUND);
 
+    // the audit log saw the API's changes and the calls
+    let (s, v) = a
+        .call(
+            "GET",
+            "/api/v1/audit",
+            "/api/v1/audit?after=0&limit=500",
+            None,
+        )
+        .await;
+    assert_eq!(s, S::OK);
+    let entries = v["entries"].as_array().unwrap();
+    assert!(
+        entries
+            .iter()
+            .any(|x| x["kind"] == "server.add" && x["actor"] == "api" && x["subject"] == "extra"),
+        "{v}"
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|x| x["kind"] == "profile.delete" && x["subject"] == "web")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|x| x["kind"] == "secret.set" && x["subject"] == "api_key")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|x| x["kind"] == "approval.decide" && x["detail"]["approved"] == false)
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|x| x["kind"] == "tool.call" && x["subject"] == "fx__echo")
+    );
+    let (s, v) = a
+        .call("GET", "/api/v1/audit/verify", "/api/v1/audit/verify", None)
+        .await;
+    assert_eq!((s, v["ok"].as_bool()), (S::OK, Some(true)), "{v}");
+
     // recent calls, newest first: the denied echo is last
     let (s, v) = a
         .call("GET", "/api/v1/calls", "/api/v1/calls?limit=10", None)

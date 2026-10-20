@@ -203,6 +203,7 @@ fn handler(kind: ClientKind, asked: std::sync::Arc<std::sync::Mutex<Vec<String>>
     }
     let mut cfg = rmcp::model::ClientConfig::default();
     cfg.capabilities = caps;
+    cfg.client_info = rmcp::model::Implementation::new("mcpgw-testkit", env!("CARGO_PKG_VERSION"));
     TestHandler {
         cfg,
         answer: kind.approve,

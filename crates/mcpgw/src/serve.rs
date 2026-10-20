@@ -45,10 +45,30 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         approvals: Some(approvals()),
         approval_timeout: approval_timeout(config),
         calls: Some(call_log()),
+        audit: auditor(),
     }
 }
 
 /// Recent calls on every endpoint (M2-12).
+static AUDITOR: std::sync::OnceLock<mcpgw_core::audit::Auditor> = std::sync::OnceLock::new();
+
+/// The daemon's audit log writer, once `serve` has set it up (M2-13).
+pub fn auditor() -> Option<mcpgw_core::audit::Auditor> {
+    AUDITOR.get().cloned()
+}
+
+/// Append to the store's audit chain; failures are logged, never fatal.
+fn install_auditor(store: Arc<SqliteStore>) {
+    let a: mcpgw_core::audit::Auditor = Arc::new(move |ev| {
+        if let Err(e) = store.append_audit(&ev) {
+            tracing::error!(error = %e, kind = %ev.kind, "could not write the audit log");
+        }
+    });
+    if AUDITOR.set(a.clone()).is_ok() {
+        approvals().set_auditor(a);
+    }
+}
+
 pub fn call_log() -> Arc<mcpgw_runtime::CallLog> {
     static L: std::sync::OnceLock<Arc<mcpgw_runtime::CallLog>> = std::sync::OnceLock::new();
     L.get_or_init(Default::default).clone()
@@ -96,6 +116,7 @@ fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::Ga
         approvals: Some(approvals()),
         approval_timeout: approval_timeout(config),
         calls: Some(call_log()),
+        audit: auditor(),
     }
 }
 
@@ -277,6 +298,7 @@ pub fn serve(
         }
     };
     let catalog = catalog(&store)?;
+    install_auditor(store.clone());
     runtime()?.block_on(async {
         let opts = ManagerOptions {
             idle_timeout: config.gateway.idle_timeout(),
@@ -383,6 +405,14 @@ async fn serve_http(
         base_url: format!("http://127.0.0.1:{}", local.port()),
         remote: Some(login),
         on_login: Some(Arc::new(move |p: &str, a: &str| {
+            if let Some(au) = auditor() {
+                au(mcpgw_core::AuditEvent::new(
+                    "auth.login",
+                    "browser",
+                    &format!("{p}@{a}"),
+                    serde_json::json!({}),
+                ));
+            }
             reset_after_login(&m, p, a)
         })),
     };
@@ -418,6 +448,7 @@ async fn serve_http(
         secrets: Arc::new(secrets::ApiSecrets::new(vault, store.clone())),
         approvals: approvals(),
         calls: call_log(),
+        audit: auditor(),
         started_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())

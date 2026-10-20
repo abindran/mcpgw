@@ -67,6 +67,16 @@ pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> 
             ),
         }
     }
+    crate::audit::record(
+        config,
+        if existed {
+            "server.update"
+        } else {
+            "server.add"
+        },
+        &name,
+        serde_json::json!({"transport": spec.transport.kind(), "pin": manifest.as_ref().map(|m| m.sha256.clone())}),
+    );
     match &manifest {
         Some(m) => println!(
             "{verb} server {name} ({} tools, pin {})",
@@ -90,6 +100,7 @@ pub fn remove(config: &Config, path: &Path, name: &str) -> AnyResult<()> {
         if let Some(c) = Control::connect(config)? {
             let _ = c.remove(name);
         }
+        crate::audit::record(config, "server.remove", name, serde_json::json!({}));
         println!("removed server {name}");
         Ok(())
     } else if in_config(config, name) {
@@ -117,6 +128,16 @@ pub fn set_enabled(config: &Config, path: &Path, name: &str, on: bool) -> AnyRes
     if let Some(c) = Control::connect(config)? {
         c.action(name, if on { "enable" } else { "disable" })?;
     }
+    crate::audit::record(
+        config,
+        if on {
+            "server.enable"
+        } else {
+            "server.disable"
+        },
+        name,
+        serde_json::json!({}),
+    );
     println!("{} server {name}", if on { "enabled" } else { "disabled" });
     Ok(())
 }
@@ -268,6 +289,12 @@ pub fn pin(config: &Config, name: &str) -> AnyResult<()> {
         .ok_or_else(|| format!("no such server: {name}"))?;
     if let Some(c) = Control::connect(config)? {
         let v = c.action(name, "pin")?.unwrap_or_default();
+        crate::audit::record(
+            config,
+            "server.pin",
+            name,
+            serde_json::json!({"sha256": v["sha256"]}),
+        );
         println!(
             "pinned {name}: {} tools, pin {}",
             v["tools"],
@@ -282,6 +309,12 @@ pub fn pin(config: &Config, name: &str) -> AnyResult<()> {
         Some(serve::resolver(config)),
     ))?;
     s.put_manifest(&m)?;
+    crate::audit::record(
+        config,
+        "server.pin",
+        name,
+        serde_json::json!({"sha256": m.sha256}),
+    );
     println!(
         "pinned {name}: {} tools, pin {}",
         m.tools.len(),

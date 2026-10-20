@@ -3,6 +3,7 @@
 //! Servers, tools, profiles, manifests, policies and the crate-wide
 //! [`Error`] / [`Result`]. Nothing here performs I/O.
 
+pub mod audit;
 pub mod duration;
 pub mod manifest;
 pub mod oauth;
@@ -11,6 +12,7 @@ pub mod secret;
 pub mod server;
 pub mod tls;
 
+pub use audit::{AuditEntry, AuditEvent};
 pub use duration::Duration;
 pub use manifest::{ManifestDiff, ToolDef, ToolManifest};
 pub use oauth::{OAuthEndpoints, OAuthProvider, oauth_secret_name};

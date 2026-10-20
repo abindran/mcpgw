@@ -51,6 +51,7 @@ struct Pending {
 #[derive(Default)]
 pub struct Approvals {
     inner: Mutex<HashMap<String, Pending>>,
+    audit: std::sync::OnceLock<mcpgw_core::audit::Auditor>,
 }
 
 /// Digest binding an approval to one tool and its arguments.
@@ -77,6 +78,11 @@ fn short(args: &Option<JsonObject>) -> String {
 }
 
 impl Approvals {
+    /// Record each decision in the audit log (once; later calls are ignored).
+    pub fn set_auditor(&self, a: mcpgw_core::audit::Auditor) {
+        let _ = self.audit.set(a);
+    }
+
     fn sweep(map: &mut HashMap<String, Pending>) {
         map.retain(|_, p| p.created.elapsed() < APPROVAL_TTL);
     }
@@ -132,6 +138,16 @@ impl Approvals {
         }
         p.decided = Some(approve);
         p.view.status = if approve { "approved" } else { "denied" };
+        if let Some(a) = self.audit.get() {
+            let mut ev = mcpgw_core::AuditEvent::new(
+                "approval.decide",
+                &p.view.endpoint,
+                &p.view.tool,
+                serde_json::json!({"id": id, "approved": approve}),
+            );
+            ev.args_digest = Some(p.digest.clone());
+            a(ev);
+        }
         for w in p.waiters.drain(..) {
             let _ = w.send(approve);
         }

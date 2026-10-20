@@ -9,7 +9,9 @@ use std::path::Path;
 use std::sync::Mutex;
 
 use mcpgw_core::{
-    Error, Profile, Result, SecretMeta, ServerSpec, ToolManifest, validate_secret_name,
+    AuditEntry, AuditEvent, Error, Profile, Result, SecretMeta, ServerSpec, ToolManifest,
+    audit::{ChainBreak, ChainVerifier, GENESIS_HASH, entry_hash},
+    validate_secret_name,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -41,6 +43,22 @@ pub const MIGRATIONS: &[&str] = &[
          updated_at INTEGER NOT NULL,
          meta       TEXT NOT NULL
      );",
+    // 3: the hash-chained, append-only audit log (M2-13)
+    "CREATE TABLE audit (
+         seq         INTEGER PRIMARY KEY NOT NULL,
+         at_ms       INTEGER NOT NULL,
+         kind        TEXT NOT NULL,
+         actor       TEXT NOT NULL,
+         subject     TEXT NOT NULL,
+         args_digest TEXT,
+         detail      TEXT NOT NULL,
+         prev_hash   TEXT NOT NULL,
+         hash        TEXT NOT NULL
+     );
+     CREATE TRIGGER audit_no_update BEFORE UPDATE ON audit
+         BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;
+     CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit
+         BEGIN SELECT RAISE(ABORT, 'the audit log is append-only'); END;",
 ];
 
 /// Current schema version.
@@ -88,6 +106,26 @@ pub trait Store: Send + Sync {
     fn secret_meta(&self, name: &str) -> Result<Option<SecretMeta>>;
     /// All secret metadata, ordered by name.
     fn secret_metas(&self) -> Result<Vec<SecretMeta>>;
+
+    /// Append an event to the audit chain.
+    fn append_audit(&self, event: &AuditEvent) -> Result<AuditEntry>;
+    /// Entries after `after_seq`, oldest first, at most `limit`.
+    fn audit_entries(&self, after_seq: u64, limit: usize) -> Result<Vec<AuditEntry>>;
+    /// Verify the whole chain: the number of entries, or the first break.
+    fn verify_audit(&self) -> Result<std::result::Result<u64, ChainBreak>> {
+        let mut v = ChainVerifier::default();
+        loop {
+            let page = self.audit_entries(v.checked(), 1000)?;
+            if page.is_empty() {
+                return Ok(Ok(v.checked()));
+            }
+            for e in &page {
+                if let Err(b) = v.push(e) {
+                    return Ok(Err(b));
+                }
+            }
+        }
+    }
 }
 
 fn db_err(e: impl std::fmt::Display) -> Error {
@@ -310,6 +348,78 @@ impl Store for SqliteStore {
     fn secret_metas(&self) -> Result<Vec<SecretMeta>> {
         self.all_json("SELECT meta FROM secrets ORDER BY name")
     }
+
+    fn append_audit(&self, event: &AuditEvent) -> Result<AuditEntry> {
+        let at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let detail = serde_json::to_string(&event.detail).map_err(db_err)?;
+        self.with(|c| {
+            let tx = c.unchecked_transaction()?;
+            let last: Option<(i64, String)> = tx
+                .query_row("SELECT seq, hash FROM audit ORDER BY seq DESC LIMIT 1", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .optional()?;
+            let (seq, prev) = match last {
+                Some((s, h)) => (s as u64 + 1, h),
+                None => (1, GENESIS_HASH.to_string()),
+            };
+            let hash = entry_hash(&prev, seq, at_ms, event);
+            tx.execute(
+                "INSERT INTO audit(seq, at_ms, kind, actor, subject, args_digest, detail, prev_hash, hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    seq as i64,
+                    at_ms as i64,
+                    event.kind,
+                    event.actor,
+                    event.subject,
+                    event.args_digest,
+                    detail,
+                    prev,
+                    hash
+                ],
+            )?;
+            tx.commit()?;
+            Ok(AuditEntry {
+                seq,
+                at_ms,
+                event: event.clone(),
+                prev_hash: prev,
+                hash,
+            })
+        })
+    }
+
+    fn audit_entries(&self, after_seq: u64, limit: usize) -> Result<Vec<AuditEntry>> {
+        self.with(|c| {
+            let mut st = c.prepare(
+                "SELECT seq, at_ms, kind, actor, subject, args_digest, detail, prev_hash, hash
+                 FROM audit WHERE seq > ?1 ORDER BY seq LIMIT ?2",
+            )?;
+            let rows = st.query_map(params![after_seq as i64, limit as i64], |r| {
+                let detail: String = r.get(6)?;
+                Ok(AuditEntry {
+                    seq: r.get::<_, i64>(0)? as u64,
+                    at_ms: r.get::<_, i64>(1)? as u64,
+                    event: AuditEvent {
+                        kind: r.get(2)?,
+                        actor: r.get(3)?,
+                        subject: r.get(4)?,
+                        args_digest: r.get(5)?,
+                        // a row whose detail isn't JSON fails verification as modified
+                        detail: serde_json::from_str(&detail)
+                            .unwrap_or(serde_json::Value::String(detail)),
+                    },
+                    prev_hash: r.get(7)?,
+                    hash: r.get(8)?,
+                })
+            })?;
+            rows.collect()
+        })
+    }
 }
 
 /// Merge config-file servers with store-registered servers.
@@ -484,6 +594,106 @@ mod tests {
         s.put_manifest(&manifest("old", "v1")).unwrap();
         drop(s);
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn audit_store(n: u64) -> SqliteStore {
+        let s = SqliteStore::open_in_memory().unwrap();
+        for i in 1..=n {
+            let mut e = AuditEvent::new(
+                "tool.call",
+                "the default endpoint",
+                &format!("fx__t{i}"),
+                serde_json::json!({"outcome": "ok"}),
+            );
+            e.args_digest = Some(mcpgw_core::audit::args_digest(&serde_json::json!({"i": i})));
+            s.append_audit(&e).unwrap();
+        }
+        s
+    }
+
+    #[test]
+    fn audit_chain_appends_and_verifies() {
+        let s = audit_store(5);
+        assert_eq!(s.verify_audit().unwrap(), Ok(5));
+        let all = s.audit_entries(0, 100).unwrap();
+        assert_eq!(all.len(), 5);
+        assert_eq!(all[0].prev_hash, GENESIS_HASH);
+        assert_eq!(all[1].prev_hash, all[0].hash);
+        assert_eq!(s.audit_entries(3, 100).unwrap()[0].seq, 4);
+        assert_eq!(
+            SqliteStore::open_in_memory()
+                .unwrap()
+                .verify_audit()
+                .unwrap(),
+            Ok(0)
+        );
+    }
+
+    #[test]
+    fn audit_rows_cannot_be_changed_through_sql() {
+        let s = audit_store(2);
+        let err = s
+            .with(|c| c.execute("UPDATE audit SET subject = 'x' WHERE seq = 1", []))
+            .unwrap_err();
+        assert!(err.to_string().contains("append-only"), "{err}");
+        let err = s.with(|c| c.execute("DELETE FROM audit", [])).unwrap_err();
+        assert!(err.to_string().contains("append-only"), "{err}");
+    }
+
+    /// Someone with the database file drops the triggers and edits rows:
+    /// verification names the first broken entry.
+    #[test]
+    fn tampering_with_any_row_breaks_the_chain() {
+        let tamper = |sql: &str| {
+            let s = audit_store(6);
+            s.with(|c| {
+                c.execute_batch("DROP TRIGGER audit_no_update; DROP TRIGGER audit_no_delete;")?;
+                c.execute_batch(sql)
+            })
+            .unwrap();
+            s.verify_audit().unwrap().unwrap_err()
+        };
+        for (sql, seq) in [
+            ("UPDATE audit SET subject = 'fx__innocent' WHERE seq = 3", 3),
+            ("UPDATE audit SET args_digest = NULL WHERE seq = 1", 1),
+            (
+                "UPDATE audit SET detail = '{\"outcome\":\"error\"}' WHERE seq = 6",
+                6,
+            ),
+            ("UPDATE audit SET at_ms = at_ms + 1 WHERE seq = 2", 2),
+            ("UPDATE audit SET actor = 'cli' WHERE seq = 4", 4),
+            ("DELETE FROM audit WHERE seq = 2", 3),
+            ("DELETE FROM audit WHERE seq = 1", 2),
+            (
+                "INSERT INTO audit VALUES (7, 1, 'tool.call', 'x', 'y', NULL, '{}', 'forged', 'forged')",
+                7,
+            ),
+            (
+                "UPDATE audit SET hash = 'f' || substr(hash, 2) WHERE seq = 5",
+                5,
+            ),
+        ] {
+            let b = tamper(sql);
+            assert_eq!(b.seq, seq, "{sql}: {b}");
+        }
+        // rewriting a row and its hash still breaks the next link
+        let s = audit_store(4);
+        let mut row = s.audit_entries(1, 1).unwrap().remove(0);
+        row.event.subject = "fx__rewritten".into();
+        let forged = entry_hash(&row.prev_hash, row.seq, row.at_ms, &row.event);
+        s.with(|c| {
+            c.execute_batch("DROP TRIGGER audit_no_update;")?;
+            c.execute(
+                "UPDATE audit SET subject = ?1, hash = ?2 WHERE seq = 2",
+                params![row.event.subject, forged],
+            )
+        })
+        .unwrap();
+        let b = s.verify_audit().unwrap().unwrap_err();
+        assert_eq!(
+            (b.seq, b.reason.as_str()),
+            (3, "does not link to the previous entry")
+        );
     }
 
     #[test]

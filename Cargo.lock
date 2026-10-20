@@ -1533,6 +1533,7 @@ dependencies = [
  "mcpgw-vault",
  "reqwest",
  "rpassword",
+ "rusqlite",
  "secrecy",
  "serde",
  "serde_json",

@@ -8,6 +8,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 
+mod audit;
 mod auth;
 mod clients;
 mod control;
@@ -131,6 +132,9 @@ enum Cmd {
         /// Approval id.
         id: String,
     },
+    /// Inspect the hash-chained audit log.
+    #[command(subcommand)]
+    Audit(AuditCmd),
     /// Manage secrets in the vault.
     #[command(subcommand)]
     Secret(SecretCmd),
@@ -243,6 +247,24 @@ enum ClientCmd {
         /// them to the vault.
         #[arg(long)]
         keep_env: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuditCmd {
+    /// Check that no entry was changed, removed or reordered.
+    Verify,
+    /// Write entries as JSON lines (to stdout).
+    Export {
+        /// Only entries after this sequence number.
+        #[arg(long, default_value_t = 0)]
+        after: u64,
+    },
+    /// Show the latest entries.
+    Tail {
+        /// Number of entries.
+        #[arg(short = 'n', long, default_value_t = 20)]
+        lines: usize,
     },
 }
 
@@ -384,6 +406,9 @@ fn run(cli: Cli) -> AnyResult<()> {
             secrets::cmd::set(&config, &name, description)
         }
         Cmd::Secret(SecretCmd::Ls) => secrets::cmd::ls(&config),
+        Cmd::Audit(AuditCmd::Verify) => audit::verify(&config),
+        Cmd::Audit(AuditCmd::Export { after }) => audit::export(&config, after),
+        Cmd::Audit(AuditCmd::Tail { lines }) => audit::tail(&config, lines),
         Cmd::Auth(AuthCmd::Connect {
             provider,
             account,

@@ -34,6 +34,65 @@
         },
         "type": "object"
       },
+      "AuditEntry": {
+        "description": "One stored, chained entry.",
+        "properties": {
+          "actor": {
+            "description": "Who: an endpoint and client (`profile web / Cursor`), `cli`, `api`.",
+            "type": "string"
+          },
+          "args_digest": {
+            "description": "SHA-256 of the canonical JSON of the arguments, for tool calls.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "at_ms": {
+            "description": "Time, Unix milliseconds.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "detail": {
+            "default": null,
+            "description": "Small, non-secret details (outcome, duration, pin, …)."
+          },
+          "hash": {
+            "description": "This entry's hash.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "What happened: `tool.call`, `server.add`, `approval.decide`, …",
+            "type": "string"
+          },
+          "prev_hash": {
+            "description": "Hash of the previous entry (64 zeros for the first).",
+            "type": "string"
+          },
+          "seq": {
+            "description": "Position in the chain, from 1.",
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "subject": {
+            "description": "What it was done to: a tool, server, profile, secret name, approval id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "seq",
+          "at_ms",
+          "kind",
+          "actor",
+          "subject",
+          "prev_hash",
+          "hash"
+        ],
+        "title": "AuditEntry",
+        "type": "object"
+      },
       "Call": {
         "properties": {
           "at_ms": {
@@ -644,6 +703,149 @@
         "summary": "Refuse a waiting call",
         "tags": [
           "approvals"
+        ]
+      }
+    },
+    "/api/v1/audit": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 1000,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "entries": {
+                      "items": {
+                        "$ref": "#/components/schemas/AuditEntry"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Entries"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Audit log entries, oldest first",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/v1/audit/verify": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "broken_at": {
+                      "type": "integer"
+                    },
+                    "entries": {
+                      "type": "integer"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "reason": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Result"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Error"
+          }
+        },
+        "summary": "Verify the audit hash chain",
+        "tags": [
+          "audit"
         ]
       }
     },
