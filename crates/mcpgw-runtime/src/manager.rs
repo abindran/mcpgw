@@ -22,7 +22,7 @@ use mcpgw_core::{ManifestDiff, ServerSpec, ToolManifest, Transport};
 use mcpgw_proto::{BackendConn, HttpSpec, JsonObject, ProtoError, StderrSink, StdioSpec};
 use mcpgw_vault::Redactor;
 use secrecy::{ExposeSecret, SecretString};
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 use crate::{
     catalog::{Catalog, manifest_from},
@@ -135,7 +135,7 @@ struct Shared {
     /// The live manifest that differs from the pin, while quarantined.
     pending: std::sync::Mutex<Option<ToolManifest>>,
     status: std::sync::RwLock<BackendStatus>,
-    tools: RwLock<Vec<JsonObject>>,
+    tools: std::sync::RwLock<Vec<JsonObject>>,
     stderr: Arc<Mutex<VecDeque<String>>>,
     catalog: Arc<Catalog>,
 }
@@ -482,7 +482,7 @@ impl BackendManager {
                 last_start_ms: None,
                 prewarms: 0,
             }),
-            tools: RwLock::new(Vec::new()),
+            tools: std::sync::RwLock::new(Vec::new()),
             stderr: Arc::default(),
             catalog: self.catalog.clone(),
         });
@@ -661,7 +661,7 @@ impl BackendManager {
     /// The tools the running server reported on its last start.
     pub async fn live_tools(&self, server: &str) -> Vec<JsonObject> {
         match self.handle(server) {
-            Ok(h) => h.shared.tools.read().await.clone(),
+            Ok(h) => h.shared.tools.read().expect("tools lock").clone(),
             Err(_) => Vec::new(),
         }
     }
@@ -1509,8 +1509,9 @@ impl Actor {
                     }
                     return;
                 }
-                // Record the connection's facts before `Ready` is published,
-                // so a reader never sees Ready without them.
+                // Record the connection's facts (protocol, start time, its
+                // tools and manifest) before `Ready` is published, so a reader
+                // never sees Ready without them.
                 let started_ms = self
                     .start_began
                     .take()
@@ -1521,6 +1522,13 @@ impl Actor {
                         s.last_start_ms = started_ms;
                     }
                 });
+                let tool_count = tools.len();
+                if !self.shared.catalog.contains(&self.shared.catalog_key) {
+                    let m = manifest_from(&self.shared.catalog_key, pv.clone(), &tools);
+                    tracing::info!(server = %self.shared.name, pin = %m.sha256, tools = m.tools.len(), "captured manifest");
+                    self.shared.catalog.record(m);
+                }
+                *self.shared.tools.write().expect("tools lock") = tools;
                 if !self.apply(Event::StartOk) {
                     if let Some(c) = self.conn.take() {
                         self.closing(close(c));
@@ -1528,25 +1536,14 @@ impl Actor {
                     return;
                 }
                 if self.state == State::Ready {
-                    tracing::info!(server = %self.shared.name, protocol = ?pv, tools = tools.len(), "backend connected");
+                    tracing::info!(server = %self.shared.name, protocol = ?pv, tools = tool_count, "backend connected");
                     if self.ever_connected {
                         self.shared.update(|s| s.restarts += 1);
                     }
                     self.ever_connected = true;
                     self.failures = 0;
                     self.touch();
-                    if !self.shared.catalog.contains(&self.shared.catalog_key) {
-                        let m = manifest_from(&self.shared.catalog_key, pv.clone(), &tools);
-                        tracing::info!(server = %self.shared.name, pin = %m.sha256, tools = m.tools.len(), "captured manifest");
-                        self.shared.catalog.record(m);
-                    }
                     self.shared.update(|s| s.last_error = None);
-                    if let Ok(mut t) = self.shared.tools.try_write() {
-                        *t = tools;
-                    } else {
-                        let shared = self.shared.clone();
-                        tokio::spawn(async move { *shared.tools.write().await = tools });
-                    }
                     for w in std::mem::take(&mut self.waiters) {
                         match w {
                             Waiter::Call { tool, args, reply } => self.dispatch(tool, args, reply),
