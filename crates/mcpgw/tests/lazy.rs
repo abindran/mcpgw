@@ -131,7 +131,9 @@ async fn ten_installed_servers_run_no_processes_until_used() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn idle_server_stops_after_gateway_idle_timeout() {
-    let (d, log) = daemon("idle", "idle_timeout = \"500ms\"", 1);
+    // long enough that a slow `alive` check (Windows CI) can't miss the
+    // running server, short enough to keep the test quick
+    let (d, log) = daemon("idle", "idle_timeout = \"2s\"", 1);
     let token = std::fs::read_to_string(d.dir.join("token")).unwrap();
     let c = McpClient::http(&d.url, Some(token.trim())).await.unwrap();
     c.call_text("s0__add", json!({"a": 1, "b": 2}))
@@ -140,7 +142,7 @@ async fn idle_server_stops_after_gateway_idle_timeout() {
     let pid = *pids(&log).last().unwrap();
     assert!(alive(pid));
     let mut stopped = false;
-    for _ in 0..60 {
+    for _ in 0..150 {
         if !alive(pid) {
             stopped = true;
             break;

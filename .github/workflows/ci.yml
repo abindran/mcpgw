@@ -68,7 +68,8 @@ jobs:
   test:
     name: test (${{ matrix.name }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # the Intel macOS runner needs more than 15 minutes for the full suite
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
