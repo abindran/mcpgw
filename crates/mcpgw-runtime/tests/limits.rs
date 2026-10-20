@@ -73,7 +73,8 @@ async fn stdio_memory_cap_stops_the_server_not_the_gateway() {
     );
 
     // over it: the call fails and the server is reported out of memory
-    let r = call(&m, "hog", "alloc", json!({"mib": 400, "step_ms": 5})).await;
+    // (slowly enough for the 250 ms RSS watchdog to look, even under load)
+    let r = call(&m, "hog", "alloc", json!({"mib": 400, "step_ms": 20})).await;
     assert!(r.is_err(), "allocated past its cap: {r:?}");
     let reported = || {
         m.status_of("hog")

@@ -112,7 +112,8 @@ impl OpenApiTemplate {
             .keys()
             .find(|k| !api.security_schemes.contains_key(*k))
         {
-            let known: Vec<&str> = api.security_schemes.keys().map(String::as_str).collect();
+            let mut known: Vec<&str> = api.security_schemes.keys().map(String::as_str).collect();
+            known.sort_unstable();
             return Err(err(format!(
                 "auth: {} has no security scheme {unknown:?} (it has: {})",
                 self.spec,
