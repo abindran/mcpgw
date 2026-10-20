@@ -5,6 +5,11 @@
 //! connection; spawns, calls and health pings run in their own tasks and
 //! report back as internal events, so a slow server never blocks status or
 //! other calls. Concurrent calls to a cold server queue behind one spawn.
+//!
+//! M1-06: an actor stops its server after `idle_timeout` without activity,
+//! and before starting one it makes room under `max_running` by stopping
+//! the least recently used idle server. `stateful` servers are exempt from
+//! both.
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -44,6 +49,11 @@ pub struct ManagerOptions {
     /// Start every enabled server at once and restart it after a crash,
     /// instead of starting on first use (the default).
     pub eager: bool,
+    /// Stop a server after this long without activity (per-server
+    /// `idle_timeout` overrides it).
+    pub idle_timeout: Duration,
+    /// Most servers running at once.
+    pub max_running: usize,
 }
 
 impl Default for ManagerOptions {
@@ -57,6 +67,8 @@ impl Default for ManagerOptions {
             backoff_max: Duration::from_secs(30),
             max_failures: 5,
             eager: false,
+            idle_timeout: Duration::from_secs(600),
+            max_running: 16,
         }
     }
 }
@@ -86,8 +98,10 @@ pub struct BackendStatus {
     pub last_error: Option<String>,
     /// Process id while connected (stdio servers).
     pub pid: Option<u32>,
-    /// When a call last started.
+    /// Last start, call start or call end.
     pub last_used: Option<Instant>,
+    /// Never stopped for idleness or evicted.
+    pub stateful: bool,
 }
 
 struct Shared {
@@ -151,9 +165,52 @@ enum Internal {
     Recheck,
 }
 
+#[derive(Clone)]
 struct Handle {
     shared: Arc<Shared>,
     tx: mpsc::UnboundedSender<Cmd>,
+}
+
+/// What every actor knows about its peers, for `max_running` eviction.
+struct Registry {
+    peers: std::sync::OnceLock<Vec<Handle>>,
+    max_running: usize,
+}
+
+impl Registry {
+    /// Before `me` starts: if the cap is reached, stop the least recently
+    /// used idle, non-stateful peer. The cap is soft: when every running
+    /// server is busy or stateful, `me` starts anyway.
+    fn make_room(&self, me: &str) {
+        let Some(peers) = self.peers.get() else {
+            return;
+        };
+        let others: Vec<(BackendStatus, &Handle)> = peers
+            .iter()
+            .filter(|h| h.shared.name != me)
+            .map(|h| (h.shared.snapshot(), h))
+            .filter(|(s, _)| s.state.is_connected() || s.state == State::Starting)
+            .collect();
+        if others.len() < self.max_running {
+            return;
+        }
+        let victim = others
+            .iter()
+            .filter(|(s, _)| matches!(s.state, State::Ready | State::Idle) && !s.stateful)
+            .min_by_key(|(s, _)| s.last_used);
+        match victim {
+            Some((s, h)) => {
+                tracing::info!(server = %s.name, starting = me, max_running = self.max_running, "evicting least recently used idle server");
+                let (reply, _) = oneshot::channel();
+                let _ = h.tx.send(Cmd::Stop(reply));
+            }
+            None => tracing::warn!(
+                starting = me,
+                max_running = self.max_running,
+                "max_running reached and no idle server to stop; starting anyway"
+            ),
+        }
+    }
 }
 
 /// Owns all backend actors.
@@ -180,6 +237,10 @@ impl BackendManager {
     ) -> Self {
         let mut backends = BTreeMap::new();
         let mut tasks = Vec::new();
+        let registry = Arc::new(Registry {
+            peers: std::sync::OnceLock::new(),
+            max_running: opts.max_running.max(1),
+        });
         for cfg in servers {
             let (state, why) = match (&cfg.transport, cfg.enabled) {
                 (_, false) => (State::Disabled, Some("disabled".to_string())),
@@ -199,6 +260,7 @@ impl BackendManager {
                     last_error: why,
                     pid: None,
                     last_used: None,
+                    stateful: cfg.stateful,
                 }),
                 tools: RwLock::new(Vec::new()),
                 stderr: Arc::default(),
@@ -222,13 +284,22 @@ impl BackendManager {
                     .startup_timeout
                     .map(|d| d.get())
                     .unwrap_or(opts.connect_timeout);
+                let idle_timeout = cfg
+                    .idle_timeout
+                    .map(|d| d.get())
+                    .unwrap_or(opts.idle_timeout);
                 let actor = Actor::new(
                     shared.clone(),
                     spec,
                     opts.clone(),
-                    connect_timeout,
+                    Limits {
+                        connect_timeout,
+                        idle_timeout,
+                        stateful: cfg.stateful,
+                    },
                     state,
                     rx,
+                    registry.clone(),
                 );
                 tasks.push(tokio::spawn(actor.run()));
                 if opts.eager && cfg.enabled {
@@ -238,6 +309,7 @@ impl BackendManager {
             }
             backends.insert(cfg.name.clone(), Handle { shared, tx });
         }
+        let _ = registry.peers.set(backends.values().cloned().collect());
         Self {
             backends,
             opts,
@@ -407,11 +479,20 @@ impl BackendManager {
     }
 }
 
+/// Per-server limits resolved from the spec and the defaults.
+struct Limits {
+    connect_timeout: Duration,
+    idle_timeout: Duration,
+    stateful: bool,
+}
+
 struct Actor {
     shared: Arc<Shared>,
     spec: StdioSpec,
     opts: ManagerOptions,
-    connect_timeout: Duration,
+    limits: Limits,
+    registry: Arc<Registry>,
+    idle_at: Option<tokio::time::Instant>,
     sink: StderrSink,
     rx: mpsc::UnboundedReceiver<Cmd>,
     itx: mpsc::UnboundedSender<Internal>,
@@ -432,9 +513,10 @@ impl Actor {
         shared: Arc<Shared>,
         spec: StdioSpec,
         opts: ManagerOptions,
-        connect_timeout: Duration,
+        limits: Limits,
         state: State,
         rx: mpsc::UnboundedReceiver<Cmd>,
+        registry: Arc<Registry>,
     ) -> Self {
         let (itx, irx) = mpsc::unbounded_channel();
         let sink = shared.sink();
@@ -442,7 +524,9 @@ impl Actor {
             shared,
             spec,
             opts,
-            connect_timeout,
+            limits,
+            registry,
+            idle_at: None,
             sink,
             rx,
             itx,
@@ -470,6 +554,12 @@ impl Actor {
                     None => std::future::pending().await,
                 }
             };
+            let idle = async {
+                match self.idle_at {
+                    Some(at) => tokio::time::sleep_until(at).await,
+                    None => std::future::pending().await,
+                }
+            };
             tokio::select! {
                 cmd = self.rx.recv() => match cmd {
                     Some(c) => self.on_cmd(c),
@@ -478,7 +568,15 @@ impl Actor {
                 Some(ev) = self.irx.recv() => self.on_internal(ev),
                 _ = health.tick() => self.check_health(),
                 _ = retry => self.on_retry(),
+                _ = idle => {
+                    self.idle_at = None;
+                    if matches!(self.state, State::Ready | State::Idle) {
+                        tracing::info!(server = %self.shared.name, idle = ?self.limits.idle_timeout, "stopping idle server");
+                        self.apply(Event::Stop);
+                    }
+                }
             }
+            self.rearm_idle();
             // Calls that queued while the server drained start it again.
             if self.state == State::Cold && !self.waiters.is_empty() && self.exiting.is_none() {
                 self.apply(Event::Demand);
@@ -495,6 +593,21 @@ impl Actor {
         if let Some(r) = self.exiting.take() {
             let _ = r.send(());
         }
+    }
+
+    /// Keep the idle timer armed exactly while the server is connected and
+    /// unused (and not stateful).
+    fn rearm_idle(&mut self) {
+        let idle = matches!(self.state, State::Ready | State::Idle) && !self.limits.stateful;
+        if !idle {
+            self.idle_at = None;
+        } else if self.idle_at.is_none() {
+            self.idle_at = Some(tokio::time::Instant::now() + self.limits.idle_timeout);
+        }
+    }
+
+    fn touch(&self) {
+        self.shared.update(|s| s.last_used = Some(Instant::now()));
     }
 
     /// Apply an event; returns whether it was valid.
@@ -523,8 +636,9 @@ impl Actor {
         match action {
             Action::None => {}
             Action::Spawn => {
+                self.registry.make_room(&self.shared.name);
                 let spec = self.spec.clone();
-                let timeout = self.connect_timeout;
+                let timeout = self.limits.connect_timeout;
                 let sink = self.sink.clone();
                 let itx = self.itx.clone();
                 tokio::spawn(async move {
@@ -648,7 +762,7 @@ impl Actor {
             return;
         };
         self.apply(Event::CallStart);
-        self.shared.update(|s| s.last_used = Some(Instant::now()));
+        self.touch();
         let timeout = self.opts.call_timeout;
         let itx = self.itx.clone();
         tokio::spawn(async move {
@@ -693,6 +807,7 @@ impl Actor {
                     }
                     self.ever_connected = true;
                     self.failures = 0;
+                    self.touch();
                     if !self.shared.catalog.contains(&self.shared.name) {
                         let m = manifest_from(&self.shared.name, pv.clone(), &tools);
                         tracing::info!(server = %self.shared.name, pin = %m.sha256, tools = m.tools.len(), "captured manifest");
@@ -727,6 +842,7 @@ impl Actor {
             }
             Internal::CallDone { lost, failed } => {
                 self.apply(Event::CallEnd);
+                self.touch();
                 if lost {
                     self.lost("connection closed".into());
                 } else if failed {

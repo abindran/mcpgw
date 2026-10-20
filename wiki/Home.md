@@ -44,7 +44,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | [M1-03](M1-03-SQLite-Store.md) | SQLite store: servers, manifests, profiles, secrets metadata | ✅ |
 | [M1-04](M1-04-Stdio-Launcher.md) | stdio launcher: process groups / Job Objects, stderr capture | ✅ |
 | [M1-05](M1-05-Lifecycle-Supervisor.md) | Lifecycle supervisor state machine | ✅ |
-| M1-06 | Idle reaper and `max_running` cap | ⏳ |
+| [M1-06](M1-06-Idle-Reaper-and-Cap.md) | Idle reaper and `max_running` cap | ✅ |
 | [M1-07](M1-07-Manifest-Capture.md) | Manifest capture with SHA-256 pin | ✅ |
 | M1-08 | Drift check and quarantine | ⏳ |
 | M1-09 | Aggregating router, 64-char names with hash suffix | ⏳ |

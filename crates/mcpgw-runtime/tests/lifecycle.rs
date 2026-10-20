@@ -17,6 +17,7 @@ fn fast() -> ManagerOptions {
         backoff_max: Duration::from_millis(400),
         max_failures: 1000,
         eager: true,
+        ..ManagerOptions::default()
     }
 }
 
@@ -461,4 +462,138 @@ async fn catalog_lists_tools_without_spawning() {
     assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
     m.shutdown().await;
     let _ = std::fs::remove_file(&log);
+}
+
+fn seeded(names: &[&str]) -> std::sync::Arc<mcpgw_runtime::Catalog> {
+    let manifests = names
+        .iter()
+        .map(|n| {
+            let t = mcpgw_core::ToolDef::from_json(json!({"name": "add"})).unwrap();
+            mcpgw_core::ToolManifest::new(*n, None, 0, vec![t])
+        })
+        .collect();
+    std::sync::Arc::new(mcpgw_runtime::Catalog::new(manifests, None))
+}
+
+/// Ten enabled servers that nobody calls: their tools are listed, and not a
+/// single backend process runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn ten_unused_servers_run_nothing() {
+    let log = temp_file("ten-unused");
+    let log_s = log.to_string_lossy().into_owned();
+    let names: Vec<String> = (0..10).map(|i| format!("s{i}")).collect();
+    let specs: Vec<_> = names
+        .iter()
+        .map(|n| server(n, &[("FAKE_SPAWN_LOG", &log_s)]))
+        .collect();
+    let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+    let m = BackendManager::with_catalog(&specs, lazy(), seeded(&refs));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    for n in &names {
+        assert_eq!(m.tools(n).await.len(), 1, "{n}");
+        let st = m.status_of(n).unwrap();
+        assert_eq!((st.state, st.pid), (State::Cold, None), "{n}");
+    }
+    assert!(!log.exists(), "a backend was started");
+    m.shutdown().await;
+}
+
+fn idle_after(ms: u64) -> ManagerOptions {
+    ManagerOptions {
+        idle_timeout: Duration::from_millis(ms),
+        ..lazy()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn idle_server_stops_after_idle_timeout() {
+    let m = BackendManager::start(&[server("fx", &[])], idle_after(300));
+    let r = m
+        .call_tool("fx", "add", args(json!({"a": 1, "b": 1})))
+        .await
+        .unwrap();
+    assert_eq!(text_of(&r), "2");
+    let pid = m.status_of("fx").unwrap().pid.unwrap();
+    assert!(wait_for(&m, "fx", |s| *s == State::Cold).await);
+    assert!(gone(pid).await, "idle server {pid} still running");
+    // the next call starts it again
+    m.call_tool("fx", "add", args(json!({"a": 2, "b": 2})))
+        .await
+        .unwrap();
+    assert!(m.status_of("fx").unwrap().state.is_connected());
+    m.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn per_server_idle_timeout_and_stateful_servers() {
+    let mut quick = server("quick", &[]);
+    quick.idle_timeout = Some(mcpgw_core::Duration::from_millis(200));
+    let mut browser = server("browser", &[]);
+    browser.stateful = true;
+    browser.idle_timeout = Some(mcpgw_core::Duration::from_millis(200));
+    let m = BackendManager::start(&[quick, browser], idle_after(60_000));
+    m.ensure("quick").await.unwrap();
+    m.ensure("browser").await.unwrap();
+    assert!(wait_for(&m, "quick", |s| *s == State::Cold).await);
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert!(
+        state(&m, "browser").is_connected(),
+        "stateful server was stopped"
+    );
+    m.shutdown().await;
+}
+
+fn capped(n: usize) -> ManagerOptions {
+    ManagerOptions {
+        max_running: n,
+        ..lazy()
+    }
+}
+
+/// With `max_running = 2`, starting a third server stops the least
+/// recently used idle one.
+#[tokio::test(flavor = "multi_thread")]
+async fn max_running_evicts_least_recently_used_idle_server() {
+    let specs = [server("a", &[]), server("b", &[]), server("c", &[])];
+    let m = BackendManager::start(&specs, capped(2));
+    for n in ["a", "b"] {
+        m.call_tool(n, "add", args(json!({"a": 1, "b": 1})))
+            .await
+            .unwrap();
+        assert!(wait_for(&m, n, |s| *s == State::Idle).await);
+    }
+    m.call_tool("c", "add", args(json!({"a": 1, "b": 1})))
+        .await
+        .unwrap();
+    assert!(
+        wait_for(&m, "a", |s| *s == State::Cold).await,
+        "a should be evicted"
+    );
+    assert!(state(&m, "b").is_connected() && state(&m, "c").is_connected());
+
+    // a again: now b is the least recently used
+    m.call_tool("a", "add", args(json!({"a": 1, "b": 1})))
+        .await
+        .unwrap();
+    assert!(
+        wait_for(&m, "b", |s| *s == State::Cold).await,
+        "b should be evicted"
+    );
+    assert!(state(&m, "a").is_connected() && state(&m, "c").is_connected());
+    m.shutdown().await;
+}
+
+/// The cap is soft: when the only running server is stateful (or busy),
+/// nothing is evicted and the new server starts anyway.
+#[tokio::test(flavor = "multi_thread")]
+async fn stateful_servers_are_never_evicted() {
+    let mut keep = server("keep", &[]);
+    keep.stateful = true;
+    let m = BackendManager::start(&[keep, server("other", &[])], capped(1));
+    m.ensure("keep").await.unwrap();
+    m.ensure("other").await.unwrap();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(state(&m, "keep").is_connected());
+    assert!(state(&m, "other").is_connected());
+    m.shutdown().await;
 }

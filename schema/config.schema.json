@@ -29,10 +29,30 @@
           },
           "type": "array"
         },
+        "idle_timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Stop a server after this long without calls (per-server\n`idle_timeout` overrides it). Default: `\"10m\"`."
+        },
         "listen": {
           "description": "Address of the HTTP front door; must be a loopback address.\nDefault: `127.0.0.1:7777`.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "max_running": {
+          "description": "Most servers running at once; starting one more stops the least\nrecently used idle server. Default: 16.",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
             "null"
           ]
         },

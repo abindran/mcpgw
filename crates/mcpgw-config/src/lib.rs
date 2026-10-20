@@ -53,6 +53,14 @@ pub struct GatewayConfig {
     /// Default: `127.0.0.1:7777`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub listen: Option<std::net::SocketAddr>,
+    /// Stop a server after this long without calls (per-server
+    /// `idle_timeout` overrides it). Default: `"10m"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idle_timeout: Option<mcpgw_core::Duration>,
+    /// Most servers running at once; starting one more stops the least
+    /// recently used idle server. Default: 16.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_running: Option<usize>,
     /// Extra browser origins allowed to call the daemon, e.g.
     /// `"http://localhost:5173"`. The daemon's own origin is always allowed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -85,6 +93,18 @@ impl GatewayConfig {
         self.store_path
             .clone()
             .unwrap_or_else(|| data_dir().join("mcpgw.db"))
+    }
+
+    /// Effective idle timeout (configured or 10 minutes).
+    pub fn idle_timeout(&self) -> std::time::Duration {
+        self.idle_timeout
+            .map(|d| d.get())
+            .unwrap_or(std::time::Duration::from_secs(600))
+    }
+
+    /// Effective running-server cap (configured or 16).
+    pub fn max_running(&self) -> usize {
+        self.max_running.unwrap_or(16)
     }
 
     /// Effective listen address (configured or default).

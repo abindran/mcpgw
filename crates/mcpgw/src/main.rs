@@ -265,11 +265,12 @@ fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult<()>
     let servers = effective_servers(&config.servers, store.as_ref())?;
     let catalog = catalog(&store)?;
     runtime()?.block_on(async {
-        let mgr = Arc::new(BackendManager::with_catalog(
-            &servers,
-            ManagerOptions::default(),
-            catalog,
-        ));
+        let opts = ManagerOptions {
+            idle_timeout: config.gateway.idle_timeout(),
+            max_running: config.gateway.max_running(),
+            ..ManagerOptions::default()
+        };
+        let mgr = Arc::new(BackendManager::with_catalog(&servers, opts, catalog));
         // Servers start on first use; only those never seen are started now.
         capture_missing(&mgr, &servers, Duration::from_secs(30)).await;
         let res: AnyResult<()> = if stdio {

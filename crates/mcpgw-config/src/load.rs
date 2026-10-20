@@ -201,6 +201,14 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
             hint: Some("mcpgw only listens locally; use 127.0.0.1:<port> or [::1]:<port>".into()),
         });
     }
+    if cfg.gateway.max_running == Some(0) {
+        return Err(Issue {
+            server: None,
+            field: "max_running",
+            message: "gateway.max_running must be at least 1".into(),
+            hint: Some("remove it for the default of 16".into()),
+        });
+    }
     for o in &cfg.gateway.allowed_origins {
         if !(o.starts_with("http://") || o.starts_with("https://")) || o.ends_with('/') {
             return Err(Issue {
