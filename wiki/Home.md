@@ -61,7 +61,7 @@ M1 exit check: [M1-Exit](M1-Exit.md).
 | ID | Item | Status |
 |----|------|--------|
 | [M2-01](M2-01-OAuth-Broker.md) | OAuth broker (auth code + PKCE) | ✅ |
-| M2-02 | Token refresher | ⏳ |
+| [M2-02](M2-02-Token-Refresh.md) | Token refresher | ✅ |
 | M2-03 | Multi-account bindings | ⏳ |
 | M2-04 | Remote HTTP backends, legacy SSE bridge | ⏳ |
 | M2-05 | Upstream OAuth for remote MCP servers | ⏳ |

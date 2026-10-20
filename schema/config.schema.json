@@ -61,6 +61,17 @@
           "default": "meta",
           "description": "How tools are presented to clients: `meta` (default: only\n`search_tools`, `describe_tool`, `call_tool`), `direct` (every tool)\nor `hybrid` (meta-tools plus `pinned_tools`)."
         },
+        "oauth_refresh_interval": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How often the daemon checks for OAuth tokens to refresh.\nDefault: `\"60s\"`."
+        },
         "pinned_tools": {
           "description": "Public tool names always listed in `hybrid` mode.",
           "items": {

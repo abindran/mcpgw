@@ -127,12 +127,16 @@ pub fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult
             ..ManagerOptions::default()
         };
         let vault = vault(config);
+        let broker = broker(config, vault.clone());
+        let resolver = secrets::VaultResolver::shared(vault.clone())
+            .with_refresh(broker.clone(), tokio::runtime::Handle::current());
         let mgr = Arc::new(BackendManager::with_secrets(
             &servers,
             opts,
             catalog,
-            Some(Arc::new(secrets::VaultResolver::shared(vault.clone()))),
+            Some(Arc::new(resolver)),
         ));
+        let refresher = tokio::spawn(refresh_loop(broker.clone(), config.gateway.oauth_refresh_interval()));
         // Servers start on first use; only those never seen are started now.
         capture_missing(&mgr, &servers, Duration::from_secs(30)).await;
         let res: AnyResult<()> = if stdio {
@@ -142,11 +146,31 @@ pub fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult
                 _ = shutdown_signal() => Ok(()),
             }
         } else {
-            serve_http(config, token, mgr.clone(), broker(config, vault)).await
+            serve_http(config, token, mgr.clone(), broker).await
         };
+        refresher.abort();
         mgr.shutdown().await;
         res
     })
+}
+
+/// Refresh OAuth tokens shortly before they expire, so a server started
+/// later gets a valid one and connections show `needs login` when a
+/// refresh is refused.
+async fn refresh_loop(broker: Arc<mcpgw_auth::oauth::Broker>, every: Duration) {
+    loop {
+        tokio::time::sleep(every).await;
+        let b = broker.clone();
+        let due =
+            tokio::task::spawn_blocking(move || b.due_connections(mcpgw_auth::oauth::REFRESH_LEAD))
+                .await
+                .unwrap_or_default();
+        for (p, a) in due {
+            if let Err(e) = broker.refresh(&p, &a).await {
+                tracing::warn!(provider = %p, account = %a, error = %e, "background token refresh failed");
+            }
+        }
+    }
 }
 
 async fn serve_http(

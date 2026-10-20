@@ -134,10 +134,15 @@ struct Flow {
 /// Resolves a client secret name (vault) to its value.
 pub type SecretLookup = Arc<dyn Fn(&str) -> Option<String> + Send + Sync>;
 
+/// Refresh a token when it has less than this left.
+pub const REFRESH_LEAD: Duration = Duration::from_secs(300);
+
 /// Runs OAuth flows for the daemon.
 pub struct Broker {
     providers: Vec<OAuthProvider>,
     flows: Mutex<HashMap<String, Flow>>,
+    /// One lock per connection, so concurrent refreshes don't race.
+    refreshing: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     store: Arc<dyn TokenStore>,
     secrets: SecretLookup,
     http: reqwest::Client,
@@ -189,6 +194,7 @@ impl Broker {
         Self {
             providers,
             flows: Mutex::new(HashMap::new()),
+            refreshing: Mutex::new(HashMap::new()),
             store,
             secrets,
             http: reqwest::Client::builder()
@@ -339,6 +345,92 @@ impl Broker {
         status
     }
 
+    /// Whether `t` should be refreshed now (`lead` before expiry).
+    pub fn due(t: &TokenSet, lead: Duration) -> bool {
+        !t.needs_reauth
+            && t.refresh_token.is_some()
+            && t.expires_at.is_some_and(|at| at <= now() + lead.as_secs())
+    }
+
+    /// Connections that are due for a refresh.
+    pub fn due_connections(&self, lead: Duration) -> Vec<(String, String)> {
+        self.store
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(p, a)| {
+                self.store
+                    .load(p, a)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|t| Self::due(&t, lead))
+            })
+            .collect()
+    }
+
+    /// Refresh one connection with its refresh token. A rejected grant
+    /// (`invalid_grant`: revoked, or the refresh token expired) marks the
+    /// connection `needs_reauth` and returns the error.
+    pub async fn refresh(&self, provider: &str, account: &str) -> Result<TokenSet, TokenError> {
+        let key = mcpgw_core::oauth_secret_name(provider, account);
+        let lock = self
+            .refreshing
+            .lock()
+            .expect("refresh locks")
+            .entry(key)
+            .or_default()
+            .clone();
+        let _guard = lock.lock().await;
+        let current = self
+            .store
+            .load(provider, account)
+            .map_err(TokenError::Other)?
+            .ok_or_else(|| TokenError::Other(format!("{provider} ({account}) is not connected")))?;
+        if current.needs_reauth {
+            return Err(TokenError::InvalidGrant(format!(
+                "{provider} ({account}) needs a new login"
+            )));
+        }
+        // Someone else refreshed while we waited.
+        if !Self::due(&current, Duration::from_secs(30)) && current.expires_at.is_some() {
+            return Ok(current);
+        }
+        let Some(refresh_token) = current.refresh_token.clone() else {
+            return Err(TokenError::InvalidGrant(format!(
+                "{provider} ({account}) has no refresh token"
+            )));
+        };
+        let p = self
+            .provider(provider)
+            .ok_or_else(|| TokenError::Other(format!("no OAuth app named {provider:?}")))?
+            .clone();
+        let form = vec![
+            ("grant_type", "refresh_token".to_string()),
+            ("refresh_token", refresh_token.clone()),
+        ];
+        match self.token_request(&p, form).await {
+            Ok(mut t) => {
+                // Providers that don't rotate refresh tokens omit them.
+                if t.refresh_token.is_none() {
+                    t.refresh_token = Some(refresh_token);
+                }
+                self.store
+                    .save(provider, account, &t)
+                    .map_err(TokenError::Other)?;
+                tracing::info!(provider, account, expires_at = ?t.expires_at, "refreshed OAuth token");
+                Ok(t)
+            }
+            Err(TokenError::InvalidGrant(m)) => {
+                let mut dead = current;
+                dead.needs_reauth = true;
+                let _ = self.store.save(provider, account, &dead);
+                tracing::warn!(provider, account, error = %m, "refresh rejected; a new login is needed");
+                Err(TokenError::InvalidGrant(m))
+            }
+            Err(e) => Err(e),
+        }
+    }
+
     /// POST to the token endpoint (authorization code or refresh).
     pub async fn token_request(
         &self,
@@ -409,6 +501,30 @@ mod tests {
             URL_SAFE_NO_PAD.encode(Sha256::digest(p.verifier.as_bytes()))
         );
         assert_ne!(Pkce::new().verifier, p.verifier);
+    }
+
+    #[test]
+    fn refresh_is_due_only_near_expiry_with_a_refresh_token() {
+        let t = |expires_in: Option<u64>, rt: bool, dead: bool| TokenSet {
+            access_token: "a".into(),
+            refresh_token: rt.then(|| "r".into()),
+            expires_at: expires_in.map(|s| now() + s),
+            scope: None,
+            token_type: "bearer".into(),
+            needs_reauth: dead,
+        };
+        let lead = Duration::from_secs(300);
+        assert!(Broker::due(&t(Some(60), true, false), lead));
+        assert!(!Broker::due(&t(Some(3600), true, false), lead));
+        assert!(
+            !Broker::due(&t(Some(60), false, false), lead),
+            "nothing to refresh with"
+        );
+        assert!(!Broker::due(&t(None, true, false), lead), "no expiry");
+        assert!(
+            !Broker::due(&t(Some(60), true, true), lead),
+            "needs a new login"
+        );
     }
 
     #[test]

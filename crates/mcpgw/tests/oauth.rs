@@ -182,3 +182,115 @@ async fn refused_and_forged_logins_fail_clearly() {
     assert!(!ok && err.contains("no OAuth app named \"nope\""), "{err}");
     assert!(e.ok(&["auth", "ls"]).contains("no connected accounts"));
 }
+
+fn daemon_url(e: &Env) -> String {
+    let info: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(e.dir.join("daemon.json")).unwrap()).unwrap();
+    info["url"].as_str().unwrap().to_string()
+}
+
+async fn wait_until(mut f: impl FnMut() -> bool) -> bool {
+    for _ in 0..100 {
+        if f() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    false
+}
+
+/// M2-02: a token that is about to expire is refreshed in the background and
+/// before a server gets it; a revoked grant shows `needs login` and the
+/// server's next start says how to fix it.
+#[tokio::test(flavor = "multi_thread")]
+async fn tokens_refresh_and_revocation_needs_a_new_login() {
+    let idp = FakeOAuth::start(1).await; // every token is due at once
+    let e = Env::new(
+        "refresh",
+        &format!(
+            "oauth_refresh_interval = \"200ms\"\n\n{}",
+            idp.config("fake")
+        ),
+    );
+    e.ok(&["up"]);
+    let (ok, out, _, _) = e
+        .connect(&["auth", "connect", "fake", "--no-browser"])
+        .await;
+    assert!(ok, "{out}");
+
+    // background refresh
+    assert!(
+        wait_until(|| idp.refresh_requests() >= 2).await,
+        "no background refresh"
+    );
+    let ls = e.ok(&["auth", "ls"]);
+    assert!(
+        ls.contains("fake\tdefault\texpires ") && !ls.contains("needs login"),
+        "{ls}"
+    );
+
+    // a server bound to the connection gets a current token, redacted
+    let fake = mcpgw_testkit::fake_mcp().to_string_lossy().into_owned();
+    e.ok(&[
+        "add",
+        "fx",
+        "--command",
+        &fake,
+        "--secret",
+        "GITHUB_TOKEN=oauth/fake@default",
+    ]);
+    let token = e.ok(&["token"]);
+    let c = mcpgw_testkit::McpClient::http(&daemon_url(&e), Some(token.trim()))
+        .await
+        .unwrap();
+    let r = c
+        .call_text("fx__env", serde_json::json!({"name": "GITHUB_TOKEN"}))
+        .await
+        .unwrap();
+    assert_eq!(r, "[REDACTED:oauth/fake@default]");
+
+    // the provider revokes the grant: the next refresh fails for good
+    idp.revoke_all();
+    assert!(
+        wait_until(|| e.ok(&["auth", "ls"]).contains("needs login")).await,
+        "revocation not noticed"
+    );
+    let settled = idp.refresh_requests();
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    assert_eq!(
+        idp.refresh_requests(),
+        settled,
+        "kept refreshing a dead grant"
+    );
+
+    // the running server keeps working; a fresh start needs the new login
+    e.ok(&["restart", "fx"]);
+    let err = c
+        .call("fx__env", serde_json::json!({"name": "GITHUB_TOKEN"}))
+        .await
+        .unwrap_err();
+    assert!(
+        err.contains("mcpgw auth connect fake --account default"),
+        "{err}"
+    );
+    c.close().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn long_lived_tokens_are_not_refreshed_early() {
+    let idp = FakeOAuth::start(3600).await;
+    let e = Env::new(
+        "noearly",
+        &format!(
+            "oauth_refresh_interval = \"200ms\"\n\n{}",
+            idp.config("fake")
+        ),
+    );
+    e.ok(&["up"]);
+    let (ok, _, _, _) = e
+        .connect(&["auth", "connect", "fake", "--no-browser"])
+        .await;
+    assert!(ok);
+    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    assert_eq!(idp.refresh_requests(), 0);
+}

@@ -68,6 +68,10 @@ pub struct GatewayConfig {
     /// Public tool names always listed in `hybrid` mode.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_tools: Vec<String>,
+    /// How often the daemon checks for OAuth tokens to refresh.
+    /// Default: `"60s"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_refresh_interval: Option<mcpgw_core::Duration>,
     /// Stop a server after this long without calls (per-server
     /// `idle_timeout` overrides it). Default: `"10m"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -122,6 +126,13 @@ impl GatewayConfig {
         self.idle_timeout
             .map(|d| d.get())
             .unwrap_or(std::time::Duration::from_secs(600))
+    }
+
+    /// Effective OAuth refresh check interval (configured or 60 s).
+    pub fn oauth_refresh_interval(&self) -> std::time::Duration {
+        self.oauth_refresh_interval
+            .map(|d| d.get())
+            .unwrap_or(std::time::Duration::from_secs(60))
     }
 
     /// Effective running-server cap (configured or 16).

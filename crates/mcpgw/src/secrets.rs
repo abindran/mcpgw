@@ -68,12 +68,29 @@ impl SharedVault {
 /// resolve to that connection's current access token.
 pub struct VaultResolver {
     vault: Arc<SharedVault>,
+    /// Refreshes a due OAuth token before it is injected (daemon only).
+    refresher: Option<(Arc<mcpgw_auth::oauth::Broker>, tokio::runtime::Handle)>,
 }
 
 impl VaultResolver {
     /// A resolver over an existing shared vault.
     pub fn shared(vault: Arc<SharedVault>) -> Self {
-        Self { vault }
+        Self {
+            vault,
+            refresher: None,
+        }
+    }
+
+    /// Refresh OAuth tokens that are about to expire through `broker`.
+    /// `resolve` must then run off the async threads (it does: the runtime
+    /// calls it from `spawn_blocking`).
+    pub fn with_refresh(
+        mut self,
+        broker: Arc<mcpgw_auth::oauth::Broker>,
+        rt: tokio::runtime::Handle,
+    ) -> Self {
+        self.refresher = Some((broker, rt));
+        self
     }
 }
 
@@ -89,15 +106,47 @@ impl SecretResolver for VaultResolver {
         let Some(v) = value else { return Ok(None) };
         let t: TokenSet = serde_json::from_str(v.expose_secret())
             .map_err(|e| format!("stored OAuth tokens for {name} are unreadable: {e}"))?;
-        if t.needs_reauth {
-            return Err(format!(
+        let relogin = || {
+            format!(
                 "the {name} login has expired; run `mcpgw auth connect {}`",
                 name.trim_start_matches("oauth/")
                     .replace('@', " --account ")
-            ));
+            )
+        };
+        if t.needs_reauth {
+            return Err(relogin());
+        }
+        use mcpgw_auth::oauth::{Broker, TokenError};
+        if let Some((broker, rt)) = &self.refresher
+            && Broker::due(&t, std::time::Duration::from_secs(60))
+        {
+            let (provider, account) = name
+                .trim_start_matches("oauth/")
+                .split_once('@')
+                .ok_or_else(|| format!("bad OAuth secret name {name}"))?;
+            match rt.block_on(broker.refresh(provider, account)) {
+                Ok(fresh) => return Ok(Some(SecretString::from(fresh.access_token))),
+                Err(TokenError::InvalidGrant(_)) => return Err(relogin()),
+                Err(TokenError::Other(e)) => {
+                    let expired = t.expires_at.is_some_and(|at| at <= now_secs());
+                    if expired {
+                        return Err(format!(
+                            "the {name} token expired and refreshing it failed: {e}"
+                        ));
+                    }
+                    tracing::warn!(secret = name, error = %e, "token refresh failed; using the current token");
+                }
+            }
         }
         Ok(Some(SecretString::from(t.access_token)))
     }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 /// OAuth tokens kept in the vault as `oauth/<provider>@<account>`.
