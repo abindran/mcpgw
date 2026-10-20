@@ -144,6 +144,9 @@ enum Cmd {
     /// Search the MCP Registry (gateway.registry_url).
     #[command(subcommand)]
     Registry(RegistryCmd),
+    /// The package cache for npm and PyPI servers.
+    #[command(subcommand)]
+    Runtimes(RuntimesCmd),
     /// Manage secrets in the vault.
     #[command(subcommand)]
     Secret(SecretCmd),
@@ -239,6 +242,10 @@ struct AddArgs {
     /// captured on its first start instead.
     #[arg(long)]
     no_introspect: bool,
+    /// Don't install an npx/uvx server's package into the cache; it then
+    /// starts through npx/uvx each time.
+    #[arg(long)]
+    no_cache: bool,
     /// Registry installs: the server name to use (default: the entry's
     /// last path segment).
     #[arg(long = "as", value_name = "NAME", conflicts_with_all = ["command", "url", "image"])]
@@ -255,6 +262,18 @@ struct AddArgs {
     /// Arguments for the command or the image's entrypoint (after `--`).
     #[arg(last = true)]
     args: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum RuntimesCmd {
+    /// Install (again) the packages of npx/uvx servers, so they start
+    /// without npx/uvx and without the network.
+    Install {
+        /// Only this server.
+        server: Option<String>,
+    },
+    /// List cached packages.
+    Ls,
 }
 
 #[derive(Subcommand)]
@@ -406,6 +425,7 @@ fn run(cli: Cli) -> AnyResult<()> {
     let explicit_config = cli.config.clone();
     let path = cli.config.unwrap_or_else(Config::default_path);
     let config = Config::load_or_default(&path)?;
+    mcpgw_runtime::packages::set_dir(config.gateway.runtimes_path());
     match cli.cmd {
         Cmd::Serve { stdio, profile } => serve::serve(
             &config,
@@ -454,6 +474,10 @@ fn run(cli: Cli) -> AnyResult<()> {
             registry::search(&config, &query.join(" "), limit)
         }
         Cmd::Registry(RegistryCmd::Show { name }) => registry::show(&config, &name),
+        Cmd::Runtimes(RuntimesCmd::Install { server }) => {
+            servers::runtimes_install(&config, server.as_deref())
+        }
+        Cmd::Runtimes(RuntimesCmd::Ls) => servers::runtimes_ls(&config),
         Cmd::Add(a) => {
             let transport = match (a.command, a.url) {
                 (None, None) => Transport::Container {
@@ -496,7 +520,16 @@ fn run(cli: Cli) -> AnyResult<()> {
                 cpus: a.cpus,
                 pids: a.pids,
             };
-            servers::add(&config, &path, spec, !a.no_introspect)
+            servers::add(
+                &config,
+                &path,
+                spec,
+                servers::AddOpts {
+                    introspect: !a.no_introspect,
+                    install: !a.no_cache,
+                    ..Default::default()
+                },
+            )
         }
         Cmd::Remove { name } => servers::remove(&config, &path, &name),
         Cmd::Enable { name } => servers::set_enabled(&config, &path, &name, true),

@@ -896,14 +896,19 @@ impl Launch {
                 args,
                 env,
                 cwd,
-            } => Template::Stdio(StdioSpec {
-                command: command.clone(),
-                args: args.clone(),
-                env: env.clone(),
-                cwd: cwd.clone(),
-                cleanup: Vec::new(),
-                teardown: Vec::new(),
-                memory_limit: cfg.limits.memory.map(|m| m.get()),
+            } => Template::Stdio({
+                // an npx/uvx package in the cache starts directly (M3-08)
+                let (command, args) = crate::packages::cached_launch(command, args)
+                    .unwrap_or_else(|| (command.clone(), args.clone()));
+                StdioSpec {
+                    command,
+                    args,
+                    env: env.clone(),
+                    cwd: cwd.clone(),
+                    cleanup: Vec::new(),
+                    teardown: Vec::new(),
+                    memory_limit: cfg.limits.memory.map(|m| m.get()),
+                }
             }),
             Transport::Container {
                 image,

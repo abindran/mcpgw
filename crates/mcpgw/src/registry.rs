@@ -179,8 +179,11 @@ pub fn add(config: &Config, path: &Path, i: Install) -> AnyResult<()> {
         config,
         path,
         spec,
-        !i.no_introspect,
-        Duration::from_secs(300),
+        servers::AddOpts {
+            introspect: !i.no_introspect,
+            install: true,
+            timeout: Duration::from_secs(300),
+        },
         Some(&review),
     )?;
     Ok(())

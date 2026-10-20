@@ -135,6 +135,13 @@
             "null"
           ]
         },
+        "runtimes_path": {
+          "description": "Package cache for npm and PyPI servers (M3-08). Default: `runtimes`\nnext to the store.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "store_path": {
           "default": null,
           "description": "Path to the SQLite store. Default: `<data dir>/mcpgw/mcpgw.db`.",

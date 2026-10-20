@@ -110,6 +110,10 @@ pub struct GatewayConfig {
     /// Default: `true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prewarm: Option<bool>,
+    /// Package cache for npm and PyPI servers (M3-08). Default: `runtimes`
+    /// next to the store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtimes_path: Option<PathBuf>,
     /// MCP Registry used by `mcpgw add <name>` and `mcpgw registry search`.
     /// Default: `https://registry.modelcontextprotocol.io`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -142,6 +146,13 @@ impl GatewayConfig {
         self.store_path
             .clone()
             .unwrap_or_else(|| data_dir().join("mcpgw.db"))
+    }
+
+    /// Effective package cache (configured or next to the store).
+    pub fn runtimes_path(&self) -> PathBuf {
+        self.runtimes_path
+            .clone()
+            .unwrap_or_else(|| self.store_path().with_file_name("runtimes"))
     }
 
     /// Effective vault path (configured or next to the store).

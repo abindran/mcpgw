@@ -88,7 +88,7 @@ M2 exit check: [M2-Exit](M2-Exit.md).
 | [M3-05](M3-05-Stdio-Limits.md) | Resource limits for stdio servers | ✅ |
 | [M3-06](M3-06-Warm-Pools.md) | Warm pools | ✅ |
 | [M3-07](M3-07-Predictive-Prewarm.md) | Predictive prewarm | ✅ |
-| M3-08 | Package pre-install cache | ⏳ |
+| [M3-08](M3-08-Package-Cache.md) | Package pre-install cache | ✅ |
 | M3-09 | BM25 tool search | ⏳ |
 | M3-10 | Tool description scanner | ⏳ |
 | M3-11 | OpenTelemetry OTLP export | ⏳ |

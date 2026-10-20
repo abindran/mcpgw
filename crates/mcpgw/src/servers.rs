@@ -18,18 +18,63 @@ fn in_config(config: &Config, name: &str) -> bool {
     config.servers.iter().any(|s| s.name == name)
 }
 
+/// How `mcpgw add` treats a new server.
+#[derive(Debug, Clone, Copy)]
+pub struct AddOpts {
+    /// Start it now to read and pin its tools.
+    pub introspect: bool,
+    /// Install its npm/PyPI package into the cache first (M3-08).
+    pub install: bool,
+    /// How long reading the tools may take.
+    pub timeout: Duration,
+}
+
+impl Default for AddOpts {
+    fn default() -> Self {
+        Self {
+            introspect: true,
+            install: true,
+            timeout: Duration::from_secs(60),
+        }
+    }
+}
+
 /// `mcpgw add`: register (or update) a server, pin its tools, and tell a
 /// running daemon.
-pub fn add(config: &Config, path: &Path, spec: ServerSpec, introspect: bool) -> AnyResult<()> {
-    add_reviewed(
-        config,
-        path,
-        spec,
-        introspect,
-        Duration::from_secs(60),
-        None,
-    )
-    .map(|_| ())
+pub fn add(config: &Config, path: &Path, spec: ServerSpec, opts: AddOpts) -> AnyResult<()> {
+    add_reviewed(config, path, spec, opts, None).map(|_| ())
+}
+
+/// Install a stdio server's npx/uvx package into the cache (M3-08), unless
+/// it's there. Failures are reported; the server then runs through npx.
+pub fn install_package(config: &Config, spec: &ServerSpec, force: bool) -> AnyResult<bool> {
+    let Transport::Stdio { command, args, .. } = &spec.transport else {
+        return Ok(false);
+    };
+    let Some(p) = mcpgw_runtime::packages::detect(command, args) else {
+        return Ok(false);
+    };
+    let cache = config.gateway.runtimes_path();
+    if !force && mcpgw_runtime::packages::installed(&cache, &p).is_some() {
+        return Ok(true);
+    }
+    eprintln!("installing {} into the package cache", p.spec);
+    match serve::runtime()?.block_on(mcpgw_runtime::packages::install(&cache, &p)) {
+        Ok(i) => {
+            println!(
+                "installed {}@{} for {} (starts without {command})",
+                i.name, i.version, spec.name
+            );
+            Ok(true)
+        }
+        Err(e) => {
+            eprintln!(
+                "mcpgw: could not cache {}: {e}; {} starts through {command}",
+                p.spec, spec.name
+            );
+            Ok(false)
+        }
+    }
 }
 
 /// Shown the tools read from a new server (`None`: they couldn't be read
@@ -42,10 +87,14 @@ pub fn add_reviewed(
     config: &Config,
     path: &Path,
     mut spec: ServerSpec,
-    introspect: bool,
-    timeout: Duration,
+    opts: AddOpts,
     review: Option<Review>,
 ) -> AnyResult<bool> {
+    let AddOpts {
+        introspect,
+        install,
+        timeout,
+    } = opts;
     let name = spec.name.clone();
     if in_config(config, &name) {
         return Err(format!(
@@ -68,6 +117,9 @@ pub fn add_reviewed(
     }
     spec.validate()?;
     pin_digest(&mut spec);
+    if install {
+        install_package(config, &spec, false)?;
+    }
     let existed = s.server(&name)?.is_some();
     let verb = if existed { "updated" } else { "added" };
     let mut manifest = None;
@@ -237,13 +289,24 @@ pub fn list(config: &Config, check: bool) -> AnyResult<()> {
             "store"
         };
         let enabled = if s.enabled { "" } else { " [disabled]" };
+        let cached = match &s.transport {
+            Transport::Stdio { command, args, .. } => {
+                mcpgw_runtime::packages::detect(command, args)
+                    .and_then(|p| {
+                        mcpgw_runtime::packages::installed(&config.gateway.runtimes_path(), &p)
+                    })
+                    .map(|(_, i)| format!(" [cached {}@{}]", i.name, i.version))
+                    .unwrap_or_default()
+            }
+            _ => String::new(),
+        };
         let from = s
             .registry
             .as_ref()
             .map(|r| format!(" [{}@{}]", r.name, r.version))
             .unwrap_or_default();
         print!(
-            "{}\t{}\t{source}\t{}{enabled}{from}",
+            "{}\t{}\t{source}\t{}{enabled}{from}{cached}",
             s.name,
             s.transport.kind(),
             describe(s)
@@ -370,6 +433,55 @@ pub fn stats(config: &Config) -> AnyResult<()> {
             let server = list.iter().find(|(_, n)| n == ctr).map_or("?", |(s, _)| s);
             println!("{server}\t{line}");
         }
+    }
+    Ok(())
+}
+
+/// `mcpgw runtimes install [server]`: (re)install packages into the cache.
+pub fn runtimes_install(config: &Config, only: Option<&str>) -> AnyResult<()> {
+    let servers = effective_servers(&config.servers, &store(config)?)?;
+    let mut any = false;
+    for s in servers.iter().filter(|s| only.is_none_or(|n| n == s.name)) {
+        let Transport::Stdio { command, args, .. } = &s.transport else {
+            continue;
+        };
+        if mcpgw_runtime::packages::detect(command, args).is_some() {
+            any = true;
+            install_package(config, s, true)?;
+        }
+    }
+    if let Some(n) = only
+        && !servers.iter().any(|s| s.name == n)
+    {
+        return Err(format!("no such server: {n}").into());
+    }
+    if !any {
+        println!("no npx or uvx servers to install");
+    } else if Control::connect(config)?.is_some() {
+        println!("restart the daemon (`mcpgw down && mcpgw up`) to start them from the cache");
+    }
+    Ok(())
+}
+
+/// `mcpgw runtimes ls`: what's in the package cache.
+pub fn runtimes_ls(config: &Config) -> AnyResult<()> {
+    let cache = config.gateway.runtimes_path();
+    let list = mcpgw_runtime::packages::list(&cache);
+    if list.is_empty() {
+        println!("the package cache ({}) is empty", cache.display());
+    }
+    for (slot, i) in list {
+        let kind = serde_json::to_value(i.kind)?
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        println!(
+            "{kind}\t{}@{}\t{}\t{}",
+            i.name,
+            i.version,
+            i.spec,
+            slot.display()
+        );
     }
     Ok(())
 }
