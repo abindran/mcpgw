@@ -202,6 +202,14 @@ struct AddArgs {
     /// For --openapi: where requests go (default: the spec's server URL).
     #[arg(long, value_name = "URL", requires = "openapi")]
     base_url: Option<String>,
+    /// For --openapi: bind a vault secret to one of the spec's security
+    /// schemes, SCHEME=SECRET (repeatable): `--auth api_key=petstore_key`,
+    /// `--auth oauth=oauth/github@{account}`.
+    #[arg(long, value_parser = parse_kv, value_name = "SCHEME=SECRET", requires = "openapi")]
+    auth: Vec<(String, String)>,
+    /// For --openapi: the user name for an HTTP basic scheme, SCHEME=USER.
+    #[arg(long, value_parser = parse_kv, value_name = "SCHEME=USER", requires = "openapi")]
+    auth_username: Vec<(String, String)>,
     /// Let a Wasm server connect to HOST:PORT (repeatable; `*` for any).
     /// Default: no network.
     #[arg(long, value_name = "HOST:PORT", requires = "wasm")]
@@ -566,10 +574,33 @@ fn run(cli: Cli) -> AnyResult<()> {
                             .to_string_lossy()
                             .into_owned()
                     };
+                    let mut auth: BTreeMap<String, mcpgw_core::AuthBinding> = a
+                        .auth
+                        .iter()
+                        .map(|(scheme, secret)| {
+                            let b = mcpgw_core::AuthBinding {
+                                secret: secret.clone(),
+                                username: None,
+                            };
+                            (scheme.clone(), b)
+                        })
+                        .collect();
+                    for (scheme, user) in &a.auth_username {
+                        match auth.get_mut(scheme) {
+                            Some(b) => b.username = Some(user.clone()),
+                            None => {
+                                return Err(format!(
+                                    "--auth-username {scheme}=... needs --auth {scheme}=<secret>"
+                                )
+                                .into());
+                            }
+                        }
+                    }
                     Transport::OpenApi {
                         spec,
                         base_url: a.base_url.clone(),
                         headers: a.headers.iter().cloned().collect(),
+                        auth,
                     }
                 }
                 (None, None) if a.wasm.is_some() => {

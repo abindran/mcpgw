@@ -8,6 +8,13 @@
 //! `example`). A call checks the arguments against that schema, builds the
 //! request, and returns the response body (pretty JSON or text); HTTP
 //! errors (4xx, 5xx) come back as tool errors with their status.
+//!
+//! Credentials (M4-06) bind to the spec's security schemes by name and are
+//! applied where each scheme says: `apiKey` in a header, query parameter or
+//! cookie; HTTP `bearer` and `basic`; `oauth2` and `openIdConnect` as a
+//! bearer token. An operation's security requirements (alternatives of
+//! scheme sets) pick the first alternative whose schemes all have
+//! credentials.
 
 use std::collections::BTreeMap;
 
@@ -70,9 +77,36 @@ pub struct Operation {
     pub body: Option<(BodyKind, String, bool)>,
     /// The tool's input schema.
     pub input_schema: Value,
-    /// Security requirements (scheme names), for M4-06.
-    pub security: Vec<String>,
+    /// Security requirements: alternatives, each a set of scheme names
+    /// (all needed). Empty means no security.
+    pub security: Vec<Vec<String>>,
 }
+
+/// A credential for one security scheme.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Credential {
+    /// An API key, bearer token or OAuth access token.
+    Secret(String),
+    /// HTTP basic.
+    Basic {
+        /// User name.
+        username: String,
+        /// Password.
+        password: String,
+    },
+}
+
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Credential::Secret(_) => f.write_str("Secret(***)"),
+            Credential::Basic { username, .. } => write!(f, "Basic({username}, ***)"),
+        }
+    }
+}
+
+/// Credentials by scheme name.
+pub type Credentials = BTreeMap<String, Credential>;
 
 /// An API: its operations and where to send them.
 #[derive(Debug, Clone)]
@@ -350,7 +384,7 @@ pub fn api(spec: &Value, base: Option<&str>, spec_url: Option<&str>) -> Result<A
                 .into_iter()
                 .flatten()
                 .filter_map(|req| req.as_object())
-                .flat_map(|o| o.keys().cloned())
+                .map(|o| o.keys().cloned().collect())
                 .collect();
             ops.push(Operation {
                 tool,
@@ -389,8 +423,65 @@ impl Api {
             .collect()
     }
 
+    /// Where each scheme of the alternative this operation can satisfy puts
+    /// its credential, or the schemes it would need.
+    fn auth_for(&self, op: &Operation, creds: &Credentials) -> Result<RequestExtras, Vec<String>> {
+        use base64::Engine;
+        if op.security.is_empty() || op.security.iter().any(|alt| alt.is_empty()) {
+            return Ok(RequestExtras::default());
+        }
+        let Some(alt) = op
+            .security
+            .iter()
+            .find(|alt| alt.iter().all(|s| creds.contains_key(s)))
+        else {
+            return Err(op.security.first().cloned().unwrap_or_default());
+        };
+        let b64 = |s: String| base64::engine::general_purpose::STANDARD.encode(s);
+        let mut x = RequestExtras::default();
+        for scheme in alt {
+            let def = self
+                .security_schemes
+                .get(scheme)
+                .cloned()
+                .unwrap_or(Value::Null);
+            let cred = &creds[scheme];
+            let token = match cred {
+                Credential::Secret(t) => t.clone(),
+                Credential::Basic { password, .. } => password.clone(),
+            };
+            let http_scheme = def["scheme"]
+                .as_str()
+                .unwrap_or("bearer")
+                .to_ascii_lowercase();
+            match (def["type"].as_str().unwrap_or_default(), cred) {
+                ("apiKey", _) => {
+                    let name = def["name"].as_str().unwrap_or(scheme).to_string();
+                    match def["in"].as_str().unwrap_or("header") {
+                        "query" => x.query.push((name, token)),
+                        "cookie" => x.cookies.push(format!("{name}={token}")),
+                        _ => x.headers.push((name, token)),
+                    }
+                }
+                ("http", Credential::Basic { username, password }) => x.headers.push((
+                    "authorization".into(),
+                    format!("Basic {}", b64(format!("{username}:{password}"))),
+                )),
+                // an http basic scheme bound to one secret holding user:password
+                ("http", Credential::Secret(t)) if http_scheme == "basic" => x
+                    .headers
+                    .push(("authorization".into(), format!("Basic {}", b64(t.clone())))),
+                // http bearer, oauth2, openIdConnect
+                _ => x
+                    .headers
+                    .push(("authorization".into(), format!("Bearer {token}"))),
+            }
+        }
+        Ok(x)
+    }
+
     /// Run tool `name`: validate the arguments, send the request, return a
-    /// `CallToolResult`. `extra_headers` (credentials, M4-06) are added.
+    /// `CallToolResult`. `extra` headers and query parameters are added.
     pub async fn call(
         &self,
         http: &reqwest::Client,
@@ -398,11 +489,28 @@ impl Api {
         args: &JsonObject,
         extra: &RequestExtras,
     ) -> Result<JsonObject, String> {
+        self.call_with(http, name, args, extra, &Credentials::new())
+            .await
+    }
+
+    /// [`call`](Self::call) with credentials for the spec's security schemes.
+    pub async fn call_with(
+        &self,
+        http: &reqwest::Client,
+        name: &str,
+        args: &JsonObject,
+        extra: &RequestExtras,
+        creds: &Credentials,
+    ) -> Result<JsonObject, String> {
         let op = self
             .ops
             .iter()
             .find(|o| o.tool == name)
             .ok_or_else(|| format!("unknown tool: {name}"))?;
+        let (auth, missing) = match self.auth_for(op, creds) {
+            Ok(a) => (a, Vec::new()),
+            Err(m) => (RequestExtras::default(), m),
+        };
         let given = Value::Object(args.clone());
         let validator = jsonschema::validator_for(&op.input_schema)
             .map_err(|e| format!("bad input schema: {e}"))?;
@@ -422,9 +530,11 @@ impl Api {
             other => other.to_string(),
         };
         let mut path = op.path.clone();
-        let mut query: Vec<(String, String)> = extra.query.clone();
-        let mut headers: Vec<(String, String)> = extra.headers.clone();
-        let mut cookies: Vec<String> = Vec::new();
+        let mut query: Vec<(String, String)> =
+            extra.query.iter().chain(&auth.query).cloned().collect();
+        let mut headers: Vec<(String, String)> =
+            extra.headers.iter().chain(&auth.headers).cloned().collect();
+        let mut cookies: Vec<String> = extra.cookies.iter().chain(&auth.cookies).cloned().collect();
         for p in &op.params {
             let Some(v) = args.get(&p.arg) else { continue };
             match p.location {
@@ -502,6 +612,12 @@ impl Api {
         let mut shown: String = shown.chars().take(MAX).collect();
         if status.is_client_error() || status.is_server_error() {
             shown = format!("HTTP {status}\n{shown}");
+            if matches!(status.as_u16(), 401 | 403) && !missing.is_empty() {
+                shown.push_str(&format!(
+                    "\n(this operation needs credentials for {}; bind them in the server's `auth`)",
+                    missing.join(" + ")
+                ));
+            }
         }
         let mut out = Map::new();
         out.insert("content".into(), json!([{"type": "text", "text": shown}]));
@@ -512,11 +628,13 @@ impl Api {
     }
 }
 
-/// Added to every request: credentials and fixed parameters (M4-06).
+/// Added to a request: fixed headers, or credentials (M4-06).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RequestExtras {
     /// Headers.
     pub headers: Vec<(String, String)>,
     /// Query parameters.
     pub query: Vec<(String, String)>,
+    /// Cookies, `name=value`.
+    pub cookies: Vec<String>,
 }

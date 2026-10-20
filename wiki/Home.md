@@ -105,7 +105,7 @@ M3 exit check: [M3-Exit](M3-Exit.md).
 | [M4-03](M4-03-Wasm-Limits.md) | Wasm limits | ✅ |
 | [M4-04](M4-04-Wasm-SDK.md) | Wasm tool SDK and template | ✅ |
 | [M4-05](M4-05-OpenAPI-Adapter.md) | OpenAPI-to-MCP adapter | ✅ |
-| M4-06 | Adapter auth mapping | ⏳ |
+| [M4-06](M4-06-OpenAPI-Auth.md) | Adapter auth mapping | ✅ |
 | M4-07 | Cedar policies | ⏳ |
 | M4-08 | Embeddings search | ⛔ dropped |
 | M4-09 | Tasks extension pass-through | ⏳ |

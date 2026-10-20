@@ -17,6 +17,9 @@ pub struct OpenApiTemplate {
     pub base_url: Option<String>,
     /// Headers on every request (secrets filled in).
     pub headers: BTreeMap<String, String>,
+    /// Credentials by security scheme: (username for basic, secret name,
+    /// replaced by its value when secrets are resolved).
+    pub auth: BTreeMap<String, (Option<String>, String)>,
 }
 
 impl std::fmt::Debug for OpenApiTemplate {
@@ -26,6 +29,7 @@ impl std::fmt::Debug for OpenApiTemplate {
             .field("spec", &self.spec)
             .field("base_url", &self.base_url)
             .field("headers", &self.headers.keys().collect::<Vec<_>>())
+            .field("auth", &self.auth.keys().collect::<Vec<_>>())
             .finish()
     }
 }
@@ -34,6 +38,7 @@ struct Local {
     api: Api,
     http: reqwest::Client,
     extras: RequestExtras,
+    creds: mcpgw_openapi::Credentials,
 }
 
 impl LocalTools for Local {
@@ -48,7 +53,7 @@ impl LocalTools for Local {
     ) -> BoxFuture<'_, Result<JsonObject, String>> {
         Box::pin(async move {
             self.api
-                .call(&self.http, &name, &arguments, &self.extras)
+                .call_with(&self.http, &name, &arguments, &self.extras, &self.creds)
                 .await
         })
     }
@@ -100,8 +105,44 @@ impl OpenApiTemplate {
                 .iter()
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect(),
-            query: Vec::new(),
+            ..Default::default()
         };
-        BackendConn::connect_local(Arc::new(Local { api, http, extras }), timeout).await
+        if let Some(unknown) = self
+            .auth
+            .keys()
+            .find(|k| !api.security_schemes.contains_key(*k))
+        {
+            let known: Vec<&str> = api.security_schemes.keys().map(String::as_str).collect();
+            return Err(err(format!(
+                "auth: {} has no security scheme {unknown:?} (it has: {})",
+                self.spec,
+                if known.is_empty() {
+                    "none".to_string()
+                } else {
+                    known.join(", ")
+                }
+            )));
+        }
+        let creds = self
+            .auth
+            .iter()
+            .map(|(scheme, (user, value))| {
+                let c = match user {
+                    Some(u) => mcpgw_openapi::Credential::Basic {
+                        username: u.clone(),
+                        password: value.clone(),
+                    },
+                    None => mcpgw_openapi::Credential::Secret(value.clone()),
+                };
+                (scheme.clone(), c)
+            })
+            .collect();
+        let local = Local {
+            api,
+            http,
+            extras,
+            creds,
+        };
+        BackendConn::connect_local(Arc::new(local), timeout).await
     }
 }

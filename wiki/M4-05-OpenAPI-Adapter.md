@@ -55,8 +55,8 @@ policy, approvals, audit and status like any server.
 - **Base URL:** `base_url`, else the spec's first server. A relative server
   (`/api/v3`) resolves against the spec's URL, or needs `base_url` when the
   spec is a file. Swagger 2.0 is refused, with a hint to convert it.
-- Security schemes are mapped to vault credentials in M4-06. `headers` (with
-  `${secret:…}`) covers simple cases until then.
+- Security schemes are mapped to vault credentials:
+  [M4-06](M4-06-OpenAPI-Auth.md).
 
 ## Tests
 

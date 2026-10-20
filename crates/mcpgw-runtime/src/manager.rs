@@ -1023,10 +1023,15 @@ impl Launch {
                 spec,
                 base_url,
                 headers,
+                auth,
             } => Template::OpenApi(crate::openapi::OpenApiTemplate {
                 spec: spec.clone(),
                 base_url: base_url.clone(),
                 headers: headers.clone(),
+                auth: auth
+                    .iter()
+                    .map(|(k, b)| (k.clone(), (b.username.clone(), b.secret.clone())))
+                    .collect(),
             }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),
@@ -1129,6 +1134,11 @@ impl Launch {
         if let Template::Container(c) = &mut spec {
             for v in c.files.values_mut() {
                 *v = lookup(v).unwrap_or_default();
+            }
+        }
+        if let Template::OpenApi(o) = &mut spec {
+            for (_, secret) in o.auth.values_mut() {
+                *secret = lookup(secret).unwrap_or_default();
             }
         }
         match &mut spec {

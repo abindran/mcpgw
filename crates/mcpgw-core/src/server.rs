@@ -104,7 +104,23 @@ pub enum Transport {
         /// Headers on every request; values may use `${secret:<name>}`.
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         headers: BTreeMap<String, String>,
+        /// Credentials for the spec's security schemes, by scheme name
+        /// (M4-06): `{ api_key = { secret = "petstore_key" } }`. OAuth logins
+        /// use their vault name, `oauth/<provider>@{account}`.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        auth: BTreeMap<String, AuthBinding>,
     },
+}
+
+/// A vault secret bound to an OpenAPI security scheme.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AuthBinding {
+    /// The secret: API key, token, password, or `oauth/<provider>@<account>`.
+    pub secret: String,
+    /// For HTTP basic: the user name (the secret is the password).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
 }
 
 /// A host directory granted to a Wasm server.
@@ -468,9 +484,17 @@ impl ServerSpec {
                     *v = fill(v);
                 }
             }
-            Transport::Http { headers, .. } | Transport::OpenApi { headers, .. } => {
+            Transport::Http { headers, .. } => {
                 for v in headers.values_mut() {
                     *v = fill(v);
+                }
+            }
+            Transport::OpenApi { headers, auth, .. } => {
+                for v in headers.values_mut() {
+                    *v = fill(v);
+                }
+                for b in auth.values_mut() {
+                    b.secret = fill(&b.secret);
                 }
             }
             Transport::Wasm { env, .. } => {
@@ -501,6 +525,9 @@ impl ServerSpec {
             for s in args.iter().chain(env.values()) {
                 refs.extend(secret_placeholders(s));
             }
+        }
+        if let Transport::OpenApi { auth, .. } = &self.transport {
+            refs.extend(auth.values().map(|b| b.secret.clone()));
         }
         if let Transport::Http { headers, .. } | Transport::OpenApi { headers, .. } =
             &self.transport
@@ -946,6 +973,37 @@ mod tests {
         assert_eq!(w.secrets["GITHUB_TOKEN"], "oauth/github@work");
         assert!(w.secret_refs().contains("oauth/github@work"));
         assert_eq!(w.name, "gh");
+    }
+
+    #[test]
+    fn openapi_auth_bindings() {
+        let s: ServerSpec = toml::from_str(
+            r#"
+            name = "gh"
+            transport = "openapi"
+            spec = "gh.yaml"
+            [auth.key]
+            secret = "gh_key"
+            [auth.login]
+            secret = "gh_pass"
+            username = "bob"
+            [auth.oauth]
+            secret = "oauth/github@{account}"
+            "#,
+        )
+        .unwrap();
+        s.validate().unwrap();
+        assert!(s.account_scoped());
+        let w = s.for_account("work");
+        assert_eq!(
+            w.secret_refs().into_iter().collect::<Vec<_>>(),
+            ["gh_key", "gh_pass", "oauth/github@work"]
+        );
+        let Transport::OpenApi { auth, .. } = &w.transport else {
+            panic!()
+        };
+        assert_eq!(auth["login"].username.as_deref(), Some("bob"));
+        assert!(toml::from_str::<ServerSpec>("name = \"x\"\ntransport = \"openapi\"\nspec = \"s\"\n[auth.k]\nsecret = \"a\"\nuser = \"b\"\n").is_err());
     }
 
     #[test]

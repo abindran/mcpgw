@@ -436,6 +436,27 @@
       },
       "ServerSpec": {
         "$defs": {
+          "AuthBinding": {
+            "additionalProperties": false,
+            "description": "A vault secret bound to an OpenAPI security scheme.",
+            "properties": {
+              "secret": {
+                "description": "The secret: API key, token, password, or `oauth/<provider>@<account>`.",
+                "type": "string"
+              },
+              "username": {
+                "description": "For HTTP basic: the user name (the secret is the password).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "secret"
+            ],
+            "type": "object"
+          },
           "ByteSize": {
             "anyOf": [
               {
@@ -763,6 +784,13 @@
           {
             "description": "An HTTP API described by an OpenAPI 3.x spec, served as tools by\nmcpgw itself, no MCP server needed (M4-05).",
             "properties": {
+              "auth": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/AuthBinding"
+                },
+                "description": "Credentials for the spec's security schemes, by scheme name\n(M4-06): `{ api_key = { secret = \"petstore_key\" } }`. OAuth logins\nuse their vault name, `oauth/<provider>@{account}`.",
+                "type": "object"
+              },
               "base_url": {
                 "description": "Where requests go. Default: the spec's first server URL\n(relative ones resolve against the spec's URL).",
                 "type": [
