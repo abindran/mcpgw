@@ -319,6 +319,27 @@
               "null"
             ]
           },
+          "container": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "properties": {
+                  "image": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "runtime": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            ]
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -382,7 +403,8 @@
           "transport": {
             "enum": [
               "stdio",
-              "http"
+              "http",
+              "container"
             ]
           }
         },
@@ -485,6 +507,59 @@
             "required": [
               "transport",
               "url"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Run an OCI image with Docker or Podman, speaking MCP over the\ncontainer's stdin/stdout (`run -i`, attached). The container is\nremoved when the server stops.",
+            "properties": {
+              "args": {
+                "description": "Arguments for the image's entrypoint.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "digest": {
+                "description": "Pinned content digest (`sha256:…`): the container always runs\nexactly this image, pulled by digest. `mcpgw add` fills it in.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "env": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Environment variables set inside the container (values are passed\nthrough the runtime's environment, never on its command line).",
+                "type": "object"
+              },
+              "image": {
+                "description": "Image, e.g. `ghcr.io/github/github-mcp-server:2.0.2`.",
+                "type": "string"
+              },
+              "run_args": {
+                "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`.",
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "runtime": {
+                "description": "`docker` or `podman`. Default: whichever is installed, Docker first.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "transport": {
+                "const": "container",
+                "type": "string"
+              }
+            },
+            "required": [
+              "transport",
+              "image"
             ],
             "type": "object"
           }

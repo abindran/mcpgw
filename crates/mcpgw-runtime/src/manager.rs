@@ -17,6 +17,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::container::{ContainerInfo, ContainerTemplate};
 use mcpgw_core::{ManifestDiff, ServerSpec, ToolManifest, Transport};
 use mcpgw_proto::{BackendConn, HttpSpec, JsonObject, ProtoError, StderrSink, StdioSpec};
 use mcpgw_vault::Redactor;
@@ -107,6 +108,8 @@ pub struct BackendStatus {
     pub last_error: Option<String>,
     /// Process id while connected (stdio servers).
     pub pid: Option<u32>,
+    /// The running container (container servers).
+    pub container: Option<ContainerInfo>,
     /// Last start, call start or call end.
     pub last_used: Option<Instant>,
     /// Never stopped for idleness or evicted.
@@ -196,7 +199,7 @@ enum Waiter {
 }
 
 enum Internal {
-    Started(Result<Box<(BackendConn, Vec<JsonObject>, Redactor)>, String>),
+    Started(Result<Box<Started>, String>),
     CallDone { lost: bool, failed: bool },
     Ping(Result<(), String>),
     Recheck,
@@ -452,6 +455,7 @@ impl BackendManager {
                 protocol_version: None,
                 last_error: why,
                 pid: None,
+                container: None,
                 last_used: None,
                 stateful: cfg.stateful,
             }),
@@ -783,23 +787,36 @@ pub(crate) struct Launch {
     pub(crate) resolver: Option<Arc<dyn SecretResolver>>,
 }
 
+/// A started backend: connection, tools, redactor, container.
+type Started = (
+    BackendConn,
+    Vec<JsonObject>,
+    Redactor,
+    Option<ContainerInfo>,
+);
+
 /// A backend to connect to, before or after secrets are filled in.
 #[derive(Debug, Clone)]
 pub(crate) enum Template {
     Stdio(StdioSpec),
     Http(HttpSpec),
+    Container(ContainerTemplate),
 }
 
 impl Template {
-    /// Connect: spawn the process, or open the HTTP session.
+    /// Connect: spawn the process or container, or open the HTTP session.
     pub(crate) async fn connect(
         &self,
         timeout: Duration,
         sink: Option<StderrSink>,
-    ) -> Result<BackendConn, ProtoError> {
+    ) -> Result<(BackendConn, Option<ContainerInfo>), ProtoError> {
         match self {
-            Template::Stdio(s) => BackendConn::connect_stdio(s, timeout, sink).await,
-            Template::Http(h) => BackendConn::connect_http(h, timeout).await,
+            Template::Stdio(s) => Ok((BackendConn::connect_stdio(s, timeout, sink).await?, None)),
+            Template::Http(h) => Ok((BackendConn::connect_http(h, timeout).await?, None)),
+            Template::Container(c) => {
+                let (conn, info) = c.connect(timeout, sink).await?;
+                Ok((conn, Some(info)))
+            }
         }
     }
 }
@@ -823,6 +840,22 @@ impl Launch {
                 args: args.clone(),
                 env: env.clone(),
                 cwd: cwd.clone(),
+                cleanup: None,
+            }),
+            Transport::Container {
+                image,
+                digest,
+                runtime,
+                args,
+                env,
+                run_args,
+            } => Template::Container(ContainerTemplate {
+                server: server.to_string(),
+                runtime: runtime.clone(),
+                image: mcpgw_core::pinned_image_ref(image, digest.as_deref()),
+                args: args.clone(),
+                env: env.clone(),
+                run_args: run_args.clone(),
             }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),
@@ -893,13 +926,14 @@ impl Launch {
         let fill = |s: &str| mcpgw_core::fill_placeholders(s, &lookup);
         let mut spec = self.template.clone();
         match &mut spec {
-            Template::Stdio(s) => {
-                s.args = s.args.iter().map(|a| fill(a)).collect();
-                for v in s.env.values_mut() {
+            Template::Stdio(StdioSpec { args, env, .. })
+            | Template::Container(ContainerTemplate { args, env, .. }) => {
+                *args = args.iter().map(|a| fill(a)).collect();
+                for v in env.values_mut() {
                     *v = fill(v);
                 }
                 for (var, name) in &self.bindings {
-                    s.env.insert(var.clone(), lookup(name).unwrap_or_default());
+                    env.insert(var.clone(), lookup(name).unwrap_or_default());
                 }
             }
             Template::Http(h) => {
@@ -977,6 +1011,8 @@ struct Actor {
     failures: u32,
     ever_connected: bool,
     conn: Option<Arc<BackendConn>>,
+    /// The container behind `conn`, if any.
+    container: Option<ContainerInfo>,
     waiters: Vec<Waiter>,
     retry_at: Option<tokio::time::Instant>,
     ping_inflight: bool,
@@ -1012,6 +1048,7 @@ impl Actor {
             failures: 0,
             ever_connected: false,
             conn: None,
+            container: None,
             waiters: Vec::new(),
             retry_at: None,
             ping_inflight: false,
@@ -1149,8 +1186,8 @@ impl Actor {
                     // stderr may speak before the handshake completes
                     *redactor_cell.write().expect("redactor") = Arc::new(redactor.clone());
                     let res = match spec.connect(timeout, Some(sink)).await {
-                        Ok(c) => match c.list_tools().await {
-                            Ok(tools) => Ok((c, tools, redactor)),
+                        Ok((c, container)) => match c.list_tools().await {
+                            Ok(tools) => Ok((c, tools, redactor, container)),
                             Err(e) => {
                                 c.shutdown().await;
                                 Err(format!("tools/list failed: {e}"))
@@ -1191,10 +1228,12 @@ impl Actor {
 
     fn publish(&self) {
         let pid = self.conn.as_ref().and_then(|c| c.pid());
+        let container = self.conn.as_ref().and(self.container.clone());
         let state = self.state.clone();
         self.shared.update(|s| {
             s.state = state;
             s.pid = pid;
+            s.container = container;
         });
     }
 
@@ -1346,8 +1385,9 @@ impl Actor {
     fn on_internal(&mut self, ev: Internal) {
         match ev {
             Internal::Started(Ok(started)) => {
-                let (conn, tools, redactor) = *started;
+                let (conn, tools, redactor, container) = *started;
                 *self.shared.redactor.write().expect("redactor") = Arc::new(redactor);
+                self.container = container;
                 let pv = conn.protocol_version();
                 self.conn = Some(Arc::new(conn));
                 if let Some(diff) = self.drift(pv.clone(), &tools) {

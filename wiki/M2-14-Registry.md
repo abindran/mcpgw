@@ -33,12 +33,12 @@ The registry is `gateway.registry_url` (default
 |-------|---------|
 | npm | `npx -y <pkg>@<version> <package args>` |
 | pypi | `uvx <pkg>==<version> <package args>` |
-| oci | `docker run -i --rm <runtime args> [-e VAR…] <image>:<version> <package args>` (a tag already in the identifier is kept) |
+| oci | a [container server](M3-01-Container-Launcher.md): `image = "<image>:<version>"` (a tag already in the identifier is kept), runtime args as `run_args`, package args as `args`; the digest is pinned on add |
 | remote (`streamable-http`, `sse`) | an HTTP server with the entry's headers |
 
 - `runtimeHint` replaces the default command.
 - **Choice:** npm, then pypi, then oci, using the first one whose runtime
-  (`npx`, `uvx`, `docker`) is on `PATH`. If none is, the remote is used, with
+  (`npx`, `uvx`, Docker or Podman) is on `PATH`. If none is, the remote is used, with
   a note saying so. `--package` and `--remote` override this.
 - **Versions are always pinned**, from the entry's package version and the
   entry's own version (kept as `registry = {name, version}` on the server).
@@ -47,26 +47,28 @@ The registry is `gateway.registry_url` (default
   without a value is an error that names the flag to pass.
 - **Secrets** are never written into the config. A secret input becomes the
   vault secret `<server>_<input>` (`github-mcp-server_token`). Env vars are
-  injected at spawn; for docker, `-e NAME={secret}` becomes `-e NAME` plus an
-  injected `NAME`, so the value is not in the process list. A bare secret
+  injected at spawn; for containers, a runtime arg `-e NAME={secret}`
+  becomes an injected `NAME` (passed as `-e NAME`), so the value is never in
+  a process list. A bare secret
   `Authorization` header becomes `Bearer ${secret:…}`.
 - **Optional secrets** that aren't in the vault are left out, with a hint
   (`mcpgw secret set github-mcp-server_token`, then add again). For a
   **required** secret that is missing, a terminal asks for it (hidden);
   otherwise the command stops and says what to set.
-- OCI images are pulled (`docker pull`, progress on stderr) before the
-  first start, so a long download doesn't time out the handshake. Package
-  downloads (`npx`, `uvx`) happen at that start, which is allowed 300 s. If they can't be read (a login is needed, or Docker isn't
-  running) the question is still asked, and the tools are pinned on the
-  server's first start.
+- OCI images are pulled and their digest pinned before the first start,
+  so a long download doesn't time out the handshake. Package downloads
+  (`npx`, `uvx`) happen at that start, which is allowed 300 s. If the tools
+  can't be read (a login is needed, or Docker isn't running) the question
+  is still asked, and the tools are pinned on the server's first start.
 
 ## GitHub (`io.github.github/github-mcp-server` 2.0.2)
 
 The real entry is in `crates/mcpgw-registry/tests/fixtures/`. It has an OCI
 package and a remote.
 
-- With Docker it runs `docker run -i --rm -p 127.0.0.1:8085:8085 -e
-  GITHUB_OAUTH_CALLBACK_PORT=8085 ghcr.io/github/github-mcp-server:2.0.2`.
+- With Docker or Podman it becomes a container server for
+  `ghcr.io/github/github-mcp-server:2.0.2@sha256:ffced0d7…`, with run flags
+  `-p 127.0.0.1:8085:8085 -e GITHUB_OAUTH_CALLBACK_PORT=8085`.
   The optional token is added once `github-mcp-server_token` is set;
   otherwise the server logs in with OAuth on first use.
 - Without Docker, or with `--remote`, it uses
@@ -81,9 +83,11 @@ entry, served by a local registry, starting with no image in the cache:
 ```
 $ mcpgw add io.github.github/github-mcp-server
 io.github.github/github-mcp-server 2.0.2 via oci ghcr.io/github/github-mcp-server:2.0.2
-  runs: docker run -i --rm -p 127.0.0.1:8085:8085 -e GITHUB_OAUTH_CALLBACK_PORT=8085 ghcr.io/github/github-mcp-server:2.0.2
+  runs: ghcr.io/github/github-mcp-server:2.0.2
+  container flags: -p 127.0.0.1:8085:8085 -e GITHUB_OAUTH_CALLBACK_PORT=8085
   optional secret github-mcp-server_token is not set; …
-pulling ghcr.io/github/github-mcp-server:2.0.2            (stderr)
+pulling ghcr.io/github/github-mcp-server:2.0.2 to pin its digest     (stderr)
+pinned ghcr.io/github/github-mcp-server:2.0.2 to sha256:ffced0d76e77428532a2ced185516992d77fd146d69eec2f244e6237d1a97796
 github-mcp-server offers 46 tools:
   add_comment_to_pending_review  Add review comment to the requester's latest pending pull request review…
   …
@@ -91,7 +95,9 @@ add github-mcp-server? [y/N] y
 added server github-mcp-server (46 tools, pin 9c7a0befb486)
 ```
 
-No container is left behind after the tools are read. Before images were
+(Since M3-01 an OCI entry installs as a container server; the first run,
+before that, used a plain `docker run` stdio command.) No container is left
+behind after the tools are read. Before images were
 pulled first, a cold install failed because the download ran inside the
 handshake. With the Docker daemon stopped the tools can't be read, and the
 question still comes up. The remote plan reached the real endpoint and got
@@ -99,10 +105,10 @@ its 401 and login hint.
 
 ## Tests
 
-- `crates/mcpgw-registry/tests/plan.rs`: the real GitHub entry gives the
-  pinned docker plan without the unset optional token. Once the token is set
-  it is injected and not in argv. Without docker it falls back to the
-  remote (header left out, with a note). `--remote` with the secret set
+- `crates/mcpgw-registry/tests/plan.rs`: the real GitHub entry gives a
+  container server for the pinned image, without the unset optional token.
+  Once the token is set it is injected and not in argv. Podman alone also
+  runs it. Without Docker or Podman it falls back to the remote (header left out, with a note). `--remote` with the secret set
   gives a `Bearer` header. npm and pypi plans are pinned, fill
   `{variables}`, apply defaults and bind secrets. Missing required inputs,
   unrunnable types (`nuget`) and missing runtimes are explained. Default

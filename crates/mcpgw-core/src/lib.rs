@@ -19,8 +19,9 @@ pub use oauth::{OAuthEndpoints, OAuthProvider, oauth_secret_name};
 pub use profile::{Decision, Mode, Policy, Profile, glob_match};
 pub use secret::{SecretMeta, validate_secret_name};
 pub use server::{
-    ACCOUNT_PLACEHOLDER, DEFAULT_ACCOUNT, RegistryRef, SECRET_PLACEHOLDER, ServerSpec,
-    TOOL_SEPARATOR, Transport, fill_placeholders, secret_placeholders, validate_server_name,
+    ACCOUNT_PLACEHOLDER, CONTAINER_RUNTIMES, DEFAULT_ACCOUNT, RegistryRef, SECRET_PLACEHOLDER,
+    ServerSpec, TOOL_SEPARATOR, Transport, fill_placeholders, on_path, pinned_image_ref,
+    secret_placeholders, validate_server_name,
 };
 
 use thiserror::Error;

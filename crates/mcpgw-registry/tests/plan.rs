@@ -34,32 +34,38 @@ fn stdio(t: &Transport) -> (&str, Vec<&str>, &BTreeMap<String, String>) {
     }
 }
 
+fn container(t: &Transport) -> (&str, &[String], &BTreeMap<String, String>, &[String]) {
+    match t {
+        Transport::Container {
+            image,
+            args,
+            env,
+            run_args,
+            digest: None,
+            runtime: None,
+        } => (image, args, env, run_args),
+        other => panic!("not an unpinned container: {other:?}"),
+    }
+}
+
 #[test]
 fn github_oci_package_is_pinned_and_skips_the_unset_optional_token() {
     let s = github();
     assert_eq!(default_server_name(&s.name), "github-mcp-server");
     let p = plan(&s, &opts(&|_| false, &|_| true)).unwrap();
-    let (cmd, args, env) = stdio(&p.spec.transport);
-    assert_eq!(cmd, "docker");
+    let (image, args, env, run_args) = container(&p.spec.transport);
+    assert_eq!(image, "ghcr.io/github/github-mcp-server:2.0.2");
     assert_eq!(
-        args,
+        run_args,
         [
-            "run",
-            "-i",
-            "--rm",
             "-p",
             "127.0.0.1:8085:8085",
             "-e",
-            "GITHUB_OAUTH_CALLBACK_PORT=8085",
-            "ghcr.io/github/github-mcp-server:2.0.2"
+            "GITHUB_OAUTH_CALLBACK_PORT=8085"
         ]
     );
-    assert!(env.is_empty());
+    assert!(args.is_empty() && env.is_empty());
     assert_eq!(p.method, "oci ghcr.io/github/github-mcp-server:2.0.2");
-    assert_eq!(
-        p.image.as_deref(),
-        Some("ghcr.io/github/github-mcp-server:2.0.2")
-    );
     assert_eq!(p.skipped, ["github-mcp-server_token"]);
     assert!(p.secrets.is_empty() && p.spec.secrets.is_empty());
     assert_eq!(
@@ -78,13 +84,13 @@ fn github_token_once_set_is_injected_not_written_into_argv() {
         &opts(&|n| n == "github-mcp-server_token", &|_| true),
     )
     .unwrap();
-    let (_, args, _) = stdio(&p.spec.transport);
+    let (_, _, _, run_args) = container(&p.spec.transport);
     assert!(
-        args.windows(2)
-            .any(|w| w == ["-e", "GITHUB_PERSONAL_ACCESS_TOKEN"]),
-        "{args:?}"
+        !run_args
+            .iter()
+            .any(|a| a.contains("TOKEN") || a.contains("secret")),
+        "{run_args:?}"
     );
-    assert!(!args.iter().any(|a| a.contains("secret")), "{args:?}");
     assert_eq!(
         p.spec
             .secrets
@@ -94,18 +100,26 @@ fn github_token_once_set_is_injected_not_written_into_argv() {
     );
     assert_eq!(p.secrets.len(), 1);
     assert!(!p.secrets[0].required);
-    // the image is the last docker argument
-    assert_eq!(args.last(), Some(&"ghcr.io/github/github-mcp-server:2.0.2"));
+}
+
+#[test]
+fn podman_alone_runs_oci_packages() {
+    let p = plan(&github(), &opts(&|_| false, &|c| c == "podman")).unwrap();
+    assert_eq!(p.spec.transport.kind(), "container");
+    assert!(p.notes.is_empty(), "{:?}", p.notes);
 }
 
 #[test]
 fn github_falls_back_to_the_remote_without_docker() {
-    let p = plan(&github(), &opts(&|_| false, &|c| c != "docker")).unwrap();
+    let p = plan(
+        &github(),
+        &opts(&|_| false, &|c| c != "docker" && c != "podman"),
+    )
+    .unwrap();
     let Transport::Http { url, headers } = &p.spec.transport else {
         panic!("not http: {:?}", p.spec.transport)
     };
     assert_eq!(url, "https://api.githubcopilot.com/mcp/");
-    assert_eq!(p.image, None);
     // optional secret header, unset: left out (log in with OAuth instead)
     assert!(headers.is_empty(), "{headers:?}");
     assert_eq!(p.skipped, ["github-mcp-server_authorization"]);

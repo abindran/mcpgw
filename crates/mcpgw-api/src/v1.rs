@@ -14,7 +14,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use mcpgw_core::{Profile, SecretMeta, ServerSpec, Transport};
+use mcpgw_core::{Profile, SecretMeta, ServerSpec};
 use mcpgw_runtime::{Approvals, BackendManager};
 use mcpgw_store::Store;
 use serde::Deserialize;
@@ -97,26 +97,17 @@ impl ApiState {
 
     fn server_json(&self, spec: &ServerSpec) -> Value {
         let st = self.manager.status_of(&spec.name);
-        let (transport, target) = match &spec.transport {
-            Transport::Stdio { command, args, .. } => (
-                "stdio",
-                std::iter::once(command.clone())
-                    .chain(args.iter().cloned())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            ),
-            Transport::Http { url, .. } => ("http", url.clone()),
-        };
         json!({
             "name": spec.name,
-            "transport": transport,
-            "target": target,
+            "transport": spec.transport.kind(),
+            "target": spec.transport.target(),
             "alias": spec.alias,
             "enabled": spec.enabled,
             "stateful": spec.stateful,
             "source": if self.config_servers.contains(&spec.name) { "config" } else { "store" },
             "state": st.as_ref().map(|s| s.state.name()),
             "pid": st.as_ref().and_then(|s| s.pid),
+            "container": st.as_ref().and_then(|s| s.container.clone()),
             "restarts": st.as_ref().map(|s| s.restarts),
             "protocol_version": st.as_ref().and_then(|s| s.protocol_version.clone()),
             "last_error": st.as_ref().and_then(|s| s.last_error.clone()),
@@ -679,10 +670,12 @@ pub fn openapi() -> Value {
                 "Profile": schema::<Profile>(),
                 "SecretMeta": schema::<SecretMeta>(),
                 "Server": {"type": "object", "properties": {
-                    "name": {"type": "string"}, "transport": {"enum": ["stdio", "http"]}, "target": {"type": "string"},
+                    "name": {"type": "string"}, "transport": {"enum": ["stdio", "http", "container"]}, "target": {"type": "string"},
                     "alias": {"type": ["string", "null"]}, "enabled": {"type": "boolean"}, "stateful": {"type": "boolean"},
                     "source": {"enum": ["config", "store"]}, "state": {"type": ["string", "null"]},
                     "pid": {"type": ["integer", "null"]}, "restarts": {"type": ["integer", "null"]},
+                    "container": {"oneOf": [{"type": "null"}, {"type": "object", "properties": {
+                        "runtime": {"type": "string"}, "name": {"type": "string"}, "image": {"type": "string"}}}]},
                     "protocol_version": {"type": ["string", "null"]}, "last_error": {"type": ["string", "null"]},
                     "tools": {"type": "integer"}, "pin": {"type": ["string", "null"]}, "spec": {"$ref": "#/components/schemas/ServerSpec"}
                 }},

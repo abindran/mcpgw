@@ -6,6 +6,7 @@
 //! [`McpClient`] is a real MCP client (rmcp) for driving the gateway itself,
 //! the way Claude Code or Cursor would.
 
+pub mod container;
 pub mod oauth;
 pub mod registry;
 pub mod sse;

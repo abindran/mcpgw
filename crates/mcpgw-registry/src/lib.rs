@@ -3,8 +3,8 @@
 //! [`Registry`] searches and fetches `server.json` entries from
 //! `https://registry.modelcontextprotocol.io` (`/v0/servers`). [`plan`]
 //! turns an entry into a [`ServerSpec`] with **pinned versions**:
-//! `npx -y pkg@1.2.3`, `uvx pkg==1.2.3`, `docker run … image:tag`, or the
-//! entry's remote URL. Secret inputs become vault references
+//! `npx -y pkg@1.2.3`, `uvx pkg==1.2.3`, a container server running
+//! `image:tag` (Docker or Podman), or the entry's remote URL. Secret inputs become vault references
 //! (`${secret:<server>_<input>}`) and are listed so the caller can ask for
 //! them; optional secret inputs are left out unless the secret exists.
 
@@ -233,8 +233,6 @@ pub struct InstallPlan {
     pub skipped: Vec<String>,
     /// Things the user should know (a missing runtime, a fallback).
     pub notes: Vec<String>,
-    /// For OCI packages: the pinned image, to pull before the first start.
-    pub image: Option<String>,
 }
 
 /// Choices for [`plan`].
@@ -254,29 +252,7 @@ pub struct PlanOptions<'a> {
     pub runtime_available: &'a dyn Fn(&str) -> bool,
 }
 
-/// Whether `command` is an existing path or found on `PATH`.
-pub fn on_path(command: &str) -> bool {
-    let p = std::path::Path::new(command);
-    if p.components().count() > 1 {
-        return p.is_file();
-    }
-    let exts: Vec<String> = if cfg!(windows) {
-        std::env::var("PATHEXT")
-            .unwrap_or_else(|_| ".EXE;.CMD;.BAT".into())
-            .split(';')
-            .map(str::to_string)
-            .chain([String::new()])
-            .collect()
-    } else {
-        vec![String::new()]
-    };
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|d| {
-            exts.iter()
-                .any(|x| d.join(format!("{command}{x}")).is_file())
-        })
-    })
-}
+pub use mcpgw_core::on_path;
 
 fn runtime_of(p: &Package) -> &str {
     p.runtime_hint
@@ -286,6 +262,14 @@ fn runtime_of(p: &Package) -> &str {
             "pypi" => "uvx",
             _ => "docker",
         })
+}
+
+/// Whether a package can run here (an OCI image runs with Docker or Podman).
+fn runnable(p: &Package, available: &dyn Fn(&str) -> bool) -> bool {
+    match (p.registry_type.as_str(), p.runtime_hint.as_deref()) {
+        ("oci", None) => mcpgw_core::CONTAINER_RUNTIMES.iter().any(|r| available(r)),
+        _ => available(runtime_of(p)),
+    }
 }
 
 /// Vault name for input `input` of `server`.
@@ -423,8 +407,9 @@ impl Renderer<'_> {
         Ok(Rendered::Value(out))
     }
 
-    /// `docker -e NAME={secret}`: pass `-e NAME` and inject NAME from the
-    /// vault, so the value never shows up in the process list.
+    /// `docker -e NAME={secret}`: inject NAME from the vault into the
+    /// container's environment, so the value never shows up in a process
+    /// list.
     fn docker_secret_env(&mut self, a: &Argument) -> Option<Rendered> {
         if !matches!(a.name.as_deref(), Some("-e" | "--env")) {
             return None;
@@ -446,11 +431,8 @@ impl Renderer<'_> {
     fn args(&mut self, list: &[Argument], docker: bool) -> Result<Vec<String>, String> {
         let mut out = Vec::new();
         for a in list {
-            if docker && let Some(r) = self.docker_secret_env(a) {
-                if let Rendered::Value(env) = r {
-                    out.extend(a.name.clone());
-                    out.push(env);
-                }
+            // injected into the container's env instead (never in argv)
+            if docker && self.docker_secret_env(a).is_some() {
                 continue;
             }
             let key = a.name.clone().unwrap_or_else(|| a.input.name.clone());
@@ -491,7 +473,6 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
         bindings: BTreeMap::new(),
     };
     let mut notes = Vec::new();
-    let mut image = None;
     let order = ["npm", "pypi", "oci"];
     let mut candidates: Vec<&Package> = server
         .packages
@@ -518,7 +499,7 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
         None
     } else if let Some(p) = candidates
         .iter()
-        .find(|p| (opts.runtime_available)(runtime_of(p)))
+        .find(|p| runnable(p, opts.runtime_available))
     {
         Some(*p)
     } else if let Some(p) = candidates.first() {
@@ -538,72 +519,74 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
         None
     };
     let (transport, method) = match package {
-        Some(p) => {
-            let version = p.version.clone();
-            let mut args = Vec::new();
-            let (command, method) = match p.registry_type.as_str() {
-                "npm" => {
-                    args.push("-y".to_string());
-                    (
-                        "npx",
-                        format!(
-                            "npm {}@{}",
-                            p.identifier,
-                            version.as_deref().unwrap_or("latest")
-                        ),
-                    )
-                }
-                "pypi" => (
-                    "uvx",
-                    format!(
-                        "pypi {}=={}",
-                        p.identifier,
-                        version.as_deref().unwrap_or("latest")
-                    ),
-                ),
-                _ => {
-                    args.extend(["run", "-i", "--rm"].map(String::from));
-                    (
-                        "docker",
-                        format!("oci {}", pinned_image(&p.identifier, version.as_deref())),
-                    )
-                }
-            };
-            let docker = p.registry_type == "oci";
-            args.extend(r.args(&p.runtime_arguments, docker)?);
+        Some(p) if p.registry_type == "oci" => {
+            let image = pinned_image(&p.identifier, p.version.as_deref());
+            // `-e NAME={secret}` runtime args become injected env (see
+            // `docker_secret_env`); the rest are run flags
+            let run_args = r.args(&p.runtime_arguments, true)?;
             let mut env = BTreeMap::new();
             for v in &p.environment_variables {
-                match r.input(&v.name, v)? {
-                    Rendered::Skip => continue,
-                    Rendered::Value(val) => {
-                        if p.registry_type == "oci" {
-                            // pass it through docker into the container
-                            args.extend(["-e".to_string(), v.name.clone()]);
-                        }
-                        if v.is_secret && v.value.is_none() {
-                            r.bindings
-                                .insert(v.name.clone(), secret_name(&opts.server_name, &v.name));
-                        } else {
-                            env.insert(v.name.clone(), val);
-                        }
+                if let Rendered::Value(val) = r.input(&v.name, v)? {
+                    if v.is_secret && v.value.is_none() {
+                        r.bindings
+                            .insert(v.name.clone(), secret_name(&opts.server_name, &v.name));
+                    } else {
+                        env.insert(v.name.clone(), val);
                     }
                 }
             }
-            args.push(match p.registry_type.as_str() {
-                "npm" => match &version {
-                    Some(v) => format!("{}@{v}", p.identifier),
-                    None => p.identifier.clone(),
+            let args = r.args(&p.package_arguments, false)?;
+            let runtime = p
+                .runtime_hint
+                .clone()
+                .filter(|h| mcpgw_core::CONTAINER_RUNTIMES.contains(&h.as_str()));
+            let mut spec = ServerSpec::new(
+                opts.server_name.clone(),
+                Transport::Container {
+                    image: image.clone(),
+                    digest: None,
+                    runtime,
+                    args,
+                    env,
+                    run_args,
                 },
-                "pypi" => match &version {
-                    Some(v) => format!("{}=={v}", p.identifier),
-                    None => p.identifier.clone(),
-                },
-                _ => {
-                    let i = pinned_image(&p.identifier, version.as_deref());
-                    image = Some(i.clone());
-                    i
+            );
+            spec.secrets = std::mem::take(&mut r.bindings);
+            (spec, format!("oci {image}"))
+        }
+        Some(p) => {
+            let version = p.version.clone();
+            let mut args = Vec::new();
+            let (command, method, package) = match p.registry_type.as_str() {
+                "npm" => {
+                    args.push("-y".to_string());
+                    let pkg = match &version {
+                        Some(v) => format!("{}@{v}", p.identifier),
+                        None => p.identifier.clone(),
+                    };
+                    ("npx", format!("npm {pkg}"), pkg)
                 }
-            });
+                _ => {
+                    let pkg = match &version {
+                        Some(v) => format!("{}=={v}", p.identifier),
+                        None => p.identifier.clone(),
+                    };
+                    ("uvx", format!("pypi {pkg}"), pkg)
+                }
+            };
+            args.extend(r.args(&p.runtime_arguments, false)?);
+            let mut env = BTreeMap::new();
+            for v in &p.environment_variables {
+                if let Rendered::Value(val) = r.input(&v.name, v)? {
+                    if v.is_secret && v.value.is_none() {
+                        r.bindings
+                            .insert(v.name.clone(), secret_name(&opts.server_name, &v.name));
+                    } else {
+                        env.insert(v.name.clone(), val);
+                    }
+                }
+            }
+            args.push(package);
             args.extend(r.args(&p.package_arguments, false)?);
             let command = p
                 .runtime_hint
@@ -675,6 +658,5 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
         secrets: r.secrets,
         skipped: r.skipped,
         notes,
-        image,
     })
 }

@@ -158,7 +158,7 @@ pub async fn introspect_with_secrets(
         .map_err(|e| ProtoError::Other(e.to_string()))?
         .map_err(ProtoError::Connect)?;
     let timeout = spec.startup_timeout.map(|d| d.get()).unwrap_or(timeout);
-    let conn = target.connect(timeout, None).await?;
+    let (conn, _) = target.connect(timeout, None).await?;
     let tools = conn.list_tools().await;
     let pv = conn.protocol_version();
     conn.shutdown().await;

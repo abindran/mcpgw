@@ -41,7 +41,7 @@ pub type Review<'a> = &'a dyn Fn(Option<&ToolManifest>) -> AnyResult<bool>;
 pub fn add_reviewed(
     config: &Config,
     path: &Path,
-    spec: ServerSpec,
+    mut spec: ServerSpec,
     introspect: bool,
     timeout: Duration,
     review: Option<Review>,
@@ -67,6 +67,7 @@ pub fn add_reviewed(
         .into());
     }
     spec.validate()?;
+    pin_digest(&mut spec);
     let existed = s.server(&name)?.is_some();
     let verb = if existed { "updated" } else { "added" };
     let mut manifest = None;
@@ -174,15 +175,47 @@ pub fn set_enabled(config: &Config, path: &Path, name: &str, on: bool) -> AnyRes
     Ok(())
 }
 
+/// Pull a container server's image and pin its digest, so it always runs
+/// exactly this image. Without a runtime or registry digest it runs by tag.
+fn pin_digest(spec: &mut ServerSpec) {
+    let Transport::Container {
+        image,
+        digest,
+        runtime,
+        ..
+    } = &mut spec.transport
+    else {
+        return;
+    };
+    if digest.is_some() || image.contains('@') {
+        return;
+    }
+    let rt = match mcpgw_runtime::container::pick_runtime(runtime.as_deref()) {
+        Ok(rt) => rt,
+        Err(e) => {
+            eprintln!("mcpgw: {e}; {image} runs by tag until it is pinned (`mcpgw add` again)");
+            return;
+        }
+    };
+    eprintln!("pulling {image} to pin its digest");
+    let resolved = serve::runtime()
+        .map_err(|e| e.to_string())
+        .and_then(|r| r.block_on(mcpgw_runtime::container::resolve_digest(&rt, image)));
+    match resolved {
+        Ok(Some(d)) => {
+            println!("pinned {image} to {d}");
+            *digest = Some(d);
+        }
+        Ok(None) => {
+            eprintln!("mcpgw: {image} has no registry digest (a local build?); it runs by tag")
+        }
+        Err(e) => eprintln!("mcpgw: could not pin {image}: {e}; it runs by tag"),
+    }
+}
+
 /// One-line form of how a server is reached.
 pub fn describe(s: &ServerSpec) -> String {
-    match &s.transport {
-        Transport::Stdio { command, args, .. } => std::iter::once(command.as_str())
-            .chain(args.iter().map(String::as_str))
-            .collect::<Vec<_>>()
-            .join(" "),
-        Transport::Http { url, .. } => url.clone(),
-    }
+    s.transport.target()
 }
 
 /// `mcpgw list`: configured servers; with `--check`, start each one.
@@ -286,12 +319,53 @@ pub fn status(config: &Config) -> AnyResult<()> {
         r.pid, c.info.url, r.version
     );
     for s in r.servers {
-        let pid = s
-            .pid
-            .map(|p| format!("pid {p}"))
-            .unwrap_or_else(|| "-".into());
+        let pid = match (&s.container, s.pid) {
+            (Some(c), _) => format!("{} {}", c.runtime, c.name),
+            (None, Some(p)) => format!("pid {p}"),
+            (None, None) => "-".into(),
+        };
         let err = s.last_error.map(|e| format!("\t{e}")).unwrap_or_default();
         println!("{}\t{}\t{} tools\t{pid}{err}", s.name, s.state, s.tools);
+    }
+    Ok(())
+}
+
+/// `mcpgw stats`: CPU, memory and process count of running container
+/// servers, from `docker stats` / `podman stats`.
+pub fn stats(config: &Config) -> AnyResult<()> {
+    let c = Control::connect(config)?.ok_or("the daemon is not running")?;
+    let mut by_runtime: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for s in c.status()?.servers {
+        if let Some(ctr) = s.container {
+            by_runtime
+                .entry(ctr.runtime)
+                .or_default()
+                .push((s.name, ctr.name));
+        }
+    }
+    if by_runtime.is_empty() {
+        println!("no container servers are running");
+        return Ok(());
+    }
+    println!("server\tcontainer\tcpu\tmemory\tpids");
+    for (rt, list) in by_runtime {
+        let mut cmd = std::process::Command::new(&rt);
+        cmd.args(["stats", "--no-stream", "--format"])
+            .arg("{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.PIDs}}")
+            .args(list.iter().map(|(_, n)| n));
+        let out = cmd.output().map_err(|e| format!("{rt} stats: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "{rt} stats: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )
+            .into());
+        }
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let ctr = line.split('\t').next().unwrap_or_default();
+            let server = list.iter().find(|(_, n)| n == ctr).map_or("?", |(s, _)| s);
+            println!("{server}\t{line}");
+        }
     }
     Ok(())
 }

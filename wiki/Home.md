@@ -81,7 +81,7 @@ M2 exit check: [M2-Exit](M2-Exit.md).
 
 | ID | Item | Status |
 |----|------|--------|
-| M3-01 | Container launcher (Docker/Podman) | ⏳ |
+| [M3-01](M3-01-Container-Launcher.md) | Container launcher (Docker/Podman) | ✅ |
 | M3-02 | Sandbox profiles | ⏳ |
 | M3-03 | Egress allowlist | ⏳ |
 | M3-04 | File and tmpfs secret injection | ⏳ |

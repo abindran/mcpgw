@@ -55,6 +55,9 @@ pub struct ServerInfo {
     pub state: String,
     /// Process id while running.
     pub pid: Option<u32>,
+    /// The running container (container servers).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container: Option<mcpgw_runtime::ContainerInfo>,
     /// Restarts after the first start.
     pub restarts: u32,
     /// Negotiated protocol version.
@@ -113,6 +116,7 @@ async fn status(State(s): State<AdminState>) -> Json<StatusReport> {
         servers.push(ServerInfo {
             state: st.state.name().to_string(),
             pid: st.pid,
+            container: st.container,
             restarts: st.restarts,
             protocol_version: st.protocol_version,
             last_error: st.last_error,

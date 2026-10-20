@@ -35,6 +35,66 @@ pub enum Transport {
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         headers: BTreeMap<String, String>,
     },
+    /// Run an OCI image with Docker or Podman, speaking MCP over the
+    /// container's stdin/stdout (`run -i`, attached). The container is
+    /// removed when the server stops.
+    Container {
+        /// Image, e.g. `ghcr.io/github/github-mcp-server:2.0.2`.
+        image: String,
+        /// Pinned content digest (`sha256:…`): the container always runs
+        /// exactly this image, pulled by digest. `mcpgw add` fills it in.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        digest: Option<String>,
+        /// `docker` or `podman`. Default: whichever is installed, Docker first.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        runtime: Option<String>,
+        /// Arguments for the image's entrypoint.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+        /// Environment variables set inside the container (values are passed
+        /// through the runtime's environment, never on its command line).
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+        /// Extra `run` flags, e.g. `["-p", "127.0.0.1:8085:8085"]`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        run_args: Vec<String>,
+    },
+}
+
+/// Container runtimes mcpgw drives.
+pub const CONTAINER_RUNTIMES: [&str; 2] = ["docker", "podman"];
+
+/// Whether `command` is an existing path or is found on `PATH` (with
+/// `PATHEXT` on Windows).
+pub fn on_path(command: &str) -> bool {
+    let p = std::path::Path::new(command);
+    if p.components().count() > 1 {
+        return p.is_file();
+    }
+    let exts: Vec<String> = if cfg!(windows) {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".EXE;.CMD;.BAT".into())
+            .split(';')
+            .map(str::to_string)
+            .chain([String::new()])
+            .collect()
+    } else {
+        vec![String::new()]
+    };
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|d| {
+            exts.iter()
+                .any(|x| d.join(format!("{command}{x}")).is_file())
+        })
+    })
+}
+
+/// `image` pinned to `digest` (`repo:tag@sha256:…`), or `image` as given.
+pub fn pinned_image_ref(image: &str, digest: Option<&str>) -> String {
+    match digest {
+        Some(d) if !image.contains('@') => format!("{image}@{d}"),
+        _ => image.to_string(),
+    }
 }
 
 impl Transport {
@@ -56,11 +116,45 @@ impl Transport {
         }
     }
 
-    /// Short kind name: `stdio` or `http`.
+    /// A container transport with no extra args, env or flags.
+    pub fn container(image: impl Into<String>) -> Self {
+        Self::Container {
+            image: image.into(),
+            digest: None,
+            runtime: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
+            run_args: Vec::new(),
+        }
+    }
+
+    /// One line saying what runs: the command line, the URL, or the image
+    /// (pinned by digest) and its arguments.
+    pub fn target(&self) -> String {
+        match self {
+            Self::Stdio { command, args, .. } => std::iter::once(command.as_str())
+                .chain(args.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" "),
+            Self::Http { url, .. } => url.clone(),
+            Self::Container {
+                image,
+                digest,
+                args,
+                ..
+            } => std::iter::once(pinned_image_ref(image, digest.as_deref()))
+                .chain(args.iter().cloned())
+                .collect::<Vec<_>>()
+                .join(" "),
+        }
+    }
+
+    /// Short kind name: `stdio`, `http` or `container`.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Stdio { .. } => "stdio",
             Self::Http { .. } => "http",
+            Self::Container { .. } => "container",
         }
     }
 }
@@ -220,7 +314,7 @@ impl ServerSpec {
             *v = fill(v);
         }
         match &mut s.transport {
-            Transport::Stdio { args, env, .. } => {
+            Transport::Stdio { args, env, .. } | Transport::Container { args, env, .. } => {
                 for a in args.iter_mut() {
                     *a = fill(a);
                 }
@@ -240,7 +334,9 @@ impl ServerSpec {
     /// Every secret this server uses: bindings and placeholders.
     pub fn secret_refs(&self) -> std::collections::BTreeSet<String> {
         let mut refs: std::collections::BTreeSet<String> = self.secrets.values().cloned().collect();
-        if let Transport::Stdio { args, env, .. } = &self.transport {
+        if let Transport::Stdio { args, env, .. } | Transport::Container { args, env, .. } =
+            &self.transport
+        {
             for s in args.iter().chain(env.values()) {
                 refs.extend(secret_placeholders(s));
             }
@@ -287,12 +383,53 @@ impl ServerSpec {
         let empty = match &self.transport {
             Transport::Stdio { command, .. } => command.trim().is_empty(),
             Transport::Http { url, .. } => url.trim().is_empty(),
+            Transport::Container { image, .. } => image.trim().is_empty(),
         };
         if empty {
             return Err(Error::Config(format!(
-                "server {} has an empty command/url",
+                "server {} has an empty command/url/image",
                 self.name
             )));
+        }
+        if let Transport::Container {
+            digest,
+            runtime,
+            run_args,
+            env,
+            ..
+        } = &self.transport
+        {
+            let bad = |m: String| Err(Error::Config(format!("server {}: {m}", self.name)));
+            if let Some(d) = digest {
+                let hex = d.strip_prefix("sha256:").unwrap_or("");
+                if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+                    return bad(format!("digest {d:?} is not sha256:<64 hex digits>"));
+                }
+            }
+            if let Some(r) = runtime
+                && !CONTAINER_RUNTIMES.contains(&r.as_str())
+            {
+                return bad(format!("container runtime {r:?} is not docker or podman"));
+            }
+            for a in run_args {
+                let flag = a.split('=').next().unwrap_or(a);
+                if matches!(flag, "-d" | "--detach" | "--name" | "-t" | "--tty") {
+                    return bad(format!(
+                        "run flag {a:?} is managed by mcpgw (containers run attached, without a TTY, under their own name)"
+                    ));
+                }
+                if a.contains(SECRET_PLACEHOLDER) {
+                    return bad(
+                        "secrets can't go in run_args (they'd be on the command line); use env"
+                            .into(),
+                    );
+                }
+            }
+            for var in env.keys().chain(self.secrets.keys()) {
+                if var.is_empty() || var.contains('=') {
+                    return bad(format!("{var:?} is not an environment variable name"));
+                }
+            }
         }
         if let Transport::Http { url, .. } = &self.transport
             && !(url.starts_with("http://") || url.starts_with("https://"))
@@ -341,6 +478,55 @@ mod tests {
         for bad in ["", "a__b", "_a", "a_", "a b", "a.b", &"x".repeat(65)] {
             assert!(validate_server_name(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn container_transport() {
+        let toml_src = r#"
+            name = "gh"
+            transport = "container"
+            image = "ghcr.io/github/github-mcp-server:2.0.2"
+            digest = "sha256:ffced0d76e77428532a2ced185516992d77fd146d69eec2f244e6237d1a97796"
+            run_args = ["-p", "127.0.0.1:8085:8085"]
+            env = { GITHUB_TOOLSETS = "repos" }
+            secrets = { GITHUB_PERSONAL_ACCESS_TOKEN = "github_token" }
+        "#;
+        let s: ServerSpec = toml::from_str(toml_src).unwrap();
+        s.validate().unwrap();
+        assert_eq!(s.transport.kind(), "container");
+        let back: ServerSpec = toml::from_str(&toml::to_string(&s).unwrap()).unwrap();
+        assert_eq!(back, s);
+        let Transport::Container { image, digest, .. } = &s.transport else {
+            panic!()
+        };
+        assert_eq!(
+            pinned_image_ref(image, digest.as_deref()),
+            "ghcr.io/github/github-mcp-server:2.0.2@sha256:ffced0d76e77428532a2ced185516992d77fd146d69eec2f244e6237d1a97796"
+        );
+        assert_eq!(
+            pinned_image_ref("a@sha256:1", Some("sha256:2")),
+            "a@sha256:1"
+        );
+        for (field, bad, needle) in [
+            ("digest", r#""sha256:abc""#, "not sha256:"),
+            ("runtime", r#""lxc""#, "not docker or podman"),
+            ("run_args", r#"["-d"]"#, "managed by mcpgw"),
+            ("run_args", r#"["--name=x"]"#, "managed by mcpgw"),
+            (
+                "run_args",
+                r#"["-e", "T=${secret:t}"]"#,
+                "can't go in run_args",
+            ),
+        ] {
+            let src = format!(
+                "name = \"c\"\ntransport = \"container\"\nimage = \"x\"\n{field} = {bad}\n"
+            );
+            let s: ServerSpec = toml::from_str(&src).unwrap();
+            let e = s.validate().unwrap_err().to_string();
+            assert!(e.contains(needle), "{field}: {e}");
+        }
+        let empty = ServerSpec::new("c", Transport::container(" "));
+        assert!(empty.validate().is_err());
     }
 
     #[test]

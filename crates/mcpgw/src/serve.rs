@@ -299,7 +299,19 @@ pub fn serve(
     };
     let catalog = catalog(&store)?;
     install_auditor(store.clone());
+    // Containers are labelled with this store, so a later daemon can remove
+    // the ones a crashed predecessor left running.
+    let instance = mcpgw_core::audit::args_digest(&serde_json::json!(
+        config.gateway.store_path().to_string_lossy()
+    ));
+    mcpgw_runtime::container::set_instance(&instance[..16]);
     runtime()?.block_on(async {
+        tokio::spawn(async {
+            let n = mcpgw_runtime::container::sweep().await;
+            if n > 0 {
+                tracing::warn!(removed = n, "removed containers left by an earlier daemon");
+            }
+        });
         let opts = ManagerOptions {
             idle_timeout: config.gateway.idle_timeout(),
             max_running: config.gateway.max_running(),

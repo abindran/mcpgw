@@ -136,6 +136,11 @@ pub fn add(config: &Config, path: &Path, i: Install) -> AnyResult<()> {
         println!("  {}", first_line(d, 100));
     }
     println!("  runs: {}", servers::describe(&spec));
+    if let mcpgw_core::Transport::Container { run_args, .. } = &spec.transport
+        && !run_args.is_empty()
+    {
+        println!("  container flags: {}", run_args.join(" "));
+    }
     for n in &plan.notes {
         println!("  note: {n}");
     }
@@ -158,25 +163,6 @@ pub fn add(config: &Config, path: &Path, i: Install) -> AnyResult<()> {
                 spec.name, s.name, s.description, s.name
             )
             .into());
-        }
-    }
-    // A first pull can take minutes and would time out the handshake.
-    if let (Some(image), mcpgw_core::Transport::Stdio { command, .. }) =
-        (&plan.image, &spec.transport)
-        && spec.enabled
-        && !i.no_introspect
-        && mcpgw_registry::on_path(command)
-    {
-        eprintln!("pulling {image}");
-        let ok = std::process::Command::new(command)
-            .args(["pull", image.as_str()])
-            .stdin(std::process::Stdio::null())
-            // progress goes to our stderr; stdout stays for results
-            .stdout(std::io::stderr())
-            .status()
-            .is_ok_and(|s| s.success());
-        if !ok {
-            eprintln!("mcpgw: could not pull {image}; is the {command} daemon running?");
         }
     }
     let label = spec.name.clone();

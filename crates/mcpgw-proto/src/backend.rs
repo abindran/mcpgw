@@ -93,6 +93,30 @@ pub struct StdioSpec {
     pub env: BTreeMap<String, String>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
+    /// Command run after the process is gone, e.g. `docker rm -f <name>`
+    /// for a container the runtime CLI was attached to. It runs once: on
+    /// shutdown (awaited), after a failed handshake (awaited, before any
+    /// retry), or in the background when the connection is dropped.
+    pub cleanup: Option<Vec<String>>,
+}
+
+/// Run a cleanup command, quietly, within 30 s.
+async fn run_cleanup(argv: Vec<String>) {
+    let Some((cmd, args)) = argv.split_first() else {
+        return;
+    };
+    let mut c = tokio::process::Command::new(cmd);
+    c.args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    match tokio::time::timeout(Duration::from_secs(30), c.status()).await {
+        Ok(Ok(s)) if s.success() => tracing::debug!(command = ?argv, "cleanup done"),
+        Ok(Ok(s)) => tracing::debug!(command = ?argv, status = %s, "cleanup exited non-zero"),
+        Ok(Err(e)) => tracing::warn!(command = ?argv, error = %e, "cleanup failed"),
+        Err(_) => tracing::warn!(command = ?argv, "cleanup timed out"),
+    }
 }
 
 #[derive(Clone, Default)]
@@ -142,6 +166,7 @@ pub(crate) struct TreeGuard {
     /// Background tasks of the connection (the SSE bridge), aborted on drop.
     pub(crate) tasks: Vec<tokio::task::JoinHandle<()>>,
     child: Option<std::sync::Mutex<Box<dyn process_wrap::tokio::ChildWrapper>>>,
+    cleanup: Option<Vec<String>>,
 }
 
 impl TreeGuard {
@@ -150,6 +175,18 @@ impl TreeGuard {
             pid: None,
             child: None,
             tasks: Vec::new(),
+            cleanup: None,
+        }
+    }
+
+    /// Kill the tree, reap it, and run the cleanup command, waiting for all.
+    async fn finish(&mut self) {
+        if let Some(c) = self.child.as_mut().and_then(|c| c.get_mut().ok()) {
+            let _ = c.start_kill();
+            let _ = tokio::time::timeout(Duration::from_secs(5), c.wait()).await;
+        }
+        if let Some(argv) = self.cleanup.take() {
+            run_cleanup(argv).await;
         }
     }
 
@@ -175,14 +212,28 @@ impl Drop for TreeGuard {
         for t in self.tasks.drain(..) {
             t.abort();
         }
+        let cleanup = self.cleanup.take();
         if let Some(mut c) = self.child.take().and_then(|c| c.into_inner().ok()) {
             let _ = c.start_kill();
             // Reap, so no zombie is left behind on Unix.
             if let Ok(rt) = tokio::runtime::Handle::try_current() {
                 rt.spawn(async move {
                     let _ = c.wait().await;
+                    if let Some(argv) = cleanup {
+                        run_cleanup(argv).await;
+                    }
                 });
+                return;
             }
+        }
+        if let Some((cmd, args)) = cleanup.as_ref().and_then(|a| a.split_first()) {
+            // no async runtime left: fire and forget
+            let _ = std::process::Command::new(cmd)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn();
         }
     }
 }
@@ -270,15 +321,23 @@ impl BackendConn {
         if let Some(err) = io.stderr().take() {
             tokio::spawn(drain_stderr(err, spec.command.clone(), stderr));
         }
-        let tree = TreeGuard {
+        let mut tree = TreeGuard {
             pid: child.id(),
             child: Some(std::sync::Mutex::new(child)),
             tasks: Vec::new(),
+            cleanup: spec.cleanup.clone(),
         };
-        // If the handshake fails, dropping `tree` kills the process tree.
-        let mut conn = Self::connect_transport((stdout, stdin), timeout, lifecycle).await?;
-        conn._tree = tree;
-        Ok(conn)
+        match Self::connect_transport((stdout, stdin), timeout, lifecycle).await {
+            Ok(mut conn) => {
+                conn._tree = tree;
+                Ok(conn)
+            }
+            Err(e) => {
+                // clean up fully before a retry starts the server again
+                tree.finish().await;
+                Err(e)
+            }
+        }
     }
 
     /// Handshake over an arbitrary transport (in-memory pipes in tests).
@@ -387,6 +446,7 @@ impl BackendConn {
         let Self { service, mut _tree } = self;
         let _ = service.cancel().await;
         _tree.wait_exit(Duration::from_secs(2)).await;
+        _tree.finish().await;
     }
 }
 

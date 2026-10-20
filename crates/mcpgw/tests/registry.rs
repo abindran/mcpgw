@@ -169,7 +169,10 @@ async fn installs_a_pinned_entry_after_showing_its_tools() {
         "{err}"
     );
     let (ok, _, err) = e.run(&["add", "plain"], "");
-    assert!(!ok && err.contains("give --command or --url"), "{err}");
+    assert!(
+        !ok && err.contains("give --command, --url or --image"),
+        "{err}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]

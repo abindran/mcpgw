@@ -62,6 +62,8 @@ enum Cmd {
     Down,
     /// Show the daemon and the state of every server.
     Status,
+    /// CPU, memory and process counts of running container servers.
+    Stats,
     /// Relay stdin/stdout to the daemon, starting it if needed. Use this as
     /// the command in clients that only launch stdio servers.
     Connect {
@@ -76,7 +78,7 @@ enum Cmd {
     /// it installs that entry from the MCP Registry at a pinned version,
     /// shows its tools and asks before adding.
     #[command(alias = "add-server")]
-    Add(AddArgs),
+    Add(Box<AddArgs>),
     /// Remove a server.
     #[command(alias = "remove-server", alias = "rm")]
     Remove {
@@ -165,8 +167,20 @@ struct AddArgs {
     /// (`io.github.github/github-mcp-server`, optionally `@<version>`).
     name: String,
     /// Stdio command to launch.
-    #[arg(long, conflicts_with = "url")]
+    #[arg(long, conflicts_with_all = ["url", "image"])]
     command: Option<String>,
+    /// Container image to run with Docker or Podman (MCP over its stdio);
+    /// its digest is pinned when added.
+    #[arg(long, conflicts_with = "url")]
+    image: Option<String>,
+    /// Container runtime for --image: docker or podman (default: whichever
+    /// is installed, Docker first).
+    #[arg(long, requires = "image")]
+    runtime: Option<String>,
+    /// Extra `run` flag for --image (repeatable), e.g. `--run-arg=-p
+    /// --run-arg=127.0.0.1:8085:8085`.
+    #[arg(long = "run-arg", requires = "image", allow_hyphen_values = true)]
+    run_args: Vec<String>,
     /// Remote MCP URL: Streamable HTTP, or a legacy `…/sse` endpoint.
     #[arg(long)]
     url: Option<String>,
@@ -195,18 +209,18 @@ struct AddArgs {
     no_introspect: bool,
     /// Registry installs: the server name to use (default: the entry's
     /// last path segment).
-    #[arg(long = "as", value_name = "NAME", conflicts_with_all = ["command", "url"])]
+    #[arg(long = "as", value_name = "NAME", conflicts_with_all = ["command", "url", "image"])]
     server_name: Option<String>,
     /// Registry installs: use the entry's hosted remote, not a package.
-    #[arg(long, conflicts_with_all = ["command", "url", "package"])]
+    #[arg(long, conflicts_with_all = ["command", "url", "image", "package"])]
     remote: bool,
     /// Registry installs: use this package type (npm, pypi or oci).
-    #[arg(long, value_name = "TYPE", conflicts_with_all = ["command", "url"])]
+    #[arg(long, value_name = "TYPE", conflicts_with_all = ["command", "url", "image"])]
     package: Option<String>,
     /// Registry installs: add without asking after showing the tools.
     #[arg(short = 'y', long)]
     yes: bool,
-    /// Arguments for the command (after `--`).
+    /// Arguments for the command or the image's entrypoint (after `--`).
     #[arg(last = true)]
     args: Vec<String>,
 }
@@ -366,11 +380,12 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Up => servers::up(&config, &path),
         Cmd::Down => servers::down(&config),
         Cmd::Status => servers::status(&config),
+        Cmd::Stats => servers::stats(&config),
         Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
-        Cmd::Add(a) if a.command.is_none() && a.url.is_none() => {
+        Cmd::Add(a) if a.command.is_none() && a.url.is_none() && a.image.is_none() => {
             if !a.name.contains('/') {
                 return Err(format!(
-                    "give --command or --url for {:?}, or a registry name such as io.github.github/github-mcp-server",
+                    "give --command, --url or --image for {:?}, or a registry name such as io.github.github/github-mcp-server",
                     a.name
                 )
                 .into());
@@ -403,6 +418,14 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Registry(RegistryCmd::Show { name }) => registry::show(&config, &name),
         Cmd::Add(a) => {
             let transport = match (a.command, a.url) {
+                (None, None) => Transport::Container {
+                    image: a.image.unwrap_or_default(),
+                    digest: None,
+                    runtime: a.runtime,
+                    args: a.args,
+                    env: a.env.into_iter().collect(),
+                    run_args: a.run_args,
+                },
                 (Some(command), None) => Transport::Stdio {
                     command,
                     args: a.args,
