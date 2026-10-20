@@ -1,0 +1,31 @@
+# The public Swagger Petstore as MCP tools, served by mcpgw itself (no MCP
+# server): its 19 operations become `pets__addPet`, `pets__getPetById`, …
+#
+# Try it on its own (a separate store and port, so your setup is untouched):
+#   mcpgw --config examples/openapi-petstore.toml secret set petstore_key   # any value: the demo API accepts it
+#   mcpgw --config examples/openapi-petstore.toml up
+#   mcpgw --config examples/openapi-petstore.toml ui                        # try the tools in the Inspector
+#   mcpgw --config examples/openapi-petstore.toml down
+#
+# Or add it to your own setup:
+#   mcpgw add pets --openapi https://petstore3.swagger.io/api/v3/openapi.json --auth api_key=petstore_key
+
+[gateway]
+mode = "direct"
+store_path = ".mcpgw-petstore/db.sqlite"   # relative to where you run mcpgw
+token_path = ".mcpgw-petstore/token"
+listen = "127.0.0.1:7788"
+
+[[server]]
+name = "pets"
+transport = "openapi"
+# the API's own spec; its relative server URL (/api/v3) resolves against it
+spec = "https://petstore3.swagger.io/api/v3/openapi.json"
+# operations that ask for the `api_key` scheme get the header from the vault
+auth = { api_key = { secret = "petstore_key" } }
+
+[[profile]]
+name = "read-only"
+servers = ["pets"]
+mode = "direct"
+policy = { allow = ["pets__get*", "pets__find*"] }

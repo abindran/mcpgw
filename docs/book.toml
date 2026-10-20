@@ -1,0 +1,13 @@
+[book]
+title = "mcpgw"
+description = "A single-binary, local MCP gateway"
+authors = ["abindran"]
+language = "en"
+src = "."
+
+[build]
+build-dir = "../target/book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/abindran/mcpgw"

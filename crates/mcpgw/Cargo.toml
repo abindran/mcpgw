@@ -40,6 +40,7 @@ clap.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "signal", "time", "net"] }
 
 [dev-dependencies]
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
 rusqlite.workspace = true
 mcpgw-vault.workspace = true
 secrecy = "0.10"

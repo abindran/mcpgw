@@ -7,7 +7,10 @@ A single-binary, local **MCP gateway**. `mcpgw` is simultaneously:
 
 proxying and bridging between them (including across protocol versions).
 
-> Status: **early development**, following the implementation plan (see the [wiki](wiki/Home.md)).
+> Status: **v1.0** (all milestones of the implementation plan; see the [wiki](wiki/Home.md)).
+> **Documentation:** [docs/](docs/README.md), with guides, an [upgrade guide](docs/upgrading.md),
+> and references for every [CLI command](docs/reference/cli.md), [config key](docs/reference/config.md)
+> and [API endpoint](docs/reference/api.md).
 
 ## Workspace layout
 

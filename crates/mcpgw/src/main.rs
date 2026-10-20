@@ -16,6 +16,7 @@ mod daemon;
 mod dev;
 mod doctor;
 mod policy;
+mod reference;
 mod registry;
 mod secrets;
 mod serve;
@@ -164,6 +165,12 @@ enum Cmd {
     /// Work on a server: run it under a private gateway, restart it on
     /// every edit, log each call, and open the inspector.
     Dev(Box<DevCmd>),
+    /// Print a reference document (M4-11): `cli`, the CLI as Markdown.
+    #[command(name = "__reference", hide = true)]
+    Reference {
+        /// Which reference: `cli`.
+        what: String,
+    },
     /// Tool policies: write Cedar from glob rules, check decisions.
     #[command(subcommand)]
     Policy(PolicyCmd),
@@ -612,6 +619,14 @@ fn run(cli: Cli) -> AnyResult<()> {
             registry::search(&config, &query.join(" "), limit)
         }
         Cmd::Registry(RegistryCmd::Show { name }) => registry::show(&config, &name),
+        Cmd::Reference { what } => match what.as_str() {
+            "cli" => {
+                use clap::CommandFactory;
+                print!("{}", reference::cli(&Cli::command()));
+                Ok(())
+            }
+            other => Err(format!("no reference {other:?} (try `cli`)").into()),
+        },
         Cmd::Dev(d) => {
             let d = *d;
             dev::run(

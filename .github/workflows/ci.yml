@@ -44,6 +44,17 @@ jobs:
           path: "**/*.cdx.json"
           if-no-files-found: error
 
+  docs:
+    name: Docs (mdBook)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook
+      # missing pages fail the build (create-missing = false)
+      - run: mdbook build docs
+
   lint:
     name: fmt / clippy
     runs-on: ubuntu-latest

@@ -45,8 +45,21 @@ fn schema() -> bool {
             .map(|s| s.success())
             .unwrap_or(false)
     };
-    let ok = regen("mcpgw-config", "schema") && regen("mcpgw-api", "openapi");
-    ok && run("git", &["status", "--short", "schema", "docs/openapi.json"])
+    // the references in docs/reference are generated from the CLI and from
+    // the two schemas, so they come last
+    let ok = regen("mcpgw-config", "schema")
+        && regen("mcpgw-api", "openapi")
+        && regen("mcpgw", "reference");
+    ok && run(
+        "git",
+        &[
+            "status",
+            "--short",
+            "schema",
+            "docs/openapi.json",
+            "docs/reference",
+        ],
+    )
 }
 
 /// Build each guest crate in `wasm/` for wasm32-unknown-unknown and encode

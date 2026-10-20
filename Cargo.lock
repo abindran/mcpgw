@@ -2595,6 +2595,7 @@ dependencies = [
  "mcpgw-telemetry",
  "mcpgw-testkit",
  "mcpgw-vault",
+ "regex",
  "reqwest",
  "rpassword",
  "rusqlite",

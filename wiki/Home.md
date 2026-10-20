@@ -110,7 +110,7 @@ M3 exit check: [M3-Exit](M3-Exit.md).
 | M4-08 | Embeddings search | ⛔ dropped |
 | [M4-09](M4-09-Long-Calls-and-Tasks.md) | Tasks extension pass-through | ✅ |
 | [M4-10](M4-10-Dev-Loop.md) | `mcpgw dev`: hot reload, request log, inspector | ✅ |
-| M4-11 | v1.0 docs | ⏳ |
+| [M4-11](M4-11-Docs.md) | v1.0 docs site, upgrade guide, migration notes | ✅ |
 
 ## Earlier numbering
 
