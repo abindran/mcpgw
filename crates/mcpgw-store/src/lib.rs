@@ -668,8 +668,9 @@ mod tests {
                 "INSERT INTO audit VALUES (7, 1, 'tool.call', 'x', 'y', NULL, '{}', 'forged', 'forged')",
                 7,
             ),
+            // always a different first digit (a hash may already start with f)
             (
-                "UPDATE audit SET hash = 'f' || substr(hash, 2) WHERE seq = 5",
+                "UPDATE audit SET hash = (CASE substr(hash, 1, 1) WHEN 'f' THEN '0' ELSE 'f' END) || substr(hash, 2) WHERE seq = 5",
                 5,
             ),
         ] {

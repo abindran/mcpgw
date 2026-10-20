@@ -75,6 +75,8 @@ M1 exit check: [M1-Exit](M1-Exit.md).
 | [M2-13](M2-13-Audit-Log.md) | Hash-chained audit log | ✅ |
 | [M2-14](M2-14-Registry.md) | MCP Registry integration | ✅ |
 
+M2 exit check: [M2-Exit](M2-Exit.md).
+
 ### M3 — Isolation and performance
 
 | ID | Item | Status |
