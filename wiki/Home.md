@@ -100,7 +100,7 @@ M3 exit check: [M3-Exit](M3-Exit.md).
 
 | ID | Item | Status |
 |----|------|--------|
-| M4-01 | Wasm launcher | ⏳ |
+| [M4-01](M4-01-Wasm-Launcher.md) | Wasm launcher | ✅ |
 | M4-02 | Wasm capability grants | ⏳ |
 | M4-03 | Wasm limits | ⏳ |
 | M4-04 | Wasm tool SDK and template | ⏳ |

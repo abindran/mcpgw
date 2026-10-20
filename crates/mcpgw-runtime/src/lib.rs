@@ -11,6 +11,7 @@ pub mod container;
 pub mod manager;
 pub mod packages;
 pub mod state;
+pub mod wasm;
 
 pub use approvals::{ApprovalView, Approvals};
 pub use calls::{CallLog, CallRecord};

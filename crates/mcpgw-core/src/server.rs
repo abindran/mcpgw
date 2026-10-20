@@ -69,6 +69,12 @@ pub enum Transport {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         egress: Option<Vec<String>>,
     },
+    /// A Wasm component exporting the `mcpgw:tool` world, run in-process
+    /// with wasmtime (M4-01).
+    Wasm {
+        /// The component file (`.wasm`).
+        path: PathBuf,
+    },
 }
 
 /// Split an egress entry `host:port`, checking both parts.
@@ -190,15 +196,17 @@ impl Transport {
                 .chain(args.iter().cloned())
                 .collect::<Vec<_>>()
                 .join(" "),
+            Self::Wasm { path } => path.display().to_string(),
         }
     }
 
-    /// Short kind name: `stdio`, `http` or `container`.
+    /// Short kind name: `stdio`, `http`, `container` or `wasm`.
     pub fn kind(&self) -> &'static str {
         match self {
             Self::Stdio { .. } => "stdio",
             Self::Http { .. } => "http",
             Self::Container { .. } => "container",
+            Self::Wasm { .. } => "wasm",
         }
     }
 }
@@ -405,6 +413,7 @@ impl ServerSpec {
                     *v = fill(v);
                 }
             }
+            Transport::Wasm { .. } => {}
         }
         s
     }
@@ -475,6 +484,7 @@ impl ServerSpec {
             Transport::Stdio { command, .. } => command.trim().is_empty(),
             Transport::Http { url, .. } => url.trim().is_empty(),
             Transport::Container { image, .. } => image.trim().is_empty(),
+            Transport::Wasm { path } => path.as_os_str().is_empty(),
         };
         if empty {
             return Err(Error::Config(format!(

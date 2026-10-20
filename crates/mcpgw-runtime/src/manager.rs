@@ -893,6 +893,7 @@ pub(crate) enum Template {
     Stdio(StdioSpec),
     Http(HttpSpec),
     Container(ContainerTemplate),
+    Wasm(crate::wasm::WasmTemplate),
 }
 
 impl Template {
@@ -909,6 +910,7 @@ impl Template {
                 let (conn, info) = c.connect(timeout, sink).await?;
                 Ok((conn, Some(info)))
             }
+            Template::Wasm(w) => Ok((w.connect(timeout).await?, None)),
         }
     }
 }
@@ -939,6 +941,7 @@ impl Launch {
             Template::Container(c) => crate::container::pick_runtime(c.runtime.as_deref())
                 .unwrap_or_else(|_| "container".into()),
             Template::Http(_) => "http".into(),
+            Template::Wasm(_) => "wasm".into(),
         }
     }
 
@@ -990,6 +993,9 @@ impl Launch {
                 egress: egress.clone(),
                 files: cfg.files.clone(),
             }),
+            Transport::Wasm { path } => {
+                Template::Wasm(crate::wasm::WasmTemplate { path: path.clone() })
+            }
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),
                 headers: headers.clone(),
@@ -1069,7 +1075,7 @@ impl Launch {
                     env.insert(var.clone(), lookup(name).unwrap_or_default());
                 }
             }
-            Template::Http(_) => {}
+            Template::Http(_) | Template::Wasm(_) => {}
         }
         if let Template::Container(c) = &mut spec {
             for v in c.files.values_mut() {
@@ -1077,7 +1083,7 @@ impl Launch {
             }
         }
         match &mut spec {
-            Template::Stdio(_) | Template::Container(_) => {}
+            Template::Stdio(_) | Template::Container(_) | Template::Wasm(_) => {}
             Template::Http(h) => {
                 h.url = fill(&h.url);
                 for v in h.headers.values_mut() {

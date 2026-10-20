@@ -10,6 +10,7 @@ pub mod backend;
 pub mod front;
 pub mod http;
 pub mod limits;
+pub mod local;
 pub mod relay;
 pub mod spike_bridge;
 pub mod spike_server;
@@ -21,6 +22,7 @@ pub mod spike_server;
 /// M0-04 / M0-05 spikes.
 pub use backend::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
 pub use http::HttpSpec;
+pub use local::LocalTools;
 
 pub mod version {
     /// Protocol version presented to LLM clients (server side).

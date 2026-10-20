@@ -1,0 +1,20 @@
+# A test Wasm tool server (not part of the workspace): built for
+# wasm32-unknown-unknown and turned into a component by `cargo xtask wasm`.
+[package]
+name = "echo-tool"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = { version = "0.63", default-features = false, features = ["macros", "realloc"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true
+
+[workspace]

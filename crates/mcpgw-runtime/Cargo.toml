@@ -14,6 +14,8 @@ getrandom.workspace = true
 mcpgw-core.workspace = true
 mcpgw-proto.workspace = true
 mcpgw-vault.workspace = true
+mcpgw-wasm.workspace = true
+futures = "0.3"
 secrecy = "0.10"
 tokio = { workspace = true, features = ["sync", "time", "macros", "process"] }
 tracing.workspace = true

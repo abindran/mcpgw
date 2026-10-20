@@ -535,6 +535,24 @@
             "image"
           ],
           "type": "object"
+        },
+        {
+          "description": "A Wasm component exporting the `mcpgw:tool` world, run in-process\nwith wasmtime (M4-01).",
+          "properties": {
+            "path": {
+              "description": "The component file (`.wasm`).",
+              "type": "string"
+            },
+            "transport": {
+              "const": "wasm",
+              "type": "string"
+            }
+          },
+          "required": [
+            "transport",
+            "path"
+          ],
+          "type": "object"
         }
       ],
       "properties": {

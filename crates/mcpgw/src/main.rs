@@ -191,6 +191,10 @@ struct AddArgs {
     /// its digest is pinned when added.
     #[arg(long, conflicts_with = "url")]
     image: Option<String>,
+    /// A Wasm component exporting the `mcpgw:tool` world, run in-process
+    /// with wasmtime.
+    #[arg(long, value_name = "FILE", conflicts_with_all = ["command", "url", "image"])]
+    wasm: Option<PathBuf>,
     /// Container runtime for --image: docker or podman (default: whichever
     /// is installed, Docker first).
     #[arg(long, requires = "image")]
@@ -464,6 +468,7 @@ fn run(cli: Cli) -> AnyResult<()> {
     }
     let config = Config::load_or_default(&path)?;
     mcpgw_runtime::packages::set_dir(config.gateway.runtimes_path());
+    mcpgw_runtime::wasm::set_cache_dir(config.gateway.runtimes_path().join("wasm"));
     match cli.cmd {
         Cmd::Serve { stdio, profile } => serve::serve(
             &config,
@@ -479,7 +484,9 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Doctor { .. } => unreachable!("handled before the config loads"),
         Cmd::Scan { server } => servers::scan(&config, server.as_deref()),
         Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
-        Cmd::Add(a) if a.command.is_none() && a.url.is_none() && a.image.is_none() => {
+        Cmd::Add(a)
+            if a.command.is_none() && a.url.is_none() && a.image.is_none() && a.wasm.is_none() =>
+        {
             if !a.name.contains('/') {
                 return Err(format!(
                     "give --command, --url or --image for {:?}, or a registry name such as io.github.github/github-mcp-server",
@@ -521,6 +528,13 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Runtimes(RuntimesCmd::Ls) => servers::runtimes_ls(&config),
         Cmd::Add(a) => {
             let transport = match (a.command, a.url) {
+                (None, None) if a.wasm.is_some() => {
+                    let p = a.wasm.clone().unwrap_or_default();
+                    // stored absolute: the daemon may run from elsewhere
+                    let path =
+                        std::fs::canonicalize(&p).map_err(|e| format!("{}: {e}", p.display()))?;
+                    Transport::Wasm { path }
+                }
                 (None, None) => Transport::Container {
                     image: a.image.unwrap_or_default(),
                     digest: None,

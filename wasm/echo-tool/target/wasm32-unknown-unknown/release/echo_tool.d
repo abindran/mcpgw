@@ -1,0 +1,1 @@
+/Users/abindran-21221/Abindran/mcpgw/wasm/echo-tool/target/wasm32-unknown-unknown/release/echo_tool.wasm: /Users/abindran-21221/Abindran/mcpgw/crates/mcpgw-wasm/wit/tool.wit /Users/abindran-21221/Abindran/mcpgw/wasm/echo-tool/src/lib.rs
