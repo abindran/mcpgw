@@ -1,0 +1,11 @@
+[gateway]
+mode = "direct"
+store_path = "@DIR@/db.sqlite"
+token_path = "@DIR@/token"
+listen = "127.0.0.1:0"
+
+[[profile]]
+name = "narrow"
+servers = ["echo"]
+mode = "direct"
+policy = { deny = ["echo__crash"] }

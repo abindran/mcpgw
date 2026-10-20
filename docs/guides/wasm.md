@@ -41,6 +41,8 @@ mcpgw_tool::export!(tools);
   world (`crates/mcpgw-wasm/wit/tool.wit`) works: `list-tools` and
   `call-tool`, with JSON text.
 
+[`examples/wasm-text-tools`](https://github.com/abindran/mcpgw/tree/main/examples/wasm-text-tools) is a complete example with two tools.
+
 While you work on it, `mcpgw dev ./hello-tool.wasm` reloads the component on
 every rebuild ([Developing a server](dev.md)).
 

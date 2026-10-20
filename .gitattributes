@@ -2,3 +2,4 @@
 * text=auto eol=lf
 *.png binary
 *.wasm binary
+*.sqlite binary

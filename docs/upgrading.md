@@ -10,6 +10,14 @@ mcpgw doctor               # checks the config, vault, store, servers and client
 mcpgw up
 ```
 
+The upgrade from an M3 build is tested: `crates/mcpgw/tests/upgrade.rs`
+runs v1.0 against a config, store and vault written by the M3 binary
+(`tests/fixtures/m3/`).
+- The server starts against its M3 pin.
+- The secret decrypts, is injected and redacted.
+- The profile's policy applies.
+- The audit chain verifies, and `mcpgw doctor` finds nothing broken.
+
 ## What carries over
 
 | | |

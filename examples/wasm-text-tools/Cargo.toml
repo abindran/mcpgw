@@ -1,0 +1,23 @@
+[package]
+name = "text-tools"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+# Its own workspace: built for wasm32-unknown-unknown, outside mcpgw's.
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# outside this repository: mcpgw-tool = { git = "https://github.com/abindran/mcpgw" }
+mcpgw-tool = { path = "../../crates/mcpgw-tool" }
+serde = { version = "1", features = ["derive"] }
+schemars = "1"
+serde_json = "1"
+
+[profile.release]
+opt-level = "s"
+lto = true
+strip = true

@@ -7,7 +7,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
-# once published: mcpgw-tool = "0.1"
+# once published: mcpgw-tool = "1"
 mcpgw-tool = { git = "https://github.com/abindran/mcpgw" }
 serde = { version = "1", features = ["derive"] }
 schemars = "1"

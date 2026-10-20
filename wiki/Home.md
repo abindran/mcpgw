@@ -112,6 +112,8 @@ M3 exit check: [M3-Exit](M3-Exit.md).
 | [M4-10](M4-10-Dev-Loop.md) | `mcpgw dev`: hot reload, request log, inspector | ✅ |
 | [M4-11](M4-11-Docs.md) | v1.0 docs site, upgrade guide, migration notes | ✅ |
 
+M4 exit check: [M4-Exit](M4-Exit.md). The release is prepared; publishing it (pushing the `v1.0.0` tag) is the maintainer's step.
+
 ## Earlier numbering
 
 Work before the plan used its own IDs. The pages are kept in

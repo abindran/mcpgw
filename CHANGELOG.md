@@ -42,6 +42,16 @@ each config or API change comes with an upgrade note in
 - **Documentation:** guides, an upgrade guide, and CLI, configuration and
   HTTP API references generated from the code (`docs/`, built as an
   mdBook).
+- **Releases.** Each release has:
+  - archives for five targets, with checksums, Sigstore signatures and
+    build attestations;
+  - an SBOM;
+  - a container image pinned by digest;
+  - a shell installer and a Homebrew formula.
+- **Examples:** `examples/wasm-text-tools`, a Wasm tool server, and
+  `examples/openapi-petstore.toml`, an OpenAPI API.
+- **The upgrade from M3 builds is tested**, against a store, vault and config
+  written by the M3 binary.
 
 ### Changed
 

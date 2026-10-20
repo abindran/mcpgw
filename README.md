@@ -55,6 +55,16 @@ accepted from older clients and servers.
 - **Agent self-adding servers:** **off by default** (supply-chain / tool-poisoning safeguard).
 - **Embeddings search:** not built; tool search is BM25 only.
 
+## Install
+
+```sh
+curl -fsSL https://github.com/abindran/mcpgw/releases/latest/download/install.sh | sh   # macOS and Linux
+cargo install --locked --git https://github.com/abindran/mcpgw mcpgw                    # from source
+```
+
+Release archives (five targets) come with checksums, Sigstore signatures, build
+attestations and an SBOM; see [Getting started](docs/getting-started.md).
+
 ## Build & run
 
 ```sh

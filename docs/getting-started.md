@@ -3,10 +3,26 @@
 ## Install
 
 ```sh
-cargo install --locked --git https://github.com/abindran/mcpgw mcpgw
+curl -fsSL https://github.com/abindran/mcpgw/releases/latest/download/install.sh | sh   # macOS and Linux
+cargo install --locked --git https://github.com/abindran/mcpgw mcpgw                    # from source, Rust 1.98+
 ```
 
-Rust 1.98 or later. On Linux, the keychain is used through the Secret
+Each release has archives for Linux (glibc and musl), macOS (arm64 and
+x86_64) and Windows. With them come a `SHA256SUMS` file, an SBOM, Sigstore
+signatures (`*.sigstore.json`), GitHub build attestations, a Homebrew
+formula (`mcpgw.rb`) and a container image pinned by digest. To check an
+archive:
+
+```sh
+cosign verify-blob mcpgw-1.0.0-aarch64-apple-darwin.tar.gz \
+  --bundle mcpgw-1.0.0-aarch64-apple-darwin.tar.gz.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/abindran/mcpgw/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+gh attestation verify mcpgw-1.0.0-aarch64-apple-darwin.tar.gz --repo abindran/mcpgw
+```
+
+The container serves one client on stdio:
+`docker run -i --rm -v ~/.config/mcpgw:/config ghcr.io/abindran/mcpgw:1.0.0`. On Linux, the keychain is used through the Secret
 Service; set `MCPGW_VAULT_PASSPHRASE` where there is none (servers, CI).
 
 ## Five minutes

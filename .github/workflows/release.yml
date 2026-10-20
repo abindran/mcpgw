@@ -1,0 +1,130 @@
+name: release
+
+# A tag `v*` builds, signs and publishes a release. `workflow_dispatch` is a
+# dry run: it builds and packages everything but signs and publishes nothing
+# (keyless signing writes to the public Sigstore log).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - { os: macos-14, target: aarch64-apple-darwin }
+          - { os: macos-15-intel, target: x86_64-apple-darwin }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - run: cargo build --release --locked -p mcpgw --target ${{ matrix.target }}
+      - name: package
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_TYPE" = tag ] || version="0.0.0-dev"
+          name="mcpgw-${version}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          bin=target/${{ matrix.target }}/release/mcpgw
+          [ -f "$bin.exe" ] && bin="$bin.exe"
+          cp "$bin" README.md CHANGELOG.md "dist/$name/"
+          cp LICENSE* "dist/$name/" 2>/dev/null || true
+          cd dist
+          if [ "${{ runner.os }}" = Windows ]; then
+            7z a "$name.zip" "$name" > /dev/null
+          else
+            tar czf "$name.tar.gz" "$name"
+          fi
+          rm -rf "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  sbom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-cyclonedx
+      - run: cargo cyclonedx --format json --all
+      - run: mkdir -p dist && cp crates/mcpgw/*.cdx.json dist/mcpgw.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-sbom
+          path: dist/*
+
+  publish:
+    needs: [build, sbom]
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: installer and checksums
+        run: |
+          cp scripts/install.sh dist/
+          cd dist && sha256sum * > SHA256SUMS
+      - uses: sigstore/cosign-installer@v3
+      - name: sign (keyless)
+        run: |
+          cd dist
+          for f in *; do
+            cosign sign-blob --yes --bundle "$f.sigstore.json" "$f"
+          done
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/*
+      - name: Homebrew formula
+        run: bash scripts/homebrew-formula.sh "${GITHUB_REF_NAME#v}" dist > dist/mcpgw.rb
+      - name: release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v v="## [$version]" 'index($0, v) == 1 {on=1; next} /^## \[/ {on=0} on' CHANGELOG.md > notes.md
+      - name: GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --title "mcpgw $GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+      - name: container image (pinned by digest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          mkdir ctx && tar xzf dist/mcpgw-${version}-x86_64-unknown-linux-musl.tar.gz -C ctx --strip-components=1
+          cp Dockerfile ctx/
+          echo "$GH_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -t "$image:$version" ctx
+          docker push "$image:$version"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$version")
+          cosign sign --yes "$digest"
+          echo "image: $digest" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "9fc2c8d3d9f72a28",
+  "kek": {
+    "source": "passphrase",
+    "kdf": "argon2id",
+    "m_kib": 65536,
+    "t": 3,
+    "p": 1,
+    "salt": "NAuO04GmHY/ZscxsFW9whw=="
+  },
+  "check": {
+    "nonce": "NnWPKUJkcbwyE7QBpaBgsfUh8ZsSweVT",
+    "ct": "ZfYllnMhhx4FeZHQRhWTng0mY9Caf8DwBWfM9zwH/H4G"
+  },
+  "secrets": {
+    "m3_secret": {
+      "dek": {
+        "nonce": "gs2YA57C+dTFHjRH6J8dY6TsbZOiPQvq",
+        "ct": "nAaj/KXJGEzhsPaDzy7TzC0bRTJPZ0nTjv6CleKzRPO8bf8igTCgRWKBtcmic1X1"
+      },
+      "value": {
+        "nonce": "RENxeo7HOkAYzBmtwH5XHAkSfIAC/0HK",
+        "ct": "WCo1VmB+Y7M5RR5rO0e20CfhZKSrtr4GMU8qeztUsw=="
+      },
+      "created_at": 1792520893,
+      "updated_at": 1792520893
+    }
+  }
+}

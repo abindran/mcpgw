@@ -2578,7 +2578,7 @@ checksum = "4facc753ae494aeb6e3c22f839b158aebd4f9270f55cd3c79906c45476c47ab4"
 
 [[package]]
 name = "mcpgw"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "clap",
@@ -2609,7 +2609,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-api"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "mcpgw-auth",
@@ -2628,7 +2628,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-auth"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.3",
@@ -2643,7 +2643,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-cedar"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "cedar-policy",
  "mcpgw-core",
@@ -2653,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-config"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "mcpgw-core",
  "schemars 1.2.3",
@@ -2665,7 +2665,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "regex",
  "rustls",
@@ -2679,7 +2679,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-openapi"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2695,7 +2695,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-proto"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "futures",
@@ -2715,7 +2715,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-registry"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "mcpgw-core",
  "reqwest",
@@ -2726,7 +2726,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-router"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "mcpgw-core",
@@ -2744,7 +2744,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-runtime"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "futures",
@@ -2767,7 +2767,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-store"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "mcpgw-core",
  "rusqlite",
@@ -2778,7 +2778,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-telemetry"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "getrandom 0.4.3",
  "opentelemetry",
@@ -2795,7 +2795,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-testkit"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -2809,7 +2809,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-tool"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "schemars 1.2.3",
  "serde",
@@ -2819,7 +2819,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-vault"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "argon2",
  "base64 0.22.1",
@@ -2837,7 +2837,7 @@ dependencies = [
 
 [[package]]
 name = "mcpgw-wasm"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "serde_json",
  "sha2 0.10.9",
@@ -6210,7 +6210,7 @@ checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
 
 [[package]]
 name = "xtask"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "wit-component 0.262.0",
 ]
