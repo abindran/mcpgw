@@ -199,7 +199,25 @@ impl GatewayProvider {
     }
 }
 
+/// `ttlMs` of a direct or hybrid listing: short, so stateless clients
+/// re-list soon after servers change.
+pub const LIST_TTL_MS: u64 = 5_000;
+/// `ttlMs` of the meta-tools listing, which never changes.
+pub const META_LIST_TTL_MS: u64 = 3_600_000;
+
 impl ToolProvider for GatewayProvider {
+    fn changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        // the meta-tools listing never changes, so there is nothing to tell
+        (self.opts.mode != Mode::Meta).then(|| self.manager.catalog().changes())
+    }
+
+    fn list_ttl_ms(&self) -> Option<u64> {
+        Some(match self.opts.mode {
+            Mode::Meta => META_LIST_TTL_MS,
+            _ => LIST_TTL_MS,
+        })
+    }
+
     fn list_tools(&self) -> BoxFuture<'_, Vec<JsonObject>> {
         Box::pin(async move {
             let r: Result<_, std::convert::Infallible> =

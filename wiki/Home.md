@@ -69,7 +69,7 @@ M1 exit check: [M1-Exit](M1-Exit.md).
 | [M2-07](M2-07-Profiles.md) | Profiles | ✅ |
 | [M2-08](M2-08-Tool-Policy.md) | Tool policy | ✅ |
 | [M2-09](M2-09-Approvals.md) | Approvals | ✅ |
-| M2-10 | Direct-mode change propagation | ⏳ |
+| [M2-10](M2-10-Change-Propagation.md) | Direct-mode change propagation | ✅ |
 | M2-11 | Admin REST API v1 with OpenAPI | ⏳ |
 | M2-12 | Minimal web UI | ⏳ |
 | M2-13 | Hash-chained audit log | ⏳ |

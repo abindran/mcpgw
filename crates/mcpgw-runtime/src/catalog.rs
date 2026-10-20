@@ -14,10 +14,17 @@ use mcpgw_proto::{JsonObject, ProtoError};
 pub type Persist = Arc<dyn Fn(&ToolManifest) + Send + Sync>;
 
 /// In-memory manifests by server name.
-#[derive(Default)]
 pub struct Catalog {
     manifests: std::sync::RwLock<BTreeMap<String, ToolManifest>>,
     persist: Option<Persist>,
+    /// Bumped whenever the listed tools may have changed (M2-10).
+    version: tokio::sync::watch::Sender<u64>,
+}
+
+impl Default for Catalog {
+    fn default() -> Self {
+        Self::new(Vec::new(), None)
+    }
 }
 
 impl Catalog {
@@ -28,7 +35,20 @@ impl Catalog {
                 initial.into_iter().map(|m| (m.server.clone(), m)).collect(),
             ),
             persist,
+            version: tokio::sync::watch::Sender::new(0),
         }
+    }
+
+    /// Changes to the tool set: the value goes up whenever a manifest is
+    /// recorded or removed, or a server is added, removed, enabled or
+    /// disabled.
+    pub fn changes(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.version.subscribe()
+    }
+
+    /// Signal that the tool set may have changed.
+    pub fn bump(&self) {
+        self.version.send_modify(|v| *v += 1);
     }
 
     /// A server's manifest.
@@ -58,15 +78,28 @@ impl Catalog {
         if let Some(p) = &self.persist {
             p(&m);
         }
-        self.manifests
+        let changed = self
+            .manifests
             .write()
             .expect("catalog")
-            .insert(m.server.clone(), m);
+            .insert(m.server.clone(), m.clone())
+            .is_none_or(|old| old.sha256 != m.sha256);
+        if changed {
+            self.bump();
+        }
     }
 
     /// Forget a server's manifest.
     pub fn remove(&self, server: &str) {
-        self.manifests.write().expect("catalog").remove(server);
+        if self
+            .manifests
+            .write()
+            .expect("catalog")
+            .remove(server)
+            .is_some()
+        {
+            self.bump();
+        }
     }
 }
 

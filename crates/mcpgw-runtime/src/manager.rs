@@ -347,7 +347,9 @@ impl BackendManager {
         } else {
             cfg.clone()
         };
-        self.insert(&cfg.name, &launch, None)
+        self.insert(&cfg.name, &launch, None)?;
+        self.catalog.bump();
+        Ok(())
     }
 
     /// The backend key serving `server` for `account`, creating the
@@ -523,6 +525,7 @@ impl BackendManager {
             self.drop_backend(&key).await;
         }
         self.drop_backend(server).await;
+        self.catalog.bump();
         Ok(())
     }
 
@@ -543,8 +546,11 @@ impl BackendManager {
                 h.shared.snapshot().last_error.unwrap_or_default()
             ))
         })?;
-        rx.await
-            .map_err(|_| ProtoError::Unavailable(format!("server {server} is shut down")))?
+        let r = rx
+            .await
+            .map_err(|_| ProtoError::Unavailable(format!("server {server} is shut down")))?;
+        self.catalog.bump();
+        r
     }
 
     /// A server's spec as configured.

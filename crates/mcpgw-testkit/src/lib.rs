@@ -140,11 +140,20 @@ pub struct TestHandler {
     cfg: rmcp::model::ClientConfig,
     answer: Option<bool>,
     asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    list_changed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl rmcp::ClientHandler for TestHandler {
     fn get_info(&self) -> rmcp::model::ClientConfig {
         self.cfg.clone()
+    }
+
+    async fn on_tool_list_changed(
+        &self,
+        _context: rmcp::service::NotificationContext<rmcp::RoleClient>,
+    ) {
+        self.list_changed
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     async fn create_elicitation(
@@ -198,6 +207,7 @@ fn handler(kind: ClientKind, asked: std::sync::Arc<std::sync::Mutex<Vec<String>>
         cfg,
         answer: kind.approve,
         asked,
+        list_changed: Default::default(),
     }
 }
 
@@ -238,6 +248,43 @@ impl McpClient {
             lifecycle()
         };
         Self::http_with(url, token, lc, kind).await
+    }
+
+    /// `notifications/tools/list_changed` received on the session (legacy
+    /// clients; 2026 clients use [`McpClient::listen_tools`]).
+    pub fn list_changed_count(&self) -> usize {
+        self.svc
+            .service()
+            .list_changed
+            .load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Open a 2026-07-28 `subscriptions/listen` for tool list changes.
+    pub async fn listen_tools(&self) -> Result<ToolChanges, String> {
+        let filter = rmcp::model::SubscriptionFilter::builder()
+            .tools_list_changed()
+            .build();
+        let sub = self
+            .svc
+            .peer()
+            .listen(filter)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(ToolChanges(sub))
+    }
+
+    /// The raw `tools/list` result (with `ttlMs`).
+    pub async fn list_raw(&self) -> Result<serde_json::Value, String> {
+        let r = self.svc.list_tools(None).await.map_err(|e| e.to_string())?;
+        Ok(serde_json::to_value(r).expect("list json"))
+    }
+
+    /// The server's capabilities as JSON.
+    pub fn server_capabilities(&self) -> serde_json::Value {
+        self.svc
+            .peer_info()
+            .map(|i| serde_json::to_value(&i.capabilities).unwrap_or_default())
+            .unwrap_or_default()
     }
 
     /// Messages of the elicitations this client was shown.
@@ -373,5 +420,24 @@ impl McpClient {
     /// Hang up.
     pub async fn close(self) {
         let _ = self.svc.cancel().await;
+    }
+}
+
+/// A `subscriptions/listen` stream of tool list changes.
+pub struct ToolChanges(rmcp::service::Subscription);
+
+impl ToolChanges {
+    /// Wait for the next `tools/list_changed`; `false` if the subscription
+    /// ended.
+    pub async fn next(&mut self) -> bool {
+        loop {
+            match self.0.next().await {
+                Ok(Some(rmcp::model::ServerNotification::ToolListChangedNotification(_))) => {
+                    return true;
+                }
+                Ok(Some(_)) => continue,
+                _ => return false,
+            }
+        }
     }
 }

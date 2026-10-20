@@ -190,9 +190,16 @@ async fn daemon_server_and_secret_commands() {
             .contains(&"extra__add".to_string())
     );
 
-    // disable / enable, live
+    // disable / enable, live: a 2026 client caches tools/list for its
+    // ttlMs, and the list_changed it subscribed to refreshes it (M2-10)
+    let mut changes = c.listen_tools().await.unwrap();
     e.ok(&["disable", "extra"]);
     assert!(e.ok(&["status"]).contains("extra\tdisabled"));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_secs(5), changes.next())
+            .await
+            .unwrap()
+    );
     assert!(
         !c.tool_names()
             .await

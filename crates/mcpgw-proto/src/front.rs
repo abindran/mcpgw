@@ -33,6 +33,18 @@ pub trait ToolProvider: Send + Sync + 'static {
         arguments: Option<JsonObject>,
         ctx: CallContext,
     ) -> BoxFuture<'_, Result<JsonObject, ProtoError>>;
+
+    /// A counter that goes up when the tool list may have changed. With it,
+    /// clients are told (`notifications/tools/list_changed`) instead of
+    /// having to reconnect (M2-10).
+    fn changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
+        None
+    }
+
+    /// How long clients may cache `tools/list` (`ttlMs`, 2026-07-28).
+    fn list_ttl_ms(&self) -> Option<u64> {
+        None
+    }
 }
 
 /// What the gateway knows about the client making a call.
@@ -117,11 +129,18 @@ pub fn to_error_data(e: ProtoError) -> ErrorData {
 
 impl<P: ToolProvider> ServerHandler for Front<P> {
     fn get_info(&self) -> ServerConfig {
-        let mut cfg = ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new(
-                self.info.name.clone(),
-                self.info.version.clone(),
-            ));
+        let caps = if self.provider.changes().is_some() {
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build()
+        } else {
+            ServerCapabilities::builder().enable_tools().build()
+        };
+        let mut cfg = ServerConfig::new(caps).with_server_info(Implementation::new(
+            self.info.name.clone(),
+            self.info.version.clone(),
+        ));
         if let Some(i) = &self.info.instructions {
             cfg = cfg.with_instructions(i.clone());
         }
@@ -144,7 +163,67 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
         }
         let mut result = ListToolsResult::default();
         result.tools = tools;
+        result.ttl_ms = self.provider.list_ttl_ms();
         Ok(result)
+    }
+
+    /// 2025-11-25 sessions: push `tools/list_changed` on the session.
+    async fn on_initialized(&self, context: rmcp::service::NotificationContext<RoleServer>) {
+        let Some(mut rx) = self.provider.changes() else {
+            return;
+        };
+        rx.mark_unchanged();
+        let peer = context.peer;
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    r = rx.changed() => {
+                        if r.is_err() || peer.notify_tool_list_changed().await.is_err() {
+                            break;
+                        }
+                    }
+                    // stop once the session is gone, even if nothing changes
+                    _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
+                        if peer.is_transport_closed() {
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// 2026-07-28: `subscriptions/listen` for `tools/list_changed`.
+    fn accepted_subscription_filter(
+        &self,
+        _requested: &rmcp::model::SubscriptionFilter,
+    ) -> Option<rmcp::model::SubscriptionFilter> {
+        self.provider.changes().map(|_| {
+            rmcp::model::SubscriptionFilter::builder()
+                .tools_list_changed()
+                .build()
+        })
+    }
+
+    async fn listen(
+        &self,
+        subscription: rmcp::service::SubscriptionContext,
+    ) -> Result<(), ErrorData> {
+        let Some(mut rx) = self.provider.changes() else {
+            subscription.cancelled().await;
+            return Ok(());
+        };
+        rx.mark_unchanged();
+        loop {
+            tokio::select! {
+                _ = subscription.cancelled() => return Ok(()),
+                r = rx.changed() => {
+                    if r.is_err() || subscription.sink().notify_tool_list_changed().await.is_err() {
+                        return Ok(());
+                    }
+                }
+            }
+        }
     }
 
     async fn call_tool(
