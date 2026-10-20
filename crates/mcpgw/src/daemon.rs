@@ -175,6 +175,31 @@ fn detach(cmd: &mut Command) {
         const DETACHED_PROCESS: u32 = 0x0000_0008;
         const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
         cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        no_inherit_std_handles();
+    }
+}
+
+/// Windows creates children with handle inheritance on, so the daemon
+/// would also inherit *our* stdin/stdout/stderr: the pipes of whoever ran
+/// `mcpgw up` or `mcpgw connect`. They would then never see EOF while the
+/// daemon lives (a hung `$(mcpgw up)`, or an MCP client that never notices
+/// the shim exited). Clearing the inherit flag on our own std handles
+/// prevents that; the daemon's own stdio is set explicitly.
+#[cfg(windows)]
+fn no_inherit_std_handles() {
+    use windows_sys::Win32::{
+        Foundation::{HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation},
+        System::Console::{GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE},
+    };
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls on this process's own std handles; a
+        // null or invalid handle is skipped.
+        unsafe {
+            let h = GetStdHandle(id);
+            if !h.is_null() && h != INVALID_HANDLE_VALUE {
+                SetHandleInformation(h, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
     }
 }
 
