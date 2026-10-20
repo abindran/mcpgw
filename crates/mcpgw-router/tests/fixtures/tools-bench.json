@@ -1,0 +1,2445 @@
+[
+{
+"description": "Searches for local businesses and places using Brave's Local Search API. Best for queries related to physical locations, businesses, restaurants, services, etc. Returns detailed information including:\n- Business names and addresses\n- Ratings and review counts\n- Phone numbers and opening hours\nUse this when the query implies 'near me' or mentions specific locations. Automatically falls back to web search if no local results are found.",
+"name": "brave_local_search",
+"params": {
+"count": "Number of results (1-20, default 5)",
+"query": "Local search query (e.g. 'pizza near Central Park')"
+},
+"server": "brave"
+},
+{
+"description": "Performs a web search using the Brave Search API, ideal for general queries, news, articles, and online content. Use this for broad information gathering, recent events, or when you need diverse web sources. Supports pagination, content filtering, and freshness controls. Maximum 20 results per request, with offset for pagination. ",
+"name": "brave_web_search",
+"params": {
+"count": "Number of results (1-20, default 10)",
+"offset": "Pagination offset (max 9, default 0)",
+"query": "Search query (max 400 chars, 50 words)"
+},
+"server": "brave"
+},
+{
+"description": "Retrieves and queries up-to-date documentation and code examples from Context7 for any programming library or framework.\n\nYou must call 'Resolve Context7 Library ID' tool first to obtain the exact Context7-compatible library ID required to use this tool, UNLESS the user explicitly provides a library ID in the format '/org/project' or '/org/project/version' in their query.\n\nDo not call this tool more than 3 times per question.\n\nIf you know the programming language the user is working in, pass it as `language` so the results match their setup.",
+"name": "query-docs",
+"params": {
+"language": "Programming language the user is writing code in, such as 'Python', 'TypeScript', 'Go', or 'C#'. Ranks code examples in that language first. Leave it out when the language is unknown or does not apply",
+"libraryId": "Exact Context7-compatible library ID (e.g., '/mongodb/docs', '/vercel/next.js', '/supabase/supabase', '/vercel/next.js/v16.2.9') retrieved from 'resolve-library-id' or directly from user query in the ",
+"query": "What to look up in the library's documentation, scoped to a single concept. Be specific and include relevant details, but keep each query to one topic \u2014 if the user's question spans multiple distinct "
+},
+"server": "context7"
+},
+{
+"description": "Resolves a package/product name to a Context7-compatible library ID and returns matching libraries.\n\nYou MUST call this function before 'Query Documentation' tool to obtain a valid Context7-compatible library ID UNLESS the user explicitly provides a library ID in the format '/org/project' or '/org/project/version' in their query.\n\nEach result includes:\n- Library ID: Context7-compatible identifier (format: /org/project)\n- Name: Library or package name\n- Description: Short summary\n- Code Snippets: Number of available code examples\n- Source Reputation: Authority indicator (High, Medium, Low, or Unknown)\n- Benchmark Score: Quality indicator (100 is the highest score)\n- Versions: List of versions if available. Use one of those versions if the user provides a version in their query. The format of the version is /org/project/version.\n\nFor best results, select libraries based on name match, source reputation, snippet coverage, benchmark score, and relevance to your use case.\n\nSelection Process:\n1. Analyze the query to understand what library/package the user is looking for\n2. Return the most relevant match based on:\n- Name similarity to the query (exact matches prioritized)\n- Description r",
+"name": "resolve-library-id",
+"params": {
+"libraryName": "Library name to search for and retrieve a Context7-compatible library ID. Use the official library name with proper punctuation \u2014 e.g., 'Next.js' instead of 'nextjs', 'Customer.io' instead of 'custome",
+"query": "What to look up in the library's documentation. This is used to rank library results by relevance to what the user is trying to accomplish. The query is sent to the Context7 API for processing. Do not"
+},
+"server": "context7"
+},
+{
+"description": "Echoes back the input string",
+"name": "echo",
+"params": {
+"message": "Message to echo"
+},
+"server": "everything"
+},
+{
+"description": "Demonstrates how annotations can be used to provide metadata about content.",
+"name": "get-annotated-message",
+"params": {
+"includeImage": "Whether to include an example image",
+"messageType": "Type of message to demonstrate different annotation patterns"
+},
+"server": "everything"
+},
+{
+"description": "Returns all environment variables, helpful for debugging MCP server configuration",
+"name": "get-env",
+"params": {},
+"server": "everything"
+},
+{
+"description": "Returns up to ten resource links that reference different types of resources",
+"name": "get-resource-links",
+"params": {
+"count": "Number of resource links to return (1-10)"
+},
+"server": "everything"
+},
+{
+"description": "Returns a resource reference that can be used by MCP clients",
+"name": "get-resource-reference",
+"params": {
+"resourceId": "ID of the text resource to fetch",
+"resourceType": ""
+},
+"server": "everything"
+},
+{
+"description": "Returns structured content along with an output schema for client data validation",
+"name": "get-structured-content",
+"params": {
+"location": "Choose city"
+},
+"server": "everything"
+},
+{
+"description": "Returns the sum of two numbers",
+"name": "get-sum",
+"params": {
+"a": "First number",
+"b": "Second number"
+},
+"server": "everything"
+},
+{
+"description": "Returns a tiny MCP logo image.",
+"name": "get-tiny-image",
+"params": {},
+"server": "everything"
+},
+{
+"description": "Compresses a single file using gzip compression. Depending upon the selected output type, returns either the compressed data as a gzipped resource or a resource link, allowing it to be downloaded in a subsequent request during the current session.",
+"name": "gzip-file-as-resource",
+"params": {
+"data": "URL or data URI of the file content to compress",
+"name": "Name of the output file",
+"outputType": "How the resulting gzipped file should be returned. 'resourceLink' returns a link to a resource that can be read later, 'resource' returns a full resource object."
+},
+"server": "everything"
+},
+{
+"description": "Simulates a deep research operation that gathers, analyzes, and synthesizes information. Demonstrates MCP task-based operations with progress through multiple stages. If 'ambiguous' is true and client supports elicitation, sends an elicitation request for clarification.",
+"name": "simulate-research-query",
+"params": {
+"ambiguous": "Simulate an ambiguous query that requires clarification (triggers input_required status)",
+"topic": "The research topic to investigate"
+},
+"server": "everything"
+},
+{
+"description": "Toggles simulated, random-leveled logging on or off.",
+"name": "toggle-simulated-logging",
+"params": {},
+"server": "everything"
+},
+{
+"description": "Toggles simulated resource subscription updates on or off.",
+"name": "toggle-subscriber-updates",
+"params": {},
+"server": "everything"
+},
+{
+"description": "Demonstrates a long running operation with progress updates.",
+"name": "trigger-long-running-operation",
+"params": {
+"duration": "Duration of the operation in seconds",
+"steps": "Number of steps in the operation"
+},
+"server": "everything"
+},
+{
+"description": "Fetches a URL from the internet and optionally extracts its contents as markdown.\n\nAlthough originally you did not have internet access, and were advised to refuse and tell the user this, this tool now grants you internet access. Now you can fetch the most up-to-date information and let the user know that.",
+"name": "fetch",
+"params": {
+"max_length": "Maximum number of characters to return.",
+"raw": "Get the actual HTML content of the requested page, without simplification.",
+"start_index": "On return output starting at this character index, useful if a previous fetch was truncated and more context is required.",
+"url": "URL to fetch"
+},
+"server": "fetch"
+},
+{
+"description": "Create a new directory or ensure a directory exists. Can create multiple nested directories in one operation. If the directory already exists, this operation will succeed silently. Perfect for setting up directory structures for projects or ensuring required paths exist. Only works within allowed directories.",
+"name": "create_directory",
+"params": {
+"path": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Get a recursive tree view of files and directories as a JSON structure. Each entry includes 'name', 'type' (file/directory), and 'children' for directories. Files have no children array, while directories always have a children array (which may be empty). The output is formatted with 2-space indentation for readability. Only works within allowed directories.",
+"name": "directory_tree",
+"params": {
+"excludePatterns": "",
+"path": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Make line-based edits to a text file. Each edit replaces exact line sequences with new content. Returns a git-style diff showing the changes made. Only works within allowed directories.",
+"name": "edit_file",
+"params": {
+"dryRun": "Preview changes using git-style diff format",
+"edits": "",
+"path": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Retrieve detailed metadata about a file or directory. Returns comprehensive information including size, creation time, last modified time, permissions, and type. This tool is perfect for understanding file characteristics without reading the actual content. Only works within allowed directories.",
+"name": "get_file_info",
+"params": {
+"path": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Returns the list of directories that this server is allowed to access. Subdirectories within these allowed directories are also accessible. Use this to understand which directories and their nested paths are available before trying to access files.",
+"name": "list_allowed_directories",
+"params": {},
+"server": "filesystem"
+},
+{
+"description": "Get a detailed listing of all files and directories in a specified path. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is essential for understanding directory structure and finding specific files within a directory. Only works within allowed directories.",
+"name": "list_directory",
+"params": {
+"path": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Get a detailed listing of all files and directories in a specified path, including sizes. Results clearly distinguish between files and directories with [FILE] and [DIR] prefixes. This tool is useful for understanding directory structure and finding specific files within a directory. Only works within allowed directories.",
+"name": "list_directory_with_sizes",
+"params": {
+"path": "",
+"sortBy": "Sort entries by name or size"
+},
+"server": "filesystem"
+},
+{
+"description": "Move or rename files and directories. Can move files between directories and rename them in a single operation. If the destination exists, the operation will fail. Works across different directories and can be used for simple renaming within the same directory. Both source and destination must be within allowed directories.",
+"name": "move_file",
+"params": {
+"destination": "",
+"source": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Read the complete contents of a file as text. DEPRECATED: Use read_text_file instead.",
+"name": "read_file",
+"params": {
+"head": "If provided, returns only the first N lines of the file",
+"path": "",
+"tail": "If provided, returns only the last N lines of the file"
+},
+"server": "filesystem"
+},
+{
+"description": "Read a file and return it as a base64-encoded content block with its MIME type. Image and audio files are returned as image/audio content; any other file type is returned as an embedded resource. Only works within allowed directories.",
+"name": "read_media_file",
+"params": {
+"path": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Read the contents of multiple files simultaneously. This is more efficient than reading files one by one when you need to analyze or compare multiple files. Each file's content is returned with its path as a reference. Failed reads for individual files won't stop the entire operation. Only works within allowed directories.",
+"name": "read_multiple_files",
+"params": {
+"paths": "Array of file paths to read. Each path must be a string pointing to a valid file within allowed directories."
+},
+"server": "filesystem"
+},
+{
+"description": "Read the complete contents of a file from the file system as text. Handles various text encodings and provides detailed error messages if the file cannot be read. Use this tool when you need to examine the contents of a single file. Use the 'head' parameter to read only the first N lines of a file, or the 'tail' parameter to read only the last N lines of a file. Operates on the file as text regardless of extension. Only works within allowed directories.",
+"name": "read_text_file",
+"params": {
+"head": "If provided, returns only the first N lines of the file",
+"path": "",
+"tail": "If provided, returns only the last N lines of the file"
+},
+"server": "filesystem"
+},
+{
+"description": "Recursively search for files and directories matching a pattern. The patterns should be glob-style patterns that match paths relative to the working directory. Use pattern like '*.ext' to match files in current directory, and '**/*.ext' to match files in all subdirectories. Returns full paths to all matching items. Great for finding files when you don't know their exact location. Only searches within allowed directories.",
+"name": "search_files",
+"params": {
+"excludePatterns": "",
+"path": "",
+"pattern": ""
+},
+"server": "filesystem"
+},
+{
+"description": "Create a new file or completely overwrite an existing file with new content. Use with caution as it will overwrite existing files without warning. Handles text content with proper encoding. Only works within allowed directories.",
+"name": "write_file",
+"params": {
+"content": "",
+"path": ""
+},
+"server": "filesystem"
+},
+{
+"description": "\nRun web research that returns structured data when the URLs are not known or the answer spans several sites. Describe the fields you need in `prompt`, optionally pass a JSON `schema` and seed `urls`, and the research agent searches, navigates, reads pages, and returns JSON assembled across sources. Use it to research an entity plus its fields (founders, pricing, contact details), to build lists and datasets (companies, people, products, jobs, papers), and for pages that need navigation or interaction to reach the data. Optional `effort` sets the reasoning budget, `maxCredits` caps spend, and `strictConstrainToURLs` keeps the agent to the supplied `urls`.\n\nThis call returns only a job ID, not the research result. Read the job with `firecrawl_agent_status` until it reaches `completed` or `failed`; a typical research run takes one to three minutes. For one known URL use `firecrawl_scrape` (with formats: [\"json\"] for structured output); for a plain lookup that a results page answers, use `firecrawl_search`.\n\nThe job also returns a `threadId`. To continue that thread, pass it with a follow-up `prompt`; omitted `mode`, `urls`, `schema` and exchange settings carry over from the previous ",
+"name": "firecrawl_agent",
+"params": {
+"effort": "Reasoning budget for the agent task.",
+"exchange": "Alexandria provider settings for this turn, forwarded as the request's exchange object.",
+"maxCredits": "Spending limit in credits for this run. Defaults to 2500 on the API.",
+"mode": "\"extract\" (default) returns the complete structured result every turn. \"chat\" lets a follow-up that asks no new data get a short reply in message instead of a re-run; required for exchange.requireAppr",
+"prompt": "",
+"schema": "",
+"strictConstrainToURLs": "If true, agent will only visit URLs provided in the urls array.",
+"threadId": "Continue this thread: the threadId from an earlier firecrawl_agent or firecrawl_agent_status result. Omit to start a new thread.",
+"urls": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nRetrieve progress or final results for a `firecrawl_agent` job ID. A `processing` response is non-terminal and does not contain the final research result. Check again after 15\u201330 seconds until the status is `completed` or `failed`; a typical research run takes one to three minutes and complex jobs can take longer. If the job cannot finish within the task's available time, use `firecrawl_search` and `firecrawl_scrape` to complete the requested output.\n\nReturns job status, progress information, and result data when completed.\n",
+"name": "firecrawl_agent_status",
+"params": {
+"id": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nRetrieve the current status, progress, and available results for an existing crawl ID. This only reads Firecrawl job state and does not start or modify the crawl.\n",
+"name": "firecrawl_check_crawl_status",
+"params": {
+"id": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nStart a multi-page crawl at a website URL, poll it to a terminal state, and return the final status and collected data. Scope can be bounded with include/exclude paths, depth, page limit, subdomain/external-link controls, sitemap handling, delay, and scrape options.\n\nCrawl results can be large; use conservative limits when full-site coverage is unnecessary. Webhooks and interactive scrape actions are unavailable in safe mode. Returns the crawl ID, status, and page data.\n",
+"name": "firecrawl_crawl",
+"params": {
+"allowExternalLinks": "",
+"allowSubdomains": "",
+"crawlEntireDomain": "",
+"deduplicateSimilarURLs": "",
+"delay": "",
+"excludePaths": "",
+"ignoreQueryParameters": "",
+"includePaths": "",
+"limit": "",
+"maxConcurrency": "",
+"maxDiscoveryDepth": "",
+"prompt": "",
+"scrapeOptions": "",
+"sitemap": "",
+"url": "",
+"webhook": "",
+"webhookHeaders": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nGet the authenticated Firecrawl team's current credit balance or historical credit consumption. Use the current view to answer how many credits remain or to check billing-period boundaries. Use the historical view for monthly usage reporting and trend analysis.\n\nThe current view returns `remainingCredits`, `planCredits`, `billingPeriodStart`, and `billingPeriodEnd`. Extra purchased or granted credits can make `remainingCredits` greater than `planCredits`. Billing-period dates may be null when the upstream billing provider has no period metadata.\n\nThe historical view returns periods sorted by start date with `startDate`, `endDate`, and `creditsUsed`. Set `byApiKey` to include separate periods per API key, identified by the optional `apiKey` field. The newest period's `endDate` can be null.\n",
+"name": "firecrawl_credit_usage",
+"params": {
+"byApiKey": "Break historical usage down by API key. When view is omitted, true selects the historical view; it cannot be combined with view \"current\".",
+"view": "Select current balance or historical monthly usage. Defaults to current."
+},
+"server": "firecrawl"
+},
+{
+"description": "\nSearch an index of public repositories, GitHub issues, merged pull requests, repository READMEs, and code documentation for programming questions that need external documentation or upstream evidence.\n\nReturns ranked results with an ID, source type, URL, title, and the matched passages in markdown.\n",
+"name": "firecrawl_developer_search",
+"params": {
+"k": "Number of ranked results to return (default 10).",
+"query": "Natural-language developer question or search phrase, including the library, error message, or API involved when relevant.",
+"skills": "Set to \"only\" to search only agent-skill files."
+},
+"server": "firecrawl"
+},
+{
+"description": "\nSubmit concise quality feedback for a completed search, scrape, parse, or map job. Provide the endpoint, job ID, rating, and relevant issue codes or small contextual fields; omit large page contents and raw outputs.\n\nFor an Alexandria session, set endpoint to `alexandria`, omit jobId, and provide requestedWebsite (url and requestedFunctionality), objective, rationale, and rating. objective is the underlying goal behind the session: what you or your user were ultimately trying to accomplish (for example, \"shortlist federal IT contracts to bid on this quarter\"), not only what was needed from this website. Optional providerFeedback and capabilityFeedback describe gaps or errors. Capability issues: new_capability_request (requires requestedFunctionality), missing_capability, insufficient_functionality, incorrect_result, execution_error, other. Alexandria feedback must arrive within 20 minutes of the team's latest Alexandria search, discovery, or execution; later feedback is rejected. Eligible feedback can refund 1 credit; refunds are subject to daily caps per website and per team.\n\nReturns submission status, feedback ID, and accounting fields.\n",
+"name": "firecrawl_feedback",
+"params": {
+"capabilityFeedback": "",
+"endpoint": "",
+"issues": "",
+"jobId": "",
+"metadata": "",
+"missingContent": "",
+"note": "",
+"objective": "",
+"pageNumbers": "",
+"providerFeedback": "",
+"querySuggestions": "",
+"rating": "",
+"rationale": "",
+"requestedWebsite": "",
+"tags": "",
+"url": "",
+"valuableSources": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "Browse Alexandria data providers and workflows or read a selected contract. Alexandria covers companies, people, jobs, finance and filings, public records and government spending, real estate, places and restaurants, retail and prices, package registries and developer data, news, research, and more: typed, sourced records through published contracts. Prefer normal firecrawl_search for a data task; it already returns matching providers. Use this tool when the contract you need was not returned in full, to browse a category when search found nothing, or before scraping the same fields from several pages. Discovery is free. Use query for semantic discovery or urls to find providers for a website. With no arguments, browse categories, then providers and tools. Contracts describe the inputs and outputs for execution through firecrawl_scrape. nextTool identifies further discovery or pagination. Discovery does not execute providers. Use firecrawl_search when you also need web results.",
+"name": "firecrawl_find_tools",
+"params": {
+"capabilities": "Values from each listed tool's `capability` field (e.g. \"apps/app\"). Put the provider in `providers`: {\"providers\": [\"apps-apple-com\"], \"capabilities\": [\"apps/app\"]}. A selected capability expands its",
+"categories": "Category IDs returned by an empty call. Lists providers by default.",
+"expand": "Use [\"options\", \"response\"] for inputs and output shape without example payloads; [] keeps results compact. Omit for full contracts on selected capabilities.",
+"groups": "Optional group IDs for explicit group browsing.",
+"includeCosts": "Include per-capability credit prices (creditsCost, perRecord) in tool results.",
+"level": "",
+"limit": "",
+"offset": "",
+"providers": "Values from each listed tool's `provider` field (e.g. \"apps-apple-com\"). Alone, lists that provider's compact tools; with capabilities, scopes them.",
+"query": "Semantic lookup of tools for the data you need. Selectors constrain the search.",
+"urls": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nSearch US federal, state, and local statutes, regulations, codes, court opinions, and other government publications for legal or regulatory questions that need primary text. Clarify a missing jurisdiction or ambiguous as-of date before identifying the governing rule.\n\nReturns ranked results with a position, title, URL, and matched snippet. Results may include historical versions, bill text, agency guidance, and third-party reproductions. Verify the issuer, jurisdiction, enacted/effective status, and version before citing current governing law. Read a known URL or additional page context with firecrawl_scrape. Use general search for non-US questions or missing coverage; no hits does not establish that no applicable law exists.\n",
+"name": "firecrawl_gov_search",
+"params": {
+"k": "Number of ranked results to return (default 10).",
+"query": "Natural-language legal or regulatory question or search phrase, including the jurisdiction, agency, or citation when relevant."
+},
+"server": "firecrawl"
+},
+{
+"description": "\nOpen or reuse a live browser session to navigate a page, click controls, fill fields, or run browser code. Provide either `url` or `scrapeId`, and either a natural-language `prompt` or executable `code`; code can run as Bash, Python, or Node with a bounded timeout.\n\nThis acts on the live site, so actions such as form submission can create persistent external side effects. Returns execution output, stdout/stderr, exit status, and session viewing URLs.\n",
+"name": "firecrawl_interact",
+"params": {
+"code": "",
+"language": "",
+"prompt": "",
+"scrapeId": "",
+"scrapeOptions": "",
+"timeout": "",
+"url": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nStop the live interact session associated with a `scrapeId` and release its resources. Returns a success confirmation.\n",
+"name": "firecrawl_interact_stop",
+"params": {
+"scrapeId": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nEnumerate URLs indexed under one website through Firecrawl without fetching each page's content. Use this when the request asks for a site's URL inventory, when several relevant pages must be located, or when the desired page URL is unknown. An optional `search` term narrows the URL list, while sitemap, subdomain, query-parameter, and result-limit options control coverage.\n\nReturns matching URLs rather than page bodies. Retrieve one page with `firecrawl_scrape`; collect content across multiple pages with `firecrawl_crawl`. Authenticated responses can include an `id` for optional map feedback.\n",
+"name": "firecrawl_map",
+"params": {
+"ignoreQueryParameters": "",
+"includeSubdomains": "",
+"limit": "",
+"search": "",
+"sitemap": "",
+"url": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nRetrieve one monitor check and its page-level results, optionally filtered by page status. Pages report `same`, `new`, `changed`, `removed`, or `error`; configured goal judging can add a meaningful-change decision.\n\nMarkdown tracking returns a unified text diff, JSON tracking returns field paths with previous/current values and a current snapshot, and mixed tracking returns both. Returns one page of results plus a `next` URL when more pages exist.\n",
+"name": "firecrawl_monitor_check",
+"params": {
+"checkId": "",
+"id": "",
+"limit": "",
+"pageStatus": "",
+"skip": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nList historical checks for a monitor, optionally filtered by status and bounded by a result limit. Returns one page of check summaries and pagination metadata.\n",
+"name": "firecrawl_monitor_checks",
+"params": {
+"id": "",
+"limit": "",
+"offset": "",
+"status": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nCreate a recurring scrape, crawl, or search monitor that compares each check with its retained predecessor. The simple form accepts `page`/`pages` or `queries` plus a plain-language `goal`; the advanced `body` form controls targets, schedule, change-tracking formats, judging, retention, webhook, and notifications.\n\nIn the simple form, a `goal` is required. If `queries` contains one or more non-empty values and is supplied with `page`/`pages`, `queries` create the search target and page targets are ignored. A monitor schedules future network checks and can send configured email or webhook notifications. Returns the created monitor.\n",
+"name": "firecrawl_monitor_create",
+"params": {
+"body": "",
+"email": "",
+"excludeDomains": "",
+"goal": "",
+"includeDiffs": "",
+"includeDomains": "",
+"maxResults": "",
+"name": "",
+"page": "",
+"pages": "",
+"queries": "",
+"scheduleText": "",
+"searchWindow": "",
+"timezone": "",
+"webhookUrl": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nPermanently delete a monitor by ID and stop its future schedule. This operation cannot be undone and returns deletion status.\n",
+"name": "firecrawl_monitor_delete",
+"params": {
+"id": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nRetrieve one monitor by ID, including its configuration and current state. This does not run or modify the monitor.\n",
+"name": "firecrawl_monitor_get",
+"params": {
+"id": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nList monitors for the authenticated account with optional pagination controls. Returns one page of monitor records and pagination metadata.\n",
+"name": "firecrawl_monitor_list",
+"params": {
+"limit": "",
+"offset": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nQueue an immediate check for a monitor outside its normal schedule. This starts network work for the monitor's configured targets and returns the queued check.\n",
+"name": "firecrawl_monitor_run",
+"params": {
+"id": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nPatch an existing monitor by ID. The body can change its name, active/paused status, schedule, targets, goal, judging, webhook, notifications, or retention; these changes affect future scheduled checks.\n\nReturns the updated monitor.\n",
+"name": "firecrawl_monitor_update",
+"params": {
+"body": "",
+"id": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nParse one supported document into markdown, HTML, links, summary, targeted answers, or JSON matching a schema. Supported inputs include common HTML, PDF, Word, RTF, OpenDocument, and spreadsheet files; PDF parsing can be bounded with `pdfOptions.maxPages`.\n\nLocal MCP reads `filePath` from the server filesystem. Hosted MCP uses two calls: first provide `filePath` to receive upload instructions, upload locally, then call again with the returned `uploadRef`; do not send both fields together. Remote web URLs belong in `firecrawl_scrape`.\n\nSet `redactPII` to request redaction of personally identifiable information in the returned content. `zeroDataRetention` requires an eligible authenticated account; omit it for anonymous keyless use. Returns upload instructions for hosted phase one or parsed document content for the final call. Authenticated final responses can include a `data.metadata.scrapeId` for optional parse feedback.\n",
+"name": "firecrawl_parse",
+"params": {
+"contentType": "Optional MIME type override. If omitted, the server infers the file kind from the extension.",
+"excludeTags": "",
+"filePath": "Absolute or relative path to a local file to parse. Supported: .html, .htm, .pdf, .docx, .doc, .odt, .rtf, .xlsx, .xls",
+"formats": "",
+"includeTags": "",
+"jsonOptions": "",
+"maxAge": "Ignored: parse never reuses or stores indexed content.",
+"onlyMainContent": "",
+"parsers": "",
+"pdfOptions": "",
+"proxy": "",
+"queryOptions": "",
+"redactPII": "",
+"removeBase64Images": "",
+"skipTlsVerification": "",
+"storeInCache": "",
+"zeroDataRetention": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nRetrieve canonical metadata for one paper ID, such as an arXiv, PMC, PMID, or DOI identifier. Returns the title, abstract, authors, categories, source IDs, and dates as markdown.\n",
+"name": "firecrawl_research_inspect_paper",
+"params": {
+"paperId": "Canonical paperId or primaryId such as `arxiv:1706.03762`, `pmcid:PMC12530322`, `pmid:40953549`, or `doi:10.1016/j.neunet.2025.108095`."
+},
+"server": "firecrawl"
+},
+{
+"description": "\nRetrieve in-body passages from one paper that are relevant to a specific question. Full text is available only for indexed papers; `k` controls the number of passages.\n\nReturns matching passages or a notice when full text is unavailable.\n",
+"name": "firecrawl_research_read_paper",
+"params": {
+"k": "Number of passages to return (default 4).",
+"paperId": "Canonical paperId or primaryId such as `arxiv:1706.03762`, `pmcid:PMC12530322`, `pmid:40953549`, or `doi:10.1016/j.neunet.2025.108095`.",
+"question": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nFind citation-graph candidates from one to ten `seed_ids`; the first ID is the primary seed and later IDs are anchors. `mode` defaults to `similar` (co-citation/bibliographic coupling); `citers` returns papers citing a seed and `references` papers cited by a seed. `intent` ranks candidates.\n\nReturns ranked candidates and the evaluated pool size.\n",
+"name": "firecrawl_research_related_papers",
+"params": {
+"intent": "",
+"k": "",
+"mode": "",
+"rerank": "Apply an additional rerank over the fused candidates.",
+"seed_ids": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nSearch paper metadata and abstracts with a natural-language query across the indexed corpus, which spans biomedical, life-science, and clinical literature (PubMed, bioRxiv, medRxiv) alongside arXiv and other scientific sources. Optional author, category, and date filters constrain results.\n\nSeveral distinct framings of the same question surface different papers than a single query does.\n\nReturns ranked papers with canonical IDs, titles, authors, and abstracts.\n",
+"name": "firecrawl_research_search_papers",
+"params": {
+"authors": "Author substring filter(s); ALL must match (case-insensitive).",
+"categories": "Paper category filter(s) (e.g. `cs.LG`); ALL provided values must match.",
+"from": "Inclusive lower bound on created/updated date (`YYYY-MM-DD`).",
+"k": "Number of ranked papers to return (default 40).",
+"query": "Natural-language research topic or question, including methods, systems, conditions, populations, interventions, or outcomes when relevant.",
+"to": "Inclusive upper bound on created/updated date (`YYYY-MM-DD`)."
+},
+"server": "firecrawl"
+},
+{
+"description": "\nScrape one URL and return its content: markdown by default, or HTML, links, screenshots, branding data, a targeted answer, or JSON matching a supplied schema. Use it when the request identifies a page and needs its content or defined fields: the user gives a URL or names a page or PDF and wants it read or summarized, or wants prices, specs, contact details or a table from it. Use `firecrawl_search` when additional web sources are needed; on an authenticated session, `firecrawl_map` lists a site's URLs and `firecrawl_crawl` collects a set of pages.\n\nFirecrawl may serve recently indexed content; set `maxAge: 0` for a live fetch or a smaller `maxAge` to bound staleness. A successful response does not by itself confirm the page is still current. Browser actions can change the live page when interactive actions are enabled. Authenticated responses can include a `metadata.scrapeId` for optional scrape feedback.\n\n`firecrawl_search` and `firecrawl_find_tools` can discover providers for the same fields across several pages; a matching provider returns typed records in one call.\n\nWith `alexandria` in place of `url`, the tool runs catalogued provider capabilities instead of fetching a page. ",
+"name": "firecrawl_scrape",
+"params": {
+"actions": "",
+"alexandria": "Catalogued Alexandria capability invocation, mutually exclusive with url. One {provider, capability, options} object or an array of 1-10, with contracts available through firecrawl_search or firecrawl",
+"domainTools": "URL mode only: include domain-matched Alexandria tools for the page in tools on the returned document. Ignored with alexandria.",
+"excludeTags": "",
+"formats": "",
+"includeTags": "",
+"jsonOptions": "",
+"location": "",
+"lockdown": "",
+"maxAge": "",
+"mobile": "",
+"onlyMainContent": "",
+"parsers": "",
+"pdfOptions": "",
+"profile": "",
+"proxy": "",
+"queryOptions": "",
+"redactPII": "",
+"removeBase64Images": "",
+"requestId": "Idempotency key bound to one Alexandria execution payload. Generated when omitted and returned with the result.",
+"screenshotOptions": "",
+"skipTlsVerification": "",
+"storeInCache": "",
+"timeout": "Execution timeout in milliseconds.",
+"toolDetail": "URL mode only: domain discovery detail, summary by default; compact returns provider/capability/description, full includes contracts. Ignored with alexandria.",
+"url": "",
+"waitFor": "",
+"zeroDataRetention": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "\nSearch web, news, or image sources and return ranked results with query-relevant highlights. Use it for current information, or to list businesses, people, products, jobs or events with websites, prices or contacts. Each web result is a title, URL, and description; use `firecrawl_scrape` on a result URL when the excerpt is not enough.\n\nAuthenticated search also returns matching Alexandria data providers in data.tools (companies, people, jobs, finance and filings, public records and government spending, real estate, places and restaurants, retail and prices, package registries and developer data, news, research, and more). Prefer a provider over scraping pages when the task needs the same fields across several entities, exact figures or timestamps, provenance, or many records; use web results when they already answer the question. Authenticated searches always add alexandria to the sources, so sources: [\"web\"] also returns providers; domainTools: false turns off website-matched tools only.\n\nOn an authenticated session, tool matches describe available capabilities; `firecrawl_find_tools` returns their contracts and `firecrawl_scrape` with an `alexandria` body executes a selected cap",
+"name": "firecrawl_search",
+"params": {
+"categories": "Limit results to specific source types. `research` restricts ordinary web results to research-affiliated websites and returns page snippets, which is separate from the `firecrawl_research_*` tools tha",
+"domainTools": "Include domain-matched tools for result URLs. Defaults to true when Alexandria is combined with web, news or images; semantic-only search leaves domain matching off.",
+"enterprise": "",
+"excludeDomains": "Hostnames to leave out of results. Mutually exclusive with includeDomains.",
+"filter": "",
+"highlights": "Return query-relevant page excerpts for web and news results when available (default). Highlights appear in web `description` and news `snippet`; otherwise, original snippets are returned. Set to fals",
+"includeDomains": "Hostnames to restrict results to. Mutually exclusive with excludeDomains.",
+"limit": "",
+"location": "",
+"query": "Query for web and semantic tool discovery. Operators include quoted phrases, `-term`, `site:host`, `inurl:term`, `intitle:term`, and `related:host`; the set is non-exhaustive. Catalogue browsing is av",
+"scrapeOptions": "Attach page content for web results in the same call. These fetches ignore maxAge, so use firecrawl_scrape when you need a live fetch. scrapeOptions fetches web pages, never Alexandria provider tools.",
+"sources": "Search sources; authenticated sessions default to web + alexandria, keyless sessions to web only. Authenticated searches always add alexandria to the sources, so sources: [\"web\"] also returns provider",
+"tbs": "",
+"toolDetail": "Compact by default. Compact returns only provider, capability and description; full includes contracts. Inspect selected compact tools with firecrawl_find_tools providers and capabilities."
+},
+"server": "firecrawl"
+},
+{
+"description": "\nRecords schema-validated quality feedback for a prior `firecrawl_search` UUID `searchId`. A `good` rating requires a valuable source, `partial` a valuable source or at least one `missingContent` entry, and `bad` at least one `missingContent` entry or a query suggestion; caps are 50 `valuableSources` and 20 `missingContent` entries.\n\nEligibility is limited to successful searches within the feedback age window. The record is idempotent per search ID. Eligible first feedback for a search can refund 1 credit; refunds are subject to the team's daily cap. The response reports whether a refund was applied, along with submission and daily-cap status.\n",
+"name": "firecrawl_search_feedback",
+"params": {
+"missingContent": "Array of specific pieces of content the agent expected to find but did not. One entry per distinct topic. Each entry has a short `topic` and optional longer `description`.",
+"querySuggestions": "",
+"rating": "",
+"searchId": "",
+"valuableSources": ""
+},
+"server": "firecrawl"
+},
+{
+"description": "Adds file contents to the staging area",
+"name": "git_add",
+"params": {
+"files": "",
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "List Git branches",
+"name": "git_branch",
+"params": {
+"branch_type": "Whether to list local branches ('local'), remote branches ('remote') or all branches('all').",
+"contains": "The commit sha that branch should contain. Do not pass anything to this param if no commit sha is specified",
+"not_contains": "The commit sha that branch should NOT contain. Do not pass anything to this param if no commit sha is specified",
+"repo_path": "The path to the Git repository."
+},
+"server": "git"
+},
+{
+"description": "Switches branches",
+"name": "git_checkout",
+"params": {
+"branch_name": "",
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "Records changes to the repository",
+"name": "git_commit",
+"params": {
+"message": "",
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "Creates a new branch from an optional base branch",
+"name": "git_create_branch",
+"params": {
+"base_branch": "",
+"branch_name": "",
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "Shows differences between branches or commits",
+"name": "git_diff",
+"params": {
+"context_lines": "",
+"repo_path": "",
+"target": ""
+},
+"server": "git"
+},
+{
+"description": "Shows changes that are staged for commit",
+"name": "git_diff_staged",
+"params": {
+"context_lines": "",
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "Shows changes in the working directory that are not yet staged",
+"name": "git_diff_unstaged",
+"params": {
+"context_lines": "",
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "Shows the commit logs",
+"name": "git_log",
+"params": {
+"end_timestamp": "End timestamp for filtering commits. Accepts: ISO 8601 format (e.g., '2024-01-15T14:30:25'), relative dates (e.g., '2 weeks ago', 'yesterday'), or absolute dates (e.g., '2024-01-15', 'Jan 15 2024')",
+"max_count": "",
+"repo_path": "",
+"start_timestamp": "Start timestamp for filtering commits. Accepts: ISO 8601 format (e.g., '2024-01-15T14:30:25'), relative dates (e.g., '2 weeks ago', 'yesterday'), or absolute dates (e.g., '2024-01-15', 'Jan 15 2024')"
+},
+"server": "git"
+},
+{
+"description": "Unstages all staged changes",
+"name": "git_reset",
+"params": {
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "Shows the contents of a commit, or of a file or directory given as <revision>:<path>",
+"name": "git_show",
+"params": {
+"repo_path": "",
+"revision": ""
+},
+"server": "git"
+},
+{
+"description": "Shows the working tree status",
+"name": "git_status",
+"params": {
+"repo_path": ""
+},
+"server": "git"
+},
+{
+"description": "Create a new branch in a GitLab project",
+"name": "create_branch",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Create a new issue in a GitLab project",
+"name": "create_issue",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Create a new merge request in a GitLab project",
+"name": "create_merge_request",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Create or update a single file in a GitLab project",
+"name": "create_or_update_file",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Create a new GitLab project",
+"name": "create_repository",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Fork a GitLab project to your account or specified namespace",
+"name": "fork_repository",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Get the contents of a file or directory from a GitLab project",
+"name": "get_file_contents",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Push multiple files to a GitLab project in a single commit",
+"name": "push_files",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Search for GitLab projects",
+"name": "search_repositories",
+"params": {},
+"server": "gitlab"
+},
+{
+"description": "Cleanup all managed resources",
+"name": "cleanup",
+"params": {},
+"server": "kubernetes"
+},
+{
+"description": "Execute a command in a Kubernetes pod or container and return the output. Command must be an array of strings where the first element is the executable and remaining elements are arguments. This executes directly without shell interpretation for security.",
+"name": "exec_in_pod",
+"params": {
+"command": "Command to execute as an array of strings (e.g. [\"ls\", \"-la\", \"/app\"]). First element is the executable, remaining are arguments. Shell operators like pipes, redirects, or command chaining are not sup",
+"container": "Container name (required when pod has multiple containers)",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"name": "Name of the pod to execute the command in",
+"namespace": "Kubernetes namespace",
+"timeout": "Timeout for command - 60000 milliseconds if not specified"
+},
+"server": "kubernetes"
+},
+{
+"description": "Get documentation for a Kubernetes resource or field",
+"name": "explain_resource",
+"params": {
+"apiVersion": "API version to use (e.g. 'apps/v1')",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"output": "Output format (plaintext or plaintext-openapiv2)",
+"recursive": "Print the fields of fields recursively",
+"resource": "Resource name or field path (e.g. 'pods' or 'pods.spec.containers')"
+},
+"server": "kubernetes"
+},
+{
+"description": "Install a Helm chart with support for both standard and template-based installation",
+"name": "install_helm_chart",
+"params": {
+"chart": "Chart name (e.g., 'nginx') or path to chart directory",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"createNamespace": "Create namespace if it doesn't exist",
+"name": "Name of the Helm release",
+"namespace": "Kubernetes namespace",
+"repo": "Helm repository URL (optional if using local chart path)",
+"useTemplate": "Use helm template + kubectl apply instead of helm install (bypasses auth issues)",
+"values": "Custom values to override chart defaults",
+"valuesFile": "Path to values file (alternative to values object). The path is read on the machine running the MCP server, so it is rejected when the server runs over a remote (SSE/Streamable HTTP) transport; use 'v"
+},
+"server": "kubernetes"
+},
+{
+"description": "Apply a Kubernetes YAML manifest from a string or file",
+"name": "kubectl_apply",
+"params": {
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"dryRun": "If true, only validate the resource, don't actually execute the operation",
+"filename": "Path to a YAML file to apply (optional - use either manifest or filename). The path is read on the machine running the MCP server, so it is rejected when the server runs over a remote (SSE/Streamable ",
+"force": "If true, immediately remove resources from API and bypass graceful deletion",
+"manifest": "YAML manifest to apply",
+"namespace": "Kubernetes namespace"
+},
+"server": "kubernetes"
+},
+{
+"description": "Manage Kubernetes contexts - list, get, or set the current context",
+"name": "kubectl_context",
+"params": {
+"detailed": "Include detailed information about the context",
+"name": "Name of the context to set as current (required for set operation)",
+"operation": "Operation to perform: list contexts, get current context, or set current context",
+"output": "Output format",
+"showCurrent": "When listing contexts, highlight which one is currently active"
+},
+"server": "kubernetes"
+},
+{
+"description": "Create Kubernetes resources using various methods (from file or using subcommands)",
+"name": "kubectl_create",
+"params": {
+"annotations": "Annotations to apply to the resource (e.g. [\"key1=value1\", \"key2=value2\"])",
+"command": "Command to run in the container",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"dryRun": "If true, only validate the resource, don't actually execute the operation",
+"filename": "Path to a YAML file to create resources from. The path is read on the machine running the MCP server, so it is rejected when the server runs over a remote (SSE/Streamable HTTP) transport; use 'manifes",
+"fromFile": "Path to file for creating configmap/secret (e.g. [\"key1=/path/to/file1\", \"key2=/path/to/file2\"]). The path is read on the machine running the MCP server, so it is rejected when the server runs over a ",
+"fromFileContent": "Inline file contents for creating a configmap/secret, provided by the client instead of a server-side path (e.g. [{\"key\": \"app.conf\", \"content\": \"...\"}]). Safe on all transports; use this instead of \"",
+"fromLiteral": "Key-value pair for creating configmap (e.g. [\"key1=value1\", \"key2=value2\"])",
+"image": "Image to use for the containers in the deployment",
+"labels": "Labels to apply to the resource (e.g. [\"key1=value1\", \"key2=value2\"])",
+"manifest": "YAML manifest to create resources from",
+"name": "Name of the resource to create",
+"namespace": "Kubernetes namespace",
+"output": "Output format. One of: json|yaml|name|go-template|go-template-file|template|templatefile|jsonpath|jsonpath-as-json|jsonpath-file",
+"port": "Port that the container exposes",
+"replicas": "Number of replicas to create for the deployment",
+"resourceType": "Type of resource to create (namespace, configmap, deployment, service, etc.)",
+"schedule": "Cron schedule expression for the CronJob (e.g. \"*/5 * * * *\")",
+"secretType": "Type of secret to create (generic, docker-registry, tls)",
+"serviceType": "Type of service to create (clusterip, nodeport, loadbalancer, externalname)",
+"suspend": "Whether to suspend the CronJob",
+"tcpPort": "Port pairs for tcp service (e.g. [\"80:8080\", \"443:8443\"])",
+"validate": "If true, validate resource schema against server schema"
+},
+"server": "kubernetes"
+},
+{
+"description": "Delete Kubernetes resources by resource type, name, labels, or from a manifest file",
+"name": "kubectl_delete",
+"params": {
+"allNamespaces": "If true, delete resources across all namespaces",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"filename": "Path to a YAML file to delete resources from (optional). The path is read on the machine running the MCP server, so it is rejected when the server runs over a remote (SSE/Streamable HTTP) transport; u",
+"force": "If true, immediately remove resources from API and bypass graceful deletion",
+"gracePeriodSeconds": "Period of time in seconds given to the resource to terminate gracefully",
+"labelSelector": "Delete resources matching this label selector (e.g. 'app=nginx')",
+"manifest": "YAML manifest defining resources to delete (optional)",
+"name": "Name of the resource to delete",
+"namespace": "Kubernetes namespace",
+"resourceType": "Type of resource to delete (e.g., pods, deployments, services, etc.)"
+},
+"server": "kubernetes"
+},
+{
+"description": "Describe Kubernetes resources by resource type, name, and optionally namespace",
+"name": "kubectl_describe",
+"params": {
+"allNamespaces": "If true, describe resources across all namespaces",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"name": "Name of the resource to describe",
+"namespace": "Kubernetes namespace",
+"resourceType": "Type of resource to describe (e.g., pods, deployments, services, etc.)"
+},
+"server": "kubernetes"
+},
+{
+"description": "Execute any kubectl command with the provided arguments and flags",
+"name": "kubectl_generic",
+"params": {
+"allNamespaces": "If true, run the command across all namespaces",
+"args": "Additional command arguments",
+"command": "The kubectl command to execute (e.g. patch, rollout, top)",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"flags": "Command flags as key-value pairs",
+"name": "Resource name",
+"namespace": "Kubernetes namespace",
+"outputFormat": "Output format (e.g. json, yaml, wide)",
+"resourceType": "Resource type (e.g. pod, deployment)",
+"subCommand": "Subcommand if applicable (e.g. 'history' for rollout)"
+},
+"server": "kubernetes"
+},
+{
+"description": "Get or list Kubernetes resources by resource type, name, and optionally namespace",
+"name": "kubectl_get",
+"params": {
+"allNamespaces": "If true, list resources across all namespaces",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"fieldSelector": "Filter resources by field selector (e.g. 'metadata.name=my-pod')",
+"labelSelector": "Filter resources by label selector (e.g. 'app=nginx')",
+"name": "Name of the resource (optional - if not provided, lists all resources of the specified type)",
+"namespace": "Kubernetes namespace",
+"output": "Output format",
+"resourceType": "Type of resource to get (e.g., pods, deployments, services, configmaps, events, etc.)",
+"sortBy": "Sort events by a field (default: lastTimestamp). Only applicable for events."
+},
+"server": "kubernetes"
+},
+{
+"description": "Get logs from Kubernetes resources like pods, deployments, or jobs",
+"name": "kubectl_logs",
+"params": {
+"container": "Container name (required when pod has multiple containers)",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"follow": "Follow logs output (not recommended, may cause timeouts)",
+"labelSelector": "Filter resources by label selector",
+"name": "Name of the resource",
+"namespace": "Kubernetes namespace",
+"previous": "Include logs from previously terminated containers",
+"resourceType": "Type of resource to get logs from",
+"since": "Show logs since relative time (e.g. '5s', '2m', '3h')",
+"sinceTime": "Show logs since absolute time (RFC3339)",
+"tail": "Number of lines to show from end of logs",
+"timestamps": "Include timestamps in logs"
+},
+"server": "kubernetes"
+},
+{
+"description": "Update field(s) of a resource using strategic merge patch, JSON merge patch, or JSON patch",
+"name": "kubectl_patch",
+"params": {
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"dryRun": "If true, only validate the resource, don't actually execute the operation",
+"name": "Name of the resource to patch",
+"namespace": "Kubernetes namespace",
+"patchData": "Patch data as a JSON object",
+"patchFile": "Path to a file containing the patch data (alternative to patchData). The path is read on the machine running the MCP server, so it is rejected when the server runs over a remote (SSE/Streamable HTTP) ",
+"patchType": "Type of patch to apply",
+"resourceType": "Type of resource to patch (e.g., pods, deployments, services)"
+},
+"server": "kubernetes"
+},
+{
+"description": "Reconnect to the Kubernetes API server by recreating all API clients. Use this after cluster upgrades (e.g., EKS control plane upgrades that rotate ENIs/IPs) to force fresh DNS resolution and new TCP connections.",
+"name": "kubectl_reconnect",
+"params": {},
+"server": "kubernetes"
+},
+{
+"description": "Manage the rollout of a resource (e.g., deployment, daemonset, statefulset)",
+"name": "kubectl_rollout",
+"params": {
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"name": "Name of the resource",
+"namespace": "Kubernetes namespace",
+"resourceType": "Type of resource to manage rollout for",
+"revision": "Revision to rollback to (for undo subcommand)",
+"subCommand": "Rollout subcommand to execute",
+"timeout": "The length of time to wait before giving up (e.g., '30s', '1m', '2m30s')",
+"toRevision": "Revision to roll back to (for history subcommand)",
+"watch": "Watch the rollout status in real-time until completion"
+},
+"server": "kubernetes"
+},
+{
+"description": "Scale a Kubernetes deployment",
+"name": "kubectl_scale",
+"params": {
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"name": "Name of the deployment to scale",
+"namespace": "Kubernetes namespace",
+"replicas": "Number of replicas to scale to",
+"resourceType": "Resource type to scale (deployment, replicaset, statefulset)"
+},
+"server": "kubernetes"
+},
+{
+"description": "List the API resources available in the cluster",
+"name": "list_api_resources",
+"params": {
+"apiGroup": "API group to filter by",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"namespaced": "If true, only show namespaced resources",
+"output": "Output format (wide, name, or no-headers)",
+"verbs": "List of verbs to filter by"
+},
+"server": "kubernetes"
+},
+{
+"description": "Manage Kubernetes nodes with cordon, drain, and uncordon operations",
+"name": "node_management",
+"params": {
+"confirmDrain": "Explicit confirmation to drain the node (required for drain operation)",
+"deleteLocalData": "Delete local data even if emptyDir volumes are used (for drain operation)",
+"dryRun": "Show what would be done without actually doing it (for drain operation)",
+"force": "Force the operation even if there are pods not managed by a ReplicationController, ReplicaSet, Job, DaemonSet or StatefulSet (for drain operation)",
+"gracePeriod": "Period of time in seconds given to each pod to terminate gracefully (for drain operation). If set to -1, uses the kubectl default grace period.",
+"ignoreDaemonsets": "Ignore DaemonSet-managed pods (for drain operation)",
+"nodeName": "Name of the node to operate on (required for cordon, drain, uncordon)",
+"operation": "Node operation to perform",
+"timeout": "The length of time to wait before giving up (for drain operation, e.g., '5m', '1h')"
+},
+"server": "kubernetes"
+},
+{
+"description": "Verify that the counterpart is still responsive and the connection is alive.",
+"name": "ping",
+"params": {},
+"server": "kubernetes"
+},
+{
+"description": "Forward a local port to a port on a Kubernetes resource",
+"name": "port_forward",
+"params": {
+"localPort": "",
+"namespace": "",
+"resourceName": "",
+"resourceType": "",
+"targetPort": ""
+},
+"server": "kubernetes"
+},
+{
+"description": "Stop a port-forward process",
+"name": "stop_port_forward",
+"params": {
+"id": ""
+},
+"server": "kubernetes"
+},
+{
+"description": "Uninstall a Helm chart release",
+"name": "uninstall_helm_chart",
+"params": {
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"name": "Name of the Helm release to uninstall",
+"namespace": "Kubernetes namespace"
+},
+"server": "kubernetes"
+},
+{
+"description": "Upgrade an existing Helm chart release",
+"name": "upgrade_helm_chart",
+"params": {
+"chart": "Chart name or path to chart directory",
+"context": "Kubeconfig Context to use for the command (optional - defaults to null)",
+"name": "Name of the Helm release to upgrade",
+"namespace": "Kubernetes namespace",
+"repo": "Helm repository URL (optional if using local chart path)",
+"values": "Custom values to override chart defaults",
+"valuesFile": "Path to values file (alternative to values object). The path is read on the machine running the MCP server, so it is rejected when the server runs over a remote (SSE/Streamable HTTP) transport; use 'v"
+},
+"server": "kubernetes"
+},
+{
+"description": "Get directions between two points",
+"name": "maps_directions",
+"params": {
+"destination": "Ending point address or coordinates",
+"mode": "Travel mode (driving, walking, bicycling, transit)",
+"origin": "Starting point address or coordinates"
+},
+"server": "maps"
+},
+{
+"description": "Calculate travel distance and time for multiple origins and destinations",
+"name": "maps_distance_matrix",
+"params": {
+"destinations": "Array of destination addresses or coordinates",
+"mode": "Travel mode (driving, walking, bicycling, transit)",
+"origins": "Array of origin addresses or coordinates"
+},
+"server": "maps"
+},
+{
+"description": "Get elevation data for locations on the earth",
+"name": "maps_elevation",
+"params": {
+"locations": "Array of locations to get elevation for"
+},
+"server": "maps"
+},
+{
+"description": "Convert an address into geographic coordinates",
+"name": "maps_geocode",
+"params": {
+"address": "The address to geocode"
+},
+"server": "maps"
+},
+{
+"description": "Get detailed information about a specific place",
+"name": "maps_place_details",
+"params": {
+"place_id": "The place ID to get details for"
+},
+"server": "maps"
+},
+{
+"description": "Convert coordinates into an address",
+"name": "maps_reverse_geocode",
+"params": {
+"latitude": "Latitude coordinate",
+"longitude": "Longitude coordinate"
+},
+"server": "maps"
+},
+{
+"description": "Search for places using Google Places API",
+"name": "maps_search_places",
+"params": {
+"location": "Optional center point for the search",
+"query": "Search query",
+"radius": "Search radius in meters (max 50000)"
+},
+"server": "maps"
+},
+{
+"description": "Add new observations to existing entities in the knowledge graph",
+"name": "add_observations",
+"params": {
+"observations": ""
+},
+"server": "memory"
+},
+{
+"description": "Create multiple new entities in the knowledge graph. An entity whose name already exists, or repeats an earlier entity in the same call, is skipped and its observations are not added; the result lists the skipped names in `skipped`. Use add_observations to add observations to an existing entity.",
+"name": "create_entities",
+"params": {
+"entities": ""
+},
+"server": "memory"
+},
+{
+"description": "Create multiple new relations between entities in the knowledge graph. Relations should be in active voice",
+"name": "create_relations",
+"params": {
+"relations": ""
+},
+"server": "memory"
+},
+{
+"description": "Delete multiple entities and their associated relations from the knowledge graph",
+"name": "delete_entities",
+"params": {
+"entityNames": "An array of entity names to delete"
+},
+"server": "memory"
+},
+{
+"description": "Delete specific observations from entities in the knowledge graph",
+"name": "delete_observations",
+"params": {
+"deletions": ""
+},
+"server": "memory"
+},
+{
+"description": "Delete multiple relations from the knowledge graph",
+"name": "delete_relations",
+"params": {
+"relations": "An array of relations to delete"
+},
+"server": "memory"
+},
+{
+"description": "Open specific nodes in the knowledge graph by their names",
+"name": "open_nodes",
+"params": {
+"names": "An array of entity names to retrieve"
+},
+"server": "memory"
+},
+{
+"description": "Read the entire knowledge graph",
+"name": "read_graph",
+"params": {},
+"server": "memory"
+},
+{
+"description": "Search for nodes in the knowledge graph based on a query",
+"name": "search_nodes",
+"params": {
+"query": "The search query to match against entity names, types, and observation content"
+},
+"server": "memory"
+},
+{
+"description": "Notion | Create comment\nError Responses:\n400: Bad request",
+"name": "API-create-a-comment",
+"params": {
+"parent": "",
+"rich_text": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Create a data source\nError Responses:\n400: Bad request",
+"name": "API-create-a-data-source",
+"params": {
+"parent": "",
+"properties": "",
+"title": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Delete a block\nError Responses:\n400: Bad request",
+"name": "API-delete-a-block",
+"params": {
+"block_id": "Identifier for a Notion block"
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve block children\nError Responses:\n400: Bad request",
+"name": "API-get-block-children",
+"params": {
+"block_id": "Identifier for a [block](ref:block)",
+"page_size": "The number of items from the full list desired in the response. Maximum: 100",
+"start_cursor": "If supplied, this endpoint will return a page of results starting after the cursor provided. If not supplied, this endpoint will return the first page of results."
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve your token's bot user\nError Responses:\n400: Bad request",
+"name": "API-get-self",
+"params": {},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve a user\nError Responses:\n400: 400",
+"name": "API-get-user",
+"params": {
+"user_id": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | List all users\nError Responses:\n400: 400",
+"name": "API-get-users",
+"params": {
+"page_size": "The number of items from the full list desired in the response. Maximum: 100",
+"start_cursor": "If supplied, this endpoint will return a page of results starting after the cursor provided. If not supplied, this endpoint will return the first page of results."
+},
+"server": "notion"
+},
+{
+"description": "Notion | List templates in a data source\nError Responses:\n400: Bad request",
+"name": "API-list-data-source-templates",
+"params": {
+"data_source_id": "Identifier for a Notion data source",
+"page_size": "",
+"start_cursor": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Move a page\nError Responses:\n400: Bad request",
+"name": "API-move-page",
+"params": {
+"page_id": "Identifier for a Notion page",
+"parent": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Append block children\nError Responses:\n400: Bad request",
+"name": "API-patch-block-children",
+"params": {
+"after": "The ID of the existing block that the new block should be appended after.",
+"block_id": "Identifier for a [block](ref:block). Also accepts a [page](ref:page) ID.",
+"children": "Child content to append to a container block as an array of [block objects](ref:block)"
+},
+"server": "notion"
+},
+{
+"description": "Notion | Update page properties\nError Responses:\n400: Bad request",
+"name": "API-patch-page",
+"params": {
+"archived": "",
+"cover": "",
+"icon": "",
+"in_trash": "Set to true to delete a block. Set to false to restore a block.",
+"page_id": "The identifier for the Notion page to be updated.",
+"properties": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Create a page\nError Responses:\n400: Bad request",
+"name": "API-post-page",
+"params": {
+"children": "The content to be rendered on the new page, represented as an array of [block objects](https://developers.notion.com/reference/block).",
+"cover": "The cover image of the new page, represented as a [file object](https://developers.notion.com/reference/file-object).",
+"icon": "The icon of the new page. Either an [emoji object](https://developers.notion.com/reference/emoji-object) or an [external file object](https://developers.notion.com/reference/file-object)..",
+"parent": "",
+"properties": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Search by title\nError Responses:\n400: Bad request",
+"name": "API-post-search",
+"params": {
+"filter": "",
+"page_size": "The number of items from the full list to include in the response. Maximum: `100`.",
+"query": "The text that the API compares page and database titles against.",
+"sort": "",
+"start_cursor": "A `cursor` value returned in a previous response that If supplied, limits the response to results starting after the `cursor`. If not supplied, then the first page of results is returned. Refer to [pa"
+},
+"server": "notion"
+},
+{
+"description": "Notion | Query a data source\nError Responses:\n400: Bad request",
+"name": "API-query-data-source",
+"params": {
+"archived": "",
+"data_source_id": "Identifier for a Notion data source (database)",
+"filter": "",
+"filter_properties": "A list of page property value IDs to limit the response",
+"in_trash": "",
+"page_size": "",
+"sorts": "",
+"start_cursor": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve a block\nError Responses:\n400: Bad request",
+"name": "API-retrieve-a-block",
+"params": {
+"block_id": "Identifier for a Notion block"
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve comments\nError Responses:\n400: Bad request",
+"name": "API-retrieve-a-comment",
+"params": {
+"block_id": "Identifier for a Notion block or page",
+"page_size": "The number of items from the full list desired in the response. Maximum: 100",
+"start_cursor": "If supplied, this endpoint will return a page of results starting after the cursor provided. If not supplied, this endpoint will return the first page of results."
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve a data source\nError Responses:\n400: Bad request",
+"name": "API-retrieve-a-data-source",
+"params": {
+"data_source_id": "Identifier for a Notion data source"
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve a database\nError Responses:\n400: Bad request",
+"name": "API-retrieve-a-database",
+"params": {
+"database_id": "Identifier for a Notion database"
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve a page\nError Responses:\n400: Bad request",
+"name": "API-retrieve-a-page",
+"params": {
+"filter_properties": "A list of page property value IDs associated with the page. Use this param to limit the response to a specific page property value or values. To retrieve multiple properties, specify each page propert",
+"page_id": "Identifier for a Notion page"
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve a page property item\nError Responses:\n400: Bad request",
+"name": "API-retrieve-a-page-property",
+"params": {
+"page_id": "Identifier for a Notion page",
+"page_size": "For paginated properties. The max number of property item objects on a page. The default size is 100",
+"property_id": "Identifier for a page [property](https://developers.notion.com/reference/page#all-property-values)",
+"start_cursor": "For paginated properties."
+},
+"server": "notion"
+},
+{
+"description": "Notion | Retrieve a page as Markdown\nError Responses:\n400: Bad request\n403: The integration lacks the read/update content capability required for this page.\n404: Page not found or not shared with the integration.\n429: Rate limited.",
+"name": "API-retrieve-page-markdown",
+"params": {
+"include_transcript": "Whether to include meeting note transcripts. When false (default), a placeholder with the meeting note URL is shown instead of the full transcript.",
+"page_id": "Identifier for a Notion page (or block) to read or update as markdown."
+},
+"server": "notion"
+},
+{
+"description": "Notion | Update a block\nError Responses:\n400: Bad request",
+"name": "API-update-a-block",
+"params": {
+"archived": "Set to true to archive (delete) a block. Set to false to un-archive (restore) a block.",
+"block_id": "Identifier for a Notion block",
+"type": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Update a data source\nError Responses:\n400: Bad request",
+"name": "API-update-a-data-source",
+"params": {
+"data_source_id": "Identifier for a Notion data source",
+"description": "",
+"properties": "",
+"title": ""
+},
+"server": "notion"
+},
+{
+"description": "Notion | Update a page's content as Markdown\nError Responses:\n400: Bad request\n403: The integration lacks the read/update content capability required for this page.\n404: Page not found or not shared with the integration.\n409: Conflict (e.g. row limit exceeded).\n429: Rate limited.",
+"name": "API-update-page-markdown",
+"params": {
+"insert_content": "",
+"page_id": "Identifier for a Notion page (or block) to read or update as markdown.",
+"replace_content": "",
+"replace_content_range": "",
+"type": "The kind of edit to apply. Prefer `replace_content` (overwrite the whole page) or `update_content` (targeted find-and-replace). `insert_content` and `replace_content_range` are deprecated.",
+"update_content": ""
+},
+"server": "notion"
+},
+{
+"description": "Perform click on a web page",
+"name": "browser_click",
+"params": {
+"button": "Button to click, defaults to left",
+"doubleClick": "Whether to perform a double click instead of a single click",
+"element": "Human-readable element description used to obtain permission to interact with the element",
+"modifiers": "Modifier keys to press",
+"target": "Exact target element reference from the page snapshot, or a unique element selector"
+},
+"server": "playwright"
+},
+{
+"description": "Close the page",
+"name": "browser_close",
+"params": {},
+"server": "playwright"
+},
+{
+"description": "Returns all console messages",
+"name": "browser_console_messages",
+"params": {
+"all": "Return all console messages since the beginning of the session, not just since the last navigation. Defaults to false.",
+"filename": "File name to save the console messages to. Relative file names are resolved against the workspace root. If not provided, messages are returned as text.",
+"level": "Level of the console messages to return. Each level includes the messages of more severe levels. Defaults to \"info\"."
+},
+"server": "playwright"
+},
+{
+"description": "Perform drag and drop between two elements",
+"name": "browser_drag",
+"params": {
+"endElement": "Human-readable target element description used to obtain the permission to interact with the element",
+"endTarget": "Exact target element reference from the page snapshot, or a unique element selector",
+"startElement": "Human-readable source element description used to obtain the permission to interact with the element",
+"startTarget": "Exact target element reference from the page snapshot, or a unique element selector"
+},
+"server": "playwright"
+},
+{
+"description": "Drop files or MIME-typed data onto an element, as if dragged from outside the page. At least one of \"paths\" or \"data\" must be provided.",
+"name": "browser_drop",
+"params": {
+"data": "Data to drop, as a map of MIME type to string value (e.g. {\"text/plain\": \"hello\", \"text/uri-list\": \"https://example.com\"}).",
+"element": "Human-readable element description used to obtain permission to interact with the element",
+"paths": "Absolute paths to files to drop onto the element.",
+"target": "Exact target element reference from the page snapshot, or a unique element selector"
+},
+"server": "playwright"
+},
+{
+"description": "Emulate CSS media features for the page, for example switch between the light and dark color scheme. Omitted parameters are left unchanged; null clears an override.",
+"name": "browser_emulate_media",
+"params": {
+"colorScheme": "Emulates the prefers-color-scheme media feature",
+"contrast": "Emulates the prefers-contrast media feature",
+"forcedColors": "Emulates the forced-colors media feature",
+"media": "Changes the CSS media type of the page",
+"reducedMotion": "Emulates the prefers-reduced-motion media feature"
+},
+"server": "playwright"
+},
+{
+"description": "Evaluate JavaScript expression on page or element",
+"name": "browser_evaluate",
+"params": {
+"element": "Human-readable element description used to obtain permission to interact with the element",
+"filename": "File name to save the result to. Relative file names are resolved against the workspace root. If not provided, result is returned as text.",
+"function": "() => { /* code */ } or (element) => { /* code */ } when element is provided",
+"target": "Exact target element reference from the page snapshot, or a unique element selector"
+},
+"server": "playwright"
+},
+{
+"description": "Upload one or multiple files",
+"name": "browser_file_upload",
+"params": {
+"paths": "The absolute paths to the files to upload. Can be single file or multiple files. If omitted, file chooser is cancelled."
+},
+"server": "playwright"
+},
+{
+"description": "Fill multiple form fields",
+"name": "browser_fill_form",
+"params": {
+"fields": "Fields to fill in"
+},
+"server": "playwright"
+},
+{
+"description": "Search the accessibility snapshot of the current page for text or a regular expression. Returns matching snapshot nodes with a few lines of surrounding context (like search snippets), each shown under its path from the root of the tree, which is cheaper than capturing the whole snapshot when you only need to locate an element and its ref.",
+"name": "browser_find",
+"params": {
+"filename": "Save results to a file instead of returning them in the response. Relative file names are resolved against the workspace root.",
+"regex": "Regular expression to search for in the page snapshot. Matching is case-sensitive by default; wrap the pattern in slashes to add flags, e.g. \"/error/i\" for case-insensitive. Provide either text or reg",
+"text": "Plain text to search for in the page snapshot (case-insensitive substring match). Provide either text or regex, not both."
+},
+"server": "playwright"
+},
+{
+"description": "Handle a dialog",
+"name": "browser_handle_dialog",
+"params": {
+"accept": "Whether to accept the dialog.",
+"promptText": "The text of the prompt in case of a prompt dialog."
+},
+"server": "playwright"
+},
+{
+"description": "Hover over element on page",
+"name": "browser_hover",
+"params": {
+"element": "Human-readable element description used to obtain permission to interact with the element",
+"target": "Exact target element reference from the page snapshot, or a unique element selector"
+},
+"server": "playwright"
+},
+{
+"description": "Navigate to a URL",
+"name": "browser_navigate",
+"params": {
+"url": "The URL to navigate to"
+},
+"server": "playwright"
+},
+{
+"description": "Go back to the previous page in the history",
+"name": "browser_navigate_back",
+"params": {},
+"server": "playwright"
+},
+{
+"description": "Returns full details (headers and body) of a single network request, or a single part if `part` is set. Use the number from browser_network_requests.",
+"name": "browser_network_request",
+"params": {
+"filename": "File name to save the result to. Relative file names are resolved against the workspace root. If not provided, output is returned as text.",
+"index": "1-based index of the request, as printed by browser_network_requests.",
+"part": "Return only this part of the request. Omit to return full details."
+},
+"server": "playwright"
+},
+{
+"description": "Returns a numbered list of network requests since loading the page. Use browser_network_request with the number to get full details.",
+"name": "browser_network_requests",
+"params": {
+"filename": "File name to save the network requests to. Relative file names are resolved against the workspace root. If not provided, requests are returned as text.",
+"filter": "Only return requests whose URL matches this regexp (e.g. \"/api/.*user\").",
+"static": "Whether to include successful static resources like images, fonts, scripts, etc. Defaults to false."
+},
+"server": "playwright"
+},
+{
+"description": "Press a key on the keyboard",
+"name": "browser_press_key",
+"params": {
+"key": "Name of the key to press or a character to generate, such as `ArrowLeft` or `a`"
+},
+"server": "playwright"
+},
+{
+"description": "Resize the browser window",
+"name": "browser_resize",
+"params": {
+"height": "Height of the browser window",
+"width": "Width of the browser window"
+},
+"server": "playwright"
+},
+{
+"description": "Run a Playwright code snippet. Unsafe: executes arbitrary JavaScript in the Playwright server process and is RCE-equivalent.",
+"name": "browser_run_code_unsafe",
+"params": {
+"code": "A JavaScript function containing Playwright code to execute. It will be invoked with a single argument, page, which you can use for any page interaction. For example: `async (page) => { await page.get",
+"filename": "Load code from the specified file. Relative file names are resolved against the workspace root. If both code and filename are provided, code will be ignored."
+},
+"server": "playwright"
+},
+{
+"description": "Select an option in a dropdown",
+"name": "browser_select_option",
+"params": {
+"element": "Human-readable element description used to obtain permission to interact with the element",
+"target": "Exact target element reference from the page snapshot, or a unique element selector",
+"values": "Array of values to select in the dropdown. This can be a single value or multiple values."
+},
+"server": "playwright"
+},
+{
+"description": "Capture accessibility snapshot of the current page, this is better than screenshot",
+"name": "browser_snapshot",
+"params": {
+"boxes": "Include each element's bounding box as [box=x,y,width,height] in the snapshot. Coordinates are viewport-relative, in CSS pixels (Element.getBoundingClientRect)",
+"depth": "Limit the depth of the snapshot tree",
+"filename": "Save snapshot to a file instead of returning it in the response. Relative file names are resolved against the workspace root.",
+"target": "Exact target element reference from the page snapshot, or a unique element selector"
+},
+"server": "playwright"
+},
+{
+"description": "List, create, close, or select a browser tab.",
+"name": "browser_tabs",
+"params": {
+"action": "Operation to perform",
+"index": "Tab index, used for close/select. If omitted for close, current tab is closed.",
+"url": "URL to navigate to in the new tab, used for new."
+},
+"server": "playwright"
+},
+{
+"description": "Take a screenshot of the current page. You can't perform actions based on the screenshot, use browser_snapshot for actions.",
+"name": "browser_take_screenshot",
+"params": {
+"element": "Human-readable element description used to obtain permission to interact with the element",
+"filename": "File name to save the screenshot to. Relative file names are resolved against the workspace root. If not specified, the screenshot is saved into the output directory as `page-{timestamp}.{png|jpeg|web",
+"fullPage": "When true, takes a screenshot of the full scrollable page, instead of the currently visible viewport. Cannot be used with element screenshots.",
+"scale": "Image resolution scale. \"css\" produces a screenshot sized in CSS pixels (smaller, consistent across devices). \"device\" produces a high-resolution screenshot using device pixels (larger, accounts for t",
+"target": "Exact target element reference from the page snapshot, or a unique element selector",
+"type": "Image format for the screenshot. If unset, inferred from the filename extension, otherwise png."
+},
+"server": "playwright"
+},
+{
+"description": "Type text into editable element",
+"name": "browser_type",
+"params": {
+"element": "Human-readable element description used to obtain permission to interact with the element",
+"slowly": "Whether to type one character at a time. Useful for triggering key handlers in the page. By default entire text is filled in at once.",
+"submit": "Whether to submit entered text (press Enter after)",
+"target": "Exact target element reference from the page snapshot, or a unique element selector",
+"text": "Text to type into the element"
+},
+"server": "playwright"
+},
+{
+"description": "Wait for text to appear or disappear or a specified time to pass",
+"name": "browser_wait_for",
+"params": {
+"text": "The text to wait for",
+"textGone": "The text to wait for to disappear",
+"time": "The time to wait in seconds, at most 30"
+},
+"server": "playwright"
+},
+{
+"description": "Run a read-only SQL query",
+"name": "query",
+"params": {
+"sql": ""
+},
+"server": "postgres"
+},
+{
+"description": "Add a reaction emoji to a message",
+"name": "slack_add_reaction",
+"params": {
+"channel_id": "The ID of the channel containing the message",
+"reaction": "The name of the emoji reaction (without ::)",
+"timestamp": "The timestamp of the message to react to"
+},
+"server": "slack"
+},
+{
+"description": "Get recent messages from a channel",
+"name": "slack_get_channel_history",
+"params": {
+"channel_id": "The ID of the channel",
+"limit": "Number of messages to retrieve (default 10)"
+},
+"server": "slack"
+},
+{
+"description": "Get all replies in a message thread",
+"name": "slack_get_thread_replies",
+"params": {
+"channel_id": "The ID of the channel containing the thread",
+"thread_ts": "The timestamp of the parent message in the format '1234567890.123456'. Timestamps in the format without the period can be converted by adding the period such that 6 numbers come after it."
+},
+"server": "slack"
+},
+{
+"description": "Get detailed profile information for a specific user",
+"name": "slack_get_user_profile",
+"params": {
+"user_id": "The ID of the user"
+},
+"server": "slack"
+},
+{
+"description": "Get a list of all users in the workspace with their basic profile information",
+"name": "slack_get_users",
+"params": {
+"cursor": "Pagination cursor for next page of results",
+"limit": "Maximum number of users to return (default 100, max 200)"
+},
+"server": "slack"
+},
+{
+"description": "List public or pre-defined channels in the workspace with pagination",
+"name": "slack_list_channels",
+"params": {
+"cursor": "Pagination cursor for next page of results",
+"limit": "Maximum number of channels to return (default 100, max 200)"
+},
+"server": "slack"
+},
+{
+"description": "Post a new message to a Slack channel",
+"name": "slack_post_message",
+"params": {
+"channel_id": "The ID of the channel to post to",
+"text": "The message text to post"
+},
+"server": "slack"
+},
+{
+"description": "Reply to a specific message thread in Slack",
+"name": "slack_reply_to_thread",
+"params": {
+"channel_id": "The ID of the channel containing the thread",
+"text": "The reply text",
+"thread_ts": "The timestamp of the parent message in the format '1234567890.123456'. Timestamps in the format without the period can be converted by adding the period such that 6 numbers come after it."
+},
+"server": "slack"
+},
+{
+"description": "A detailed tool for dynamic and reflective problem-solving through thoughts.\nThis tool helps analyze problems through a flexible thinking process that can adapt and evolve.\nEach thought can build on, question, or revise previous insights as understanding deepens.\n\nWhen to use this tool:\n- Breaking down complex problems into steps\n- Planning and design with room for revision\n- Analysis that might need course correction\n- Problems where the full scope might not be clear initially\n- Problems that require a multi-step solution\n- Tasks that need to maintain context over multiple steps\n- Situations where irrelevant information needs to be filtered out\n\nKey features:\n- You can adjust total_thoughts up or down as you progress\n- You can question or revise previous thoughts\n- You can add more thoughts even after reaching what seemed like the end\n- You can express uncertainty and explore alternative approaches\n- Not every thought needs to build linearly - you can branch or backtrack\n- Generates a solution hypothesis\n- Verifies the hypothesis based on the Chain of Thought steps\n- Repeats the process until satisfied\n- Provides a correct answer\n\nParameters explained:\n- thought: Your current thin",
+"name": "sequentialthinking",
+"params": {
+"branchFromThought": "Branching point thought number",
+"branchId": "Branch identifier",
+"isRevision": "Whether this revises previous thinking",
+"needsMoreThoughts": "If more thoughts are needed",
+"nextThoughtNeeded": "Whether another thought step is needed",
+"revisesThought": "Which thought is being reconsidered",
+"thought": "Your current thinking step",
+"thoughtNumber": "Current thought number (numeric value, e.g., 1, 2, 3)",
+"totalThoughts": "Estimated total thoughts needed (numeric value, e.g., 5, 10)"
+},
+"server": "thinking"
+},
+{
+"description": "Convert time between timezones",
+"name": "convert_time",
+"params": {
+"source_timezone": "Source IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use 'Asia/Kolkata' as local timezone if no source timezone provided by the user.",
+"target_timezone": "Target IANA timezone name (e.g., 'Asia/Tokyo', 'America/San_Francisco'). Use 'Asia/Kolkata' as local timezone if no target timezone provided by the user.",
+"time": "Time to convert in 24-hour format (HH:MM)"
+},
+"server": "time"
+},
+{
+"description": "Get current time in a specific timezone",
+"name": "get_current_time",
+"params": {
+"timezone": "IANA timezone name (e.g., 'America/New_York', 'Europe/London'). Use 'Asia/Kolkata' as local timezone if no timezone provided by the user."
+},
+"server": "time"
+},
+{
+"description": "Add review comment to the requester's latest pending pull request review. A pending review needs to already exist to call this (check with the user if not sure).",
+"name": "add_comment_to_pending_review",
+"params": {
+"body": "The text of the review comment",
+"line": "The line of the blob in the pull request diff that the comment applies to. For multi-line comments, the last line of the range",
+"owner": "Repository owner",
+"path": "The relative path to the file that necessitates a comment",
+"pullNumber": "Pull request number",
+"repo": "Repository name",
+"side": "The side of the diff to comment on. LEFT indicates the previous state, RIGHT indicates the new state",
+"startLine": "For multi-line comments, the first line of the range that the comment applies to",
+"startSide": "For multi-line comments, the starting side of the diff that the comment applies to. LEFT indicates the previous state, RIGHT indicates the new state",
+"subjectType": "The level at which the comment is targeted"
+},
+"server": "github"
+},
+{
+"description": "Add a comment and/or reaction to a specific issue or issue comment in a GitHub repository. Use this tool with pull requests as well (in this case pass pull request number as issue_number), but only if user is not asking specifically to add or react to review comments. At least one of body or reaction is required.",
+"name": "add_issue_comment",
+"params": {
+"body": "Comment content. Required unless reaction is provided.",
+"comment_id": "The numeric ID of the issue or pull request comment to react to. Use this for reactions to comments; omit it to react to the issue or pull request itself. Cannot be combined with body.",
+"issue_number": "Issue or pull request number to comment on or react to.",
+"owner": "Repository owner",
+"reaction": "Emoji reaction to add. Required unless body is provided.",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Add a reply and/or reaction to an existing pull request comment. This can create a new comment linked as a reply to the specified comment, add an emoji reaction to the specified comment, or do both. At least one of body or reaction is required.",
+"name": "add_reply_to_pull_request_comment",
+"params": {
+"body": "The text of the reply. Required unless reaction is provided.",
+"commentId": "The numeric ID of the pull request review comment to reply or react to. Use the number from a #discussion_r... anchor, not the GraphQL thread node ID (PRRT_...).",
+"owner": "Repository owner",
+"pullNumber": "Pull request number. Required when body is provided.",
+"reaction": "Emoji reaction to add. Required unless body is provided.",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Assign Copilot to a specific issue in a GitHub repository.\n\nThis tool can help with the following outcomes:\n- a Pull Request created with source code changes to resolve the issue\n\n\nMore information can be found at:\n- https://docs.github.com/en/copilot/concepts/agents/cloud-agent/about-cloud-agent\n",
+"name": "assign_copilot_to_issue",
+"params": {
+"base_ref": "Git reference (e.g., branch) that the agent will start its work from. If not specified, defaults to the repository's default branch",
+"custom_instructions": "Optional custom instructions to guide the agent beyond the issue body. Use this to provide additional context, constraints, or guidance that is not captured in the issue description",
+"issue_number": "Issue number",
+"owner": "Repository owner",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Create a new branch in a GitHub repository",
+"name": "create_branch",
+"params": {
+"branch": "Name for new branch",
+"from_branch": "Source branch (defaults to repo default)",
+"owner": "Repository owner",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Create or update a single file in a GitHub repository. \nIf updating, you should provide the SHA of the file you want to update. Use this tool to create or update a file in a GitHub repository remotely; do not use it for local file operations.\n\nTo obtain the current blob SHA before updating, call the get_file_contents tool with the same owner, repo, and path, and set its ref parameter to this tool's branch value. The first text result reports the blob SHA for the requested path.\n\nSHA MUST be provided for existing file updates.\n",
+"name": "create_or_update_file",
+"params": {
+"allow_symlink_write": "Set true to update a symbolic link itself; content must be its new target path.",
+"branch": "Branch to create/update the file in",
+"content": "Content of the file, exactly as it should appear once written. Do not base64-encode it; this server does that before calling the REST API.",
+"message": "Commit message",
+"owner": "Repository owner (username or organization)",
+"path": "Path where to create/update the file",
+"repo": "Repository name",
+"sha": "The blob SHA of the file being replaced. Required if the file already exists. Retrieve it with get_file_contents using the same owner, repo, and path, with ref set to this tool's branch value."
+},
+"server": "github"
+},
+{
+"description": "Create a new pull request in a GitHub repository.",
+"name": "create_pull_request",
+"params": {
+"base": "Branch to merge into",
+"body": "PR description",
+"draft": "Create as draft PR",
+"head": "Branch containing changes",
+"maintainer_can_modify": "Allow maintainer edits",
+"owner": "Repository owner",
+"repo": "Repository name",
+"reviewers": "GitHub usernames or ORG/team-slug team reviewers to request reviews from",
+"title": "PR title"
+},
+"server": "github"
+},
+{
+"description": "Create a new GitHub repository in your account or specified organization",
+"name": "create_repository",
+"params": {
+"autoInit": "Initialize with README",
+"description": "Repository description",
+"name": "Repository name",
+"organization": "Organization to create the repository in (omit to create in your personal account)",
+"private": "Whether the repository should be private. Defaults to true (private) when omitted."
+},
+"server": "github"
+},
+{
+"description": "Delete a file from a GitHub repository",
+"name": "delete_file",
+"params": {
+"branch": "Branch to delete the file from",
+"message": "Commit message",
+"owner": "Repository owner (username or organization)",
+"path": "Path to the file to delete",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Fork a GitHub repository to your account or specified organization",
+"name": "fork_repository",
+"params": {
+"organization": "Organization to fork to",
+"owner": "Repository owner",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Get details for a commit from a GitHub repository",
+"name": "get_commit",
+"params": {
+"detail": "Level of detail to include for changed files. \"none\" omits stats and files entirely. \"stats\" (default) includes per-file metadata: filename, status, and lines-of-code counts (additions, deletions, cha",
+"owner": "Repository owner",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "Repository name",
+"sha": "Commit SHA, branch name, or tag name"
+},
+"server": "github"
+},
+{
+"description": "Get the contents of a file or directory from a GitHub repository",
+"name": "get_file_contents",
+"params": {
+"fields": "Subset of fields to return for each entry when the path is a directory. If omitted, all fields are returned. Ignored when the path is a single file. Use this to reduce response size when listing direc",
+"owner": "Repository owner (username or organization)",
+"path": "Path to file/directory",
+"ref": "Accepts optional git refs such as `refs/tags/{tag}`, `refs/heads/{branch}` or `refs/pull/{pr_number}/head`",
+"repo": "Repository name",
+"sha": "Accepts optional commit SHA. If specified, it will be used instead of ref"
+},
+"server": "github"
+},
+{
+"description": "Get a specific label from a repository.",
+"name": "get_label",
+"params": {
+"name": "Label name.",
+"owner": "Repository owner (username or organization name)",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Get the latest release in a GitHub repository",
+"name": "get_latest_release",
+"params": {
+"owner": "Repository owner",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Get details of the authenticated GitHub user. Use this when a request is about the user's own profile for GitHub. Or when information is missing to build other tool calls.",
+"name": "get_me",
+"params": {},
+"server": "github"
+},
+{
+"description": "Get a specific release by its tag name in a GitHub repository",
+"name": "get_release_by_tag",
+"params": {
+"owner": "Repository owner",
+"repo": "Repository name",
+"tag": "Tag name (e.g., 'v1.0.0')"
+},
+"server": "github"
+},
+{
+"description": "Get details about a specific git tag in a GitHub repository",
+"name": "get_tag",
+"params": {
+"owner": "Repository owner",
+"repo": "Repository name",
+"tag": "Tag name"
+},
+"server": "github"
+},
+{
+"description": "Get member usernames of a specific team in an organization. Limited to organizations accessible with current credentials",
+"name": "get_team_members",
+"params": {
+"org": "Organization login (owner) that contains the team.",
+"team_slug": "Team slug"
+},
+"server": "github"
+},
+{
+"description": "Get details of the teams the user is a member of. Limited to organizations accessible with current credentials",
+"name": "get_teams",
+"params": {
+"user": "Username to get teams for. If not provided, uses the authenticated user."
+},
+"server": "github"
+},
+{
+"description": "Get information about a specific issue in a GitHub repository.",
+"name": "issue_read",
+"params": {
+"issue_number": "The number of the issue",
+"method": "The read operation to perform on a single issue.\nOptions are:\n1. get - Get issue details. Also returns best-effort hierarchy flags (`has_parent`, `has_children`); `parent` and `sub_issues_summary` are",
+"owner": "The owner of the repository",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "The name of the repository"
+},
+"server": "github"
+},
+{
+"description": "Create a new or update an existing issue in a GitHub repository.",
+"name": "issue_write",
+"params": {
+"assignees": "Usernames to assign to this issue",
+"body": "Issue body content",
+"duplicate_of": "Issue number that this issue is a duplicate of. Required when state_reason is 'duplicate'.",
+"issue_fields": "Issue field values to set or clear. Each item requires 'field_name' and exactly one of 'value', 'field_option_name', or 'delete: true'.",
+"issue_number": "Issue number to update",
+"labels": "Labels to apply to this issue",
+"method": "Write operation to perform on a single issue.\nOptions are:\n- 'create' - creates a new issue.\n- 'update' - updates an existing issue.\n",
+"milestone": "Milestone number",
+"owner": "Repository owner",
+"parent_issue_number": "Issue number of the parent issue. Only used when method is 'create' and cannot be combined with issue_fields. The new issue is created and attached to this parent in the same operation.",
+"parent_owner": "Repository owner of the parent issue. Must be provided with parent_repo. Omit both to use owner and repo. Only used when method is 'create' and parent_issue_number is provided.",
+"parent_repo": "Repository name of the parent issue. Must be provided with parent_owner. Omit both to use owner and repo. Only used when method is 'create' and parent_issue_number is provided.",
+"repo": "Repository name",
+"state": "New state",
+"state_reason": "Reason for the state change. Ignored unless state is changed.",
+"title": "Issue title",
+"type": "Type of this issue. For updates, pass null to remove the current type. Only use if issue types are enabled for this repository. Use list_issue_types to get valid type values for this repository or its"
+},
+"server": "github"
+},
+{
+"description": "List branches in a GitHub repository",
+"name": "list_branches",
+"params": {
+"owner": "Repository owner",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Get list of commits of a branch in a GitHub repository. Returns at least 30 results per page by default, but can return more if specified using the perPage parameter (up to 100).",
+"name": "list_commits",
+"params": {
+"author": "Author username or email address to filter commits by",
+"fields": "Subset of fields to return for each commit. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields, e.g. just 'sha' and 'html_url'.",
+"owner": "Repository owner",
+"page": "Page number for pagination (min 1)",
+"path": "Only commits containing this file path will be returned",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "Repository name",
+"sha": "Commit SHA, branch or tag name to list commits of. If not provided, uses the default branch of the repository. If a commit SHA is provided, will list commits up to that SHA.",
+"since": "Only commits after this date will be returned (ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD)",
+"until": "Only commits before this date will be returned (ISO 8601 format: YYYY-MM-DDTHH:MM:SSZ or YYYY-MM-DD)"
+},
+"server": "github"
+},
+{
+"description": "List issue fields for a repository or organization. Returns field definitions including name, type (text, number, date, single_select), and for single_select fields the list of valid option names. When repo is omitted, returns org-level fields directly.",
+"name": "list_issue_fields",
+"params": {
+"owner": "The account owner of the repository or organization. The name is not case sensitive.",
+"repo": "The name of the repository. When provided, returns fields for this specific repository (inherited from its organization). When omitted, returns org-level fields directly."
+},
+"server": "github"
+},
+{
+"description": "List supported issue types for a repository or its owner organization. When repo is omitted, returns org-level issue types directly.",
+"name": "list_issue_types",
+"params": {
+"owner": "The account owner of the repository or organization.",
+"repo": "The name of the repository. When provided, returns issue types for this specific repository. When omitted, returns org-level issue types directly."
+},
+"server": "github"
+},
+{
+"description": "List issues in a GitHub repository. For pagination, use the 'endCursor' from the previous response's 'pageInfo' in the 'after' parameter.",
+"name": "list_issues",
+"params": {
+"after": "Cursor for pagination. Use the cursor from the previous response.",
+"direction": "Order direction. If provided, the 'orderBy' also needs to be provided.",
+"field_filters": "Filter by custom issue field values. Each entry takes a field_name and a value; the server looks up the field and coerces the value to its type (single-select option name, text, number, or YYYY-MM-DD ",
+"fields": "Subset of fields to return for each issue. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body' and 'field_values' in particular dr",
+"labels": "Filter by labels",
+"orderBy": "Order issues by field. If provided, the 'direction' also needs to be provided.",
+"owner": "Repository owner",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "Repository name",
+"since": "Filter by date (ISO 8601 timestamp)",
+"state": "Filter by state, by default both open and closed issues are returned when not provided"
+},
+"server": "github"
+},
+{
+"description": "List pull requests in a GitHub repository. If the user specifies an author, then DO NOT use this tool and use the search_pull_requests tool instead.",
+"name": "list_pull_requests",
+"params": {
+"base": "Filter by base branch",
+"direction": "Sort direction",
+"fields": "Subset of fields to return for each pull request. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body' in particular drops the larg",
+"head": "Filter by head user/org and branch",
+"owner": "Repository owner",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "Repository name",
+"sort": "Sort by",
+"state": "Filter by state"
+},
+"server": "github"
+},
+{
+"description": "List releases in a GitHub repository",
+"name": "list_releases",
+"params": {
+"fields": "Subset of fields to return for each release. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body' in particular drops the largest p",
+"owner": "Repository owner",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "List collaborators of a GitHub repository. Results are paginated; the response includes `nextPage`, `prevPage`, `firstPage`, and `lastPage` fields. To get the next page, use the `nextPage` value as the `page` parameter.",
+"name": "list_repository_collaborators",
+"params": {
+"affiliation": "Filter by affiliation. Can be one of: 'outside' (outside collaborators), 'direct' (all with permissions regardless of org membership), 'all' (all collaborators). Default: 'all'",
+"owner": "Repository owner",
+"page": "Page number for pagination (default 1, min 1)",
+"perPage": "Results per page for pagination (default 30, min 1, max 100)",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "List git tags in a GitHub repository",
+"name": "list_tags",
+"params": {
+"owner": "Repository owner",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Merge a pull request in a GitHub repository.",
+"name": "merge_pull_request",
+"params": {
+"commit_message": "Extra detail for merge commit",
+"commit_title": "Title for merge commit",
+"expectedHeadSha": "The expected SHA of the pull request's HEAD ref",
+"merge_method": "Merge method",
+"owner": "Repository owner",
+"pullNumber": "Pull request number",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Get information on a specific pull request in GitHub repository.",
+"name": "pull_request_read",
+"params": {
+"after": "Cursor for pagination, used only by the get_review_comments method. Pass the endCursor from the previous page's PageInfo to fetch the next page.",
+"method": "Action to specify what pull request data needs to be retrieved from GitHub. \nPossible options: \n 1. get - Get details of a specific pull request.\n 2. get_diff - Get the diff of a pull request.\n 3. get",
+"owner": "Repository owner",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"pullNumber": "Pull request number",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Create and/or submit, delete review of a pull request.\n\nAvailable methods:\n- create: Create a new review of a pull request. If \"event\" parameter is provided, the review is submitted. If \"event\" is omitted, a pending review is created.\n- submit_pending: Submit an existing pending review of a pull request. This requires that a pending review exists for the current user on the specified pull request. The \"body\" and \"event\" parameters are used when submitting the review.\n- delete_pending: Delete an existing pending review of a pull request. This requires that a pending review exists for the current user on the specified pull request.\n- resolve_thread: Resolve a review thread. Requires only \"threadId\" parameter with the thread's node ID (e.g., PRRT_kwDOxxx). The owner, repo, and pullNumber parameters are not used for this method. Resolving an already-resolved thread is a no-op.\n- unresolve_thread: Unresolve a previously resolved review thread. Requires only \"threadId\" parameter. The owner, repo, and pullNumber parameters are not used for this method. Unresolving an already-unresolved thread is a no-op.\n",
+"name": "pull_request_review_write",
+"params": {
+"body": "Review comment text",
+"commitID": "SHA of commit to review",
+"event": "Review action to perform.",
+"method": "The write operation to perform on pull request review.",
+"owner": "Repository owner",
+"pullNumber": "Pull request number",
+"repo": "Repository name",
+"threadId": "The node ID of the review thread (e.g., PRRT_kwDOxxx). Required for resolve_thread and unresolve_thread methods. Get thread IDs from pull_request_read with method get_review_comments."
+},
+"server": "github"
+},
+{
+"description": "Push multiple files to a GitHub repository in a single commit",
+"name": "push_files",
+"params": {
+"branch": "Branch to push to",
+"files": "Array of file objects to push, each object with path (string) and content (string)",
+"message": "Commit message",
+"owner": "Repository owner",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Request a GitHub Copilot code review for a pull request. Use this for automated feedback on pull requests, usually before requesting a human reviewer.",
+"name": "request_copilot_review",
+"params": {
+"owner": "Repository owner",
+"pullNumber": "Pull request number",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Fast and precise code search across ALL GitHub repositories using GitHub's native search engine. Best for finding exact symbols, functions, classes, or specific code patterns.",
+"name": "search_code",
+"params": {
+"fields": "Subset of fields to return for each code search result. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'repository' and 'text_matche",
+"order": "Sort order for results",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"query": "Search query (GitHub code search REST). Implicit AND between terms; supports `OR`, `NOT`, and `\"quoted phrase\"` for exact match. Qualifiers: `repo:owner/repo`, `org:`, `user:`, `language:`, `path:dir`",
+"sort": "Sort field ('indexed' only)"
+},
+"server": "github"
+},
+{
+"description": "Search for commits across GitHub repositories using GitHub's commit search syntax. Useful for finding specific changes, authors, or messages across one or many repositories. Searches the default branch only.",
+"name": "search_commits",
+"params": {
+"order": "Sort order",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"query": "Commit search query (GitHub commit search REST). Searches commit messages on the default branch only. Scope the search with `repo:owner/repo`, `org:`, or `user:` (queries without a scope qualifier mat",
+"sort": "Sort by author or committer date (defaults to best match)"
+},
+"server": "github"
+},
+{
+"description": "Search issues using natural-language semantic matching. Best for conceptual or paraphrased queries (e.g. \"login fails after password reset\"). Already scoped to is:issue.",
+"name": "search_issues",
+"params": {
+"fields": "Subset of fields to return for each issue result. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body', 'reactions', and 'labels' i",
+"order": "Sort order",
+"owner": "Optional repository owner. If provided with repo, only issues for this repository are listed.",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"query": "The search query, as natural language. When the user gives alternative wordings, include them as plain words rather than joining them with OR.",
+"repo": "Optional repository name. If provided with owner, only issues for this repository are listed.",
+"sort": "Sort field by number of matches of categories, defaults to best match"
+},
+"server": "github"
+},
+{
+"description": "Search for pull requests in GitHub repositories using issues search syntax already scoped to is:pr",
+"name": "search_pull_requests",
+"params": {
+"fields": "Subset of fields to return for each pull request result. If omitted, all fields are returned. Use this to reduce response size when you only need specific fields; omitting 'body', 'reactions', and 'la",
+"order": "Sort order",
+"owner": "Optional repository owner. If provided with repo, only pull requests for this repository are listed.",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"query": "Search query using GitHub pull request search syntax",
+"repo": "Optional repository name. If provided with owner, only pull requests for this repository are listed.",
+"sort": "Sort field by number of matches of categories, defaults to best match"
+},
+"server": "github"
+},
+{
+"description": "Find GitHub repositories by name, description, readme, topics, or other metadata. Perfect for discovering projects, finding examples, or locating specific repositories across GitHub.",
+"name": "search_repositories",
+"params": {
+"minimal_output": "Return minimal repository information (default: true). When false, modern clients receive additional curated repository details, not the complete GitHub API object. Legacy clients retain full GitHub A",
+"order": "Sort order",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"query": "Repository search query. Examples: 'machine learning in:name stars:>1000 language:python', 'topic:react', 'user:facebook'. Supports advanced search syntax for precise filtering.",
+"sort": "Sort repositories by field, defaults to best match"
+},
+"server": "github"
+},
+{
+"description": "Find GitHub users by username, real name, or other profile information. Useful for locating developers, contributors, or team members.",
+"name": "search_users",
+"params": {
+"order": "Sort order",
+"page": "Page number for pagination (min 1)",
+"perPage": "Results per page for pagination (min 1, max 100)",
+"query": "User search query. Examples: 'john smith', 'location:seattle', 'followers:>100'. Search is automatically scoped to type:user.",
+"sort": "Sort users by number of followers or repositories, or when the person joined GitHub."
+},
+"server": "github"
+},
+{
+"description": "Add a sub-issue to a parent issue in a GitHub repository.",
+"name": "sub_issue_write",
+"params": {
+"after_id": "The ID of the sub-issue to be prioritized after (either after_id OR before_id should be specified)",
+"before_id": "The ID of the sub-issue to be prioritized before (either after_id OR before_id should be specified)",
+"issue_number": "The number of the parent issue",
+"method": "The action to perform on a single sub-issue\nOptions are:\n- 'add' - add a sub-issue to a parent issue in a GitHub repository.\n- 'remove' - remove a sub-issue from a parent issue in a GitHub repository.",
+"owner": "Repository owner",
+"replace_parent": "When true, replaces the sub-issue's current parent issue. Use with 'add' method only.",
+"repo": "Repository name",
+"sub_issue_id": "The ID of the sub-issue to add. ID is not the same as issue number"
+},
+"server": "github"
+},
+{
+"description": "Fetch UI data for MCP Apps (labels, assignees, milestones, issue types, branches, issue fields, reviewers).",
+"name": "ui_get",
+"params": {
+"method": "The type of data to fetch",
+"owner": "Repository owner (required for all methods)",
+"repo": "Repository name (required for labels, assignees, milestones, branches, issue fields, reviewers)"
+},
+"server": "github"
+},
+{
+"description": "Update the body of an existing issue or pull request conversation comment. This tool cannot update pull request review comments.",
+"name": "update_issue_comment",
+"params": {
+"body": "New comment content",
+"comment_id": "The numeric ID of the issue or pull request conversation comment to update. Do not use a pull request review comment ID.",
+"owner": "Repository owner",
+"repo": "Repository name"
+},
+"server": "github"
+},
+{
+"description": "Update an existing pull request in a GitHub repository.",
+"name": "update_pull_request",
+"params": {
+"base": "New base branch name",
+"body": "New description",
+"draft": "Mark pull request as draft (true) or ready for review (false)",
+"maintainer_can_modify": "Allow maintainer edits",
+"owner": "Repository owner",
+"pullNumber": "Pull request number to update",
+"repo": "Repository name",
+"reviewers": "GitHub usernames or ORG/team-slug team reviewers to request reviews from",
+"state": "New state",
+"title": "New title"
+},
+"server": "github"
+},
+{
+"description": "Update the branch of a pull request with the latest changes from the base branch.",
+"name": "update_pull_request_branch",
+"params": {
+"expectedHeadSha": "The expected SHA of the pull request's HEAD ref",
+"owner": "Repository owner",
+"pullNumber": "Pull request number",
+"repo": "Repository name"
+},
+"server": "github"
+}
+]

@@ -17,6 +17,7 @@ sha2.workspace = true
 axum = { version = "0.8", default-features = false }
 tracing.workspace = true
 tokio = { workspace = true, features = ["io-util"] }
+tantivy = { version = "0.27", default-features = false, features = ["stopwords", "stemmer"] }
 
 [dev-dependencies]
 mcpgw-testkit.workspace = true

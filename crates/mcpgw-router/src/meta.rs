@@ -123,8 +123,27 @@ pub fn score(tool: &JsonObject, query: &[String]) -> u32 {
         .sum()
 }
 
-/// Best matches for `query` among `tools` (already public-named).
+/// Best matches for `query` among `tools` (already public-named): BM25
+/// over names, descriptions and parameters (see [`crate::search`]). An
+/// empty query lists tools by name.
 pub fn search(tools: &[JsonObject], query: &str, limit: usize) -> Vec<JsonObject> {
+    let limit = limit.clamp(1, MAX_LIMIT);
+    if tokens(query).is_empty() {
+        return keyword_search(tools, query, limit);
+    }
+    match crate::search::index_for(tools) {
+        Some(index) => index
+            .search(query, limit)
+            .into_iter()
+            .filter_map(|i| tools.get(i).cloned())
+            .collect(),
+        None => keyword_search(tools, query, limit),
+    }
+}
+
+/// The M1-10 keyword search (prefix matches, name 3 / parameter 2 /
+/// description 1), kept as a fallback and a benchmark baseline.
+pub fn keyword_search(tools: &[JsonObject], query: &str, limit: usize) -> Vec<JsonObject> {
     let q = tokens(query);
     let mut hits: Vec<(u32, &JsonObject)> = tools
         .iter()

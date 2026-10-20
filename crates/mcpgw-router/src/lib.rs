@@ -7,6 +7,7 @@
 pub mod aggregate;
 pub mod login;
 pub mod meta;
+pub mod search;
 
 use std::sync::Arc;
 
