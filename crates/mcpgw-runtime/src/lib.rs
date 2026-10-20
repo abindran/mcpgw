@@ -8,7 +8,7 @@ pub mod catalog;
 pub mod manager;
 pub mod state;
 
-pub use catalog::{Catalog, Persist, introspect};
-pub use manager::{BackendManager, BackendStatus, ManagerOptions};
+pub use catalog::{Catalog, Persist, introspect, introspect_with_secrets};
+pub use manager::{BackendManager, BackendStatus, ManagerOptions, SecretResolver};
 pub use mcpgw_proto::{JsonObject, ProtoError};
 pub use state::State;

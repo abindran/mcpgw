@@ -49,6 +49,9 @@ pub struct GatewayConfig {
     /// Default: `<data dir>/mcpgw/token`.
     #[serde(default)]
     pub token_path: Option<PathBuf>,
+    /// Path of the secret vault. Default: `vault.json` next to the store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vault_path: Option<PathBuf>,
     /// Address of the HTTP front door; must be a loopback address.
     /// Default: `127.0.0.1:7777`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -101,6 +104,13 @@ impl GatewayConfig {
         self.store_path
             .clone()
             .unwrap_or_else(|| data_dir().join("mcpgw.db"))
+    }
+
+    /// Effective vault path (configured or next to the store).
+    pub fn vault_path(&self) -> PathBuf {
+        self.vault_path
+            .clone()
+            .unwrap_or_else(|| self.store_path().with_file_name("vault.json"))
     }
 
     /// Effective idle timeout (configured or 10 minutes).

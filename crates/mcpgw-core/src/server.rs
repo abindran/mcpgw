@@ -90,6 +90,54 @@ pub struct ServerSpec {
     /// Deadline for start-up and the MCP handshake. Default: gateway-wide.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub startup_timeout: Option<Duration>,
+    /// Secrets injected at spawn: environment variable → vault secret name,
+    /// e.g. `{ GITHUB_TOKEN = "github_token" }`. Args and env values may
+    /// also contain `${secret:<name>}`. Injected values are redacted from
+    /// everything the server sends back.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub secrets: BTreeMap<String, String>,
+}
+
+/// Prefix of a secret placeholder in args and env values.
+pub const SECRET_PLACEHOLDER: &str = "${secret:";
+
+/// Names referenced by `${secret:<name>}` placeholders in `s`.
+pub fn secret_placeholders(s: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = s;
+    while let Some(i) = rest.find(SECRET_PLACEHOLDER) {
+        let after = &rest[i + SECRET_PLACEHOLDER.len()..];
+        match after.find('}') {
+            Some(j) => {
+                out.push(after[..j].to_string());
+                rest = &after[j + 1..];
+            }
+            None => break,
+        }
+    }
+    out
+}
+
+/// Replace `${secret:<name>}` placeholders using `lookup`.
+pub fn fill_placeholders(s: &str, lookup: &dyn Fn(&str) -> Option<String>) -> String {
+    let mut out = String::new();
+    let mut rest = s;
+    while let Some(i) = rest.find(SECRET_PLACEHOLDER) {
+        out.push_str(&rest[..i]);
+        let after = &rest[i + SECRET_PLACEHOLDER.len()..];
+        match after.find('}') {
+            Some(j) => {
+                out.push_str(&lookup(&after[..j]).unwrap_or_default());
+                rest = &after[j + 1..];
+            }
+            None => {
+                out.push_str(&rest[i..]);
+                rest = "";
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 fn default_true() -> bool {
@@ -116,13 +164,50 @@ impl ServerSpec {
             idle_timeout: None,
             stateful: false,
             startup_timeout: None,
+            secrets: BTreeMap::new(),
         }
+    }
+
+    /// Every secret this server uses: bindings and placeholders.
+    pub fn secret_refs(&self) -> std::collections::BTreeSet<String> {
+        let mut refs: std::collections::BTreeSet<String> = self.secrets.values().cloned().collect();
+        if let Transport::Stdio { args, env, .. } = &self.transport {
+            for s in args.iter().chain(env.values()) {
+                refs.extend(secret_placeholders(s));
+            }
+        }
+        if let Transport::Http { headers, .. } = &self.transport {
+            for s in headers.values() {
+                refs.extend(secret_placeholders(s));
+            }
+        }
+        refs
     }
 
     /// Check this server's own invariants: valid name, non-empty
     /// command/URL, http(s) URL.
     pub fn validate(&self) -> Result<()> {
         validate_server_name(&self.name)?;
+        for (var, secret) in &self.secrets {
+            let ok_var = !var.is_empty()
+                && !var.starts_with(|c: char| c.is_ascii_digit())
+                && var.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+            if !ok_var {
+                return Err(Error::Config(format!(
+                    "server {}: {var:?} is not an environment variable name",
+                    self.name
+                )));
+            }
+            crate::validate_secret_name(secret)?;
+        }
+        for r in self.secret_refs() {
+            crate::validate_secret_name(&r).map_err(|_| {
+                Error::Config(format!(
+                    "server {}: bad secret placeholder name {r:?}",
+                    self.name
+                ))
+            })?;
+        }
         if let Some(a) = &self.alias {
             validate_server_name(a).map_err(|_| {
                 Error::Config(format!("invalid alias {a:?} for server {}", self.name))
@@ -195,6 +280,32 @@ mod tests {
         assert!(s.validate().is_err());
         s.transport = Transport::http("https://x/mcp");
         s.validate().unwrap();
+    }
+
+    #[test]
+    fn secret_bindings_and_placeholders() {
+        let mut s = ServerSpec::new(
+            "gh",
+            Transport::Stdio {
+                command: "gh-mcp".into(),
+                args: vec!["--token=${secret:gh_pat}".into(), "--x".into()],
+                env: [("URL".to_string(), "https://${secret:host}/api".to_string())].into(),
+                cwd: None,
+            },
+        );
+        s.secrets
+            .insert("GITHUB_TOKEN".into(), "github_token".into());
+        s.validate().unwrap();
+        assert_eq!(
+            s.secret_refs().into_iter().collect::<Vec<_>>(),
+            ["gh_pat", "github_token", "host"]
+        );
+        let filled = fill_placeholders("a ${secret:x} b ${secret:y} ${secret:", &|n| {
+            (n == "x").then(|| "X".to_string())
+        });
+        assert_eq!(filled, "a X b  ${secret:");
+        s.secrets.insert("1BAD".into(), "k".into());
+        assert!(s.validate().is_err());
     }
 
     #[test]

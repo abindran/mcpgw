@@ -712,3 +712,109 @@ async fn disable_enable_and_remove_at_runtime() {
     ));
     m.shutdown().await;
 }
+
+struct MapSecrets(std::collections::BTreeMap<String, String>);
+
+impl mcpgw_runtime::SecretResolver for MapSecrets {
+    fn resolve(&self, name: &str) -> Result<Option<secrecy::SecretString>, String> {
+        Ok(self
+            .0
+            .get(name)
+            .map(|v| secrecy::SecretString::from(v.clone())))
+    }
+}
+
+fn canary() -> String {
+    // Built at runtime so the source never contains a scannable canary.
+    format!("mcpgw-canary-{}", "Z9".repeat(12))
+}
+
+/// The canary test: a server that echoes its environment never hands the
+/// bound secret back, whichever way it leaks it.
+#[tokio::test(flavor = "multi_thread")]
+async fn bound_secret_is_injected_but_never_returned() {
+    let secret = canary();
+    let resolver: std::sync::Arc<dyn mcpgw_runtime::SecretResolver> = std::sync::Arc::new(
+        MapSecrets([("gh_token".to_string(), secret.clone())].into()),
+    );
+    let mut spec = server("gh", &[("FAKE_PREFIX", "${secret:gh_token}:")]);
+    spec.secrets
+        .insert("GITHUB_TOKEN".into(), "gh_token".into());
+    let m = BackendManager::with_secrets(
+        &[spec],
+        lazy(),
+        std::sync::Arc::new(mcpgw_runtime::Catalog::default()),
+        Some(resolver),
+    );
+
+    // the env tool reads GITHUB_TOKEN: the server got the real value...
+    let r = m
+        .call_tool("gh", "env", args(json!({"name": "GITHUB_TOKEN"})))
+        .await
+        .unwrap();
+    let whole = serde_json::to_string(&r).unwrap();
+    assert!(!whole.contains(&secret), "secret returned: {whole}");
+    // ...and the client sees only the redaction marker
+    assert_eq!(text_of(&r), "[REDACTED:gh_token]");
+
+    // a placeholder in env (echo prefix) is filled and redacted too
+    let r = m
+        .call_tool("gh", "echo", args(json!({"text": "hi"})))
+        .await
+        .unwrap();
+    assert_eq!(text_of(&r), "[REDACTED:gh_token]:hi");
+
+    // base64 of the secret written to stderr is redacted in the log buffer
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&secret);
+    m.call_tool(
+        "gh",
+        "stderr",
+        args(json!({"text": format!("auth: {b64}")})),
+    )
+    .await
+    .unwrap();
+    let mut tail = Vec::new();
+    for _ in 0..100 {
+        tail = m.stderr_tail("gh");
+        if !tail.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(tail, ["auth: [REDACTED:gh_token]"]);
+    let all = format!("{:?}", m.status().await);
+    assert!(!all.contains(&secret));
+    m.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn missing_secret_fails_the_start_with_a_hint() {
+    let mut spec = server("gh", &[]);
+    spec.secrets
+        .insert("GITHUB_TOKEN".into(), "gh_token".into());
+    let resolver: std::sync::Arc<dyn mcpgw_runtime::SecretResolver> =
+        std::sync::Arc::new(MapSecrets(Default::default()));
+    let m = BackendManager::with_secrets(
+        &[spec.clone()],
+        lazy(),
+        std::sync::Arc::new(mcpgw_runtime::Catalog::default()),
+        Some(resolver),
+    );
+    let err = m
+        .call_tool("gh", "add", None)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("mcpgw secret set gh_token"), "{err}");
+    m.shutdown().await;
+
+    let m = BackendManager::start(&[spec], lazy());
+    let err = m
+        .call_tool("gh", "add", None)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no vault is configured"), "{err}");
+    m.shutdown().await;
+}

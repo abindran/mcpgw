@@ -179,3 +179,56 @@ async fn tools_list_after_install_spawns_nothing() {
     c.close().await;
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The canary test end to end: a vault secret bound to a server reaches
+/// the server, and the client asking that server to echo its environment
+/// gets only a redaction marker.
+#[tokio::test(flavor = "multi_thread")]
+async fn bound_vault_secret_never_reaches_the_client() {
+    let dir = std::env::temp_dir().join(format!("mcpgw-canary-e2e-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let secret = format!("mcpgw-canary-{}", "K3".repeat(12));
+    let source = mcpgw_vault::KeySource::Passphrase(secrecy::SecretString::from("pw".to_string()));
+    let mut v = mcpgw_vault::Vault::create(
+        dir.join("vault.json"),
+        &source,
+        mcpgw_vault::KdfParams {
+            m_kib: 1024,
+            t: 1,
+            p: 1,
+        },
+    )
+    .unwrap();
+    v.set("gh_token", &secrecy::SecretString::from(secret.clone()))
+        .unwrap();
+    std::fs::write(
+        dir.join("config.toml"),
+        format!(
+            "[gateway]\nmode = \"direct\"\nstore_path = {:?}\ntoken_path = {:?}\n\n\
+             [[server]]\nname = \"gh\"\ntransport = \"stdio\"\ncommand = {:?}\n\
+             secrets = {{ GITHUB_TOKEN = \"gh_token\" }}\n",
+            dir.join("db.sqlite"),
+            dir.join("token"),
+            mcpgw_testkit::fake_mcp(),
+        ),
+    )
+    .unwrap();
+    let mut serve = tokio::process::Command::new(env!("CARGO_BIN_EXE_mcpgw"));
+    serve
+        .arg("--config")
+        .arg(dir.join("config.toml"))
+        .args(["serve", "--stdio"])
+        .env("MCPGW_VAULT_PASSPHRASE", "pw")
+        .stderr(Stdio::null());
+    let c = mcpgw_testkit::McpClient::stdio(serve).await.unwrap();
+    let r = c
+        .call("gh__env", json!({"name": "GITHUB_TOKEN"}))
+        .await
+        .unwrap();
+    let text = r.to_string();
+    assert!(!text.contains(&secret), "secret leaked: {text}");
+    assert_eq!(r["content"][0]["text"], "[REDACTED:gh_token]");
+    c.close().await;
+    let _ = std::fs::remove_dir_all(&dir);
+}

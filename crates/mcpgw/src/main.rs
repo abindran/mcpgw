@@ -7,6 +7,7 @@
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode, sync::Arc, time::Duration};
 
 mod daemon;
+mod secrets;
 
 use clap::{Parser, Subcommand};
 use mcpgw_auth::Token;
@@ -293,7 +294,16 @@ fn serve(config: &Config, store: Arc<SqliteStore>, stdio: bool) -> AnyResult<()>
             max_running: config.gateway.max_running(),
             ..ManagerOptions::default()
         };
-        let mgr = Arc::new(BackendManager::with_catalog(&servers, opts, catalog));
+        let resolver: Arc<dyn mcpgw_runtime::SecretResolver> = Arc::new(secrets::VaultResolver::new(
+            config.gateway.vault_path(),
+            mcpgw_vault::KeySource::from_env(),
+        ));
+        let mgr = Arc::new(BackendManager::with_secrets(
+            &servers,
+            opts,
+            catalog,
+            Some(resolver),
+        ));
         // Servers start on first use; only those never seen are started now.
         capture_missing(&mgr, &servers, Duration::from_secs(30)).await;
         let res: AnyResult<()> = if stdio {

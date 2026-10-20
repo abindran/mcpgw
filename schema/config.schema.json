@@ -83,6 +83,13 @@
             "string",
             "null"
           ]
+        },
+        "vault_path": {
+          "description": "Path of the secret vault. Default: `vault.json` next to the store.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "type": "object"
@@ -201,6 +208,13 @@
         "name": {
           "description": "Unique server name.",
           "type": "string"
+        },
+        "secrets": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Secrets injected at spawn: environment variable → vault secret name,\ne.g. `{ GITHUB_TOKEN = \"github_token\" }`. Args and env values may\nalso contain `${secret:<name>}`. Injected values are redacted from\neverything the server sends back.",
+          "type": "object"
         },
         "startup_timeout": {
           "anyOf": [

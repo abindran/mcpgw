@@ -19,12 +19,21 @@ use std::{
 
 use mcpgw_core::{ManifestDiff, ServerSpec, ToolManifest, Transport};
 use mcpgw_proto::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
+use mcpgw_vault::Redactor;
+use secrecy::{ExposeSecret, SecretString};
 use tokio::sync::{RwLock, mpsc, oneshot};
 
 use crate::{
     catalog::{Catalog, manifest_from},
     state::{Action, Event, State, step},
 };
+
+/// Looks up secret values for injection (the daemon backs this with the
+/// vault). `Ok(None)` means the secret doesn't exist.
+pub trait SecretResolver: Send + Sync {
+    /// The value of secret `name`.
+    fn resolve(&self, name: &str) -> Result<Option<SecretString>, String>;
+}
 
 /// Lines of stderr kept per server.
 pub const STDERR_LINES: usize = 200;
@@ -106,6 +115,8 @@ pub struct BackendStatus {
 
 struct Shared {
     name: String,
+    /// Scrubs the secrets injected into the current connection.
+    redactor: Arc<std::sync::RwLock<Arc<Redactor>>>,
     /// The live manifest that differs from the pin, while quarantined.
     pending: std::sync::Mutex<Option<ToolManifest>>,
     status: std::sync::RwLock<BackendStatus>,
@@ -115,10 +126,17 @@ struct Shared {
 }
 
 impl Shared {
+    fn redactor(&self) -> Arc<Redactor> {
+        self.redactor.read().expect("redactor").clone()
+    }
+
     fn sink(&self) -> StderrSink {
         let buf = self.stderr.clone();
         let name = self.name.clone();
+        let redactor = self.redactor.clone();
         Arc::new(move |line: &str| {
+            let r = redactor.read().expect("redactor").clone();
+            let line = r.redact(line);
             tracing::debug!(target: "mcpgw::backend", server = %name, "{line}");
             let mut b = buf.lock().expect("stderr buffer");
             if b.len() == STDERR_LINES {
@@ -162,7 +180,7 @@ enum Waiter {
 }
 
 enum Internal {
-    Started(Result<(BackendConn, Vec<JsonObject>), String>),
+    Started(Result<(BackendConn, Vec<JsonObject>, Redactor), String>),
     CallDone { lost: bool, failed: bool },
     Ping(Result<(), String>),
     Recheck,
@@ -220,6 +238,7 @@ impl Registry {
 pub struct BackendManager {
     backends: std::sync::RwLock<BTreeMap<String, Handle>>,
     opts: ManagerOptions,
+    secrets: Option<Arc<dyn SecretResolver>>,
     catalog: Arc<Catalog>,
     registry: Arc<Registry>,
     tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
@@ -239,6 +258,17 @@ impl BackendManager {
         opts: ManagerOptions,
         catalog: Arc<Catalog>,
     ) -> Self {
+        Self::with_secrets(servers, opts, catalog, None)
+    }
+
+    /// Like [`BackendManager::with_catalog`], injecting secrets from
+    /// `secrets` into servers that bind them.
+    pub fn with_secrets(
+        servers: &[ServerSpec],
+        opts: ManagerOptions,
+        catalog: Arc<Catalog>,
+        secrets: Option<Arc<dyn SecretResolver>>,
+    ) -> Self {
         let registry = Arc::new(Registry {
             peers: std::sync::RwLock::new(Vec::new()),
             max_running: opts.max_running.max(1),
@@ -246,6 +276,7 @@ impl BackendManager {
         let m = Self {
             backends: std::sync::RwLock::new(BTreeMap::new()),
             opts,
+            secrets,
             catalog,
             registry,
             tasks: std::sync::Mutex::new(Vec::new()),
@@ -298,6 +329,7 @@ impl BackendManager {
         }
         let shared = Arc::new(Shared {
             name: cfg.name.clone(),
+            redactor: Arc::new(std::sync::RwLock::new(Arc::new(Redactor::default()))),
             pending: std::sync::Mutex::new(None),
             status: std::sync::RwLock::new(BackendStatus {
                 name: cfg.name.clone(),
@@ -340,7 +372,12 @@ impl BackendManager {
             };
             let actor = Actor::new(
                 shared.clone(),
-                spec,
+                Launch {
+                    template: spec,
+                    bindings: cfg.secrets.clone(),
+                    refs: cfg.secret_refs(),
+                    resolver: self.secrets.clone(),
+                },
                 self.opts.clone(),
                 limits,
                 state,
@@ -598,6 +635,84 @@ impl BackendManager {
     }
 }
 
+/// How to launch a server: the spec with secret placeholders, its env
+/// bindings, and where secrets come from.
+pub(crate) struct Launch {
+    pub(crate) template: StdioSpec,
+    pub(crate) bindings: BTreeMap<String, String>,
+    pub(crate) refs: std::collections::BTreeSet<String>,
+    pub(crate) resolver: Option<Arc<dyn SecretResolver>>,
+}
+
+impl Launch {
+    /// The concrete spec plus a redactor for the injected values.
+    pub(crate) fn resolve(&self) -> Result<(StdioSpec, Redactor), String> {
+        if self.refs.is_empty() {
+            return Ok((self.template.clone(), Redactor::default()));
+        }
+        let Some(r) = &self.resolver else {
+            return Err("this server needs secrets, but no vault is configured".into());
+        };
+        let mut values: BTreeMap<String, SecretString> = BTreeMap::new();
+        for name in &self.refs {
+            match r.resolve(name)? {
+                Some(v) => {
+                    values.insert(name.clone(), v);
+                }
+                None => {
+                    return Err(format!(
+                        "secret {name:?} is not set; add it with `mcpgw secret set {name}`"
+                    ));
+                }
+            }
+        }
+        let lookup = |n: &str| values.get(n).map(|v| v.expose_secret().to_string());
+        let mut spec = self.template.clone();
+        spec.args = spec
+            .args
+            .iter()
+            .map(|a| mcpgw_core::fill_placeholders(a, &lookup))
+            .collect();
+        for v in spec.env.values_mut() {
+            *v = mcpgw_core::fill_placeholders(v, &lookup);
+        }
+        for (var, name) in &self.bindings {
+            spec.env
+                .insert(var.clone(), lookup(name).unwrap_or_default());
+        }
+        let redactor = Redactor::new(values.iter().map(|(n, v)| (n.as_str(), v.expose_secret())));
+        Ok((spec, redactor))
+    }
+}
+
+/// Redact secret values from an error crossing back to the client.
+fn redact_error(e: ProtoError, r: &Redactor) -> ProtoError {
+    if r.is_empty() {
+        return e;
+    }
+    let s = |m: String| r.redact(&m).into_owned();
+    match e {
+        ProtoError::Rpc {
+            code,
+            message,
+            mut data,
+        } => {
+            if let Some(d) = data.as_mut() {
+                r.redact_json(d);
+            }
+            ProtoError::Rpc {
+                code,
+                message: s(message),
+                data,
+            }
+        }
+        ProtoError::Connect(m) => ProtoError::Connect(s(m)),
+        ProtoError::Unavailable(m) => ProtoError::Unavailable(s(m)),
+        ProtoError::Other(m) => ProtoError::Other(s(m)),
+        other => other,
+    }
+}
+
 /// Per-server limits resolved from the spec and the defaults.
 struct Limits {
     connect_timeout: Duration,
@@ -607,7 +722,7 @@ struct Limits {
 
 struct Actor {
     shared: Arc<Shared>,
-    spec: StdioSpec,
+    launch: Arc<Launch>,
     opts: ManagerOptions,
     limits: Limits,
     registry: Arc<Registry>,
@@ -631,7 +746,7 @@ struct Actor {
 impl Actor {
     fn new(
         shared: Arc<Shared>,
-        spec: StdioSpec,
+        launch: Launch,
         opts: ManagerOptions,
         limits: Limits,
         state: State,
@@ -642,7 +757,7 @@ impl Actor {
         let sink = shared.sink();
         Self {
             shared,
-            spec,
+            launch: Arc::new(launch),
             opts,
             limits,
             registry,
@@ -772,20 +887,34 @@ impl Actor {
             Action::None => {}
             Action::Spawn => {
                 self.registry.make_room(&self.shared.name);
-                let spec = self.spec.clone();
+                let launch = self.launch.clone();
                 let timeout = self.limits.connect_timeout;
                 let sink = self.sink.clone();
                 let itx = self.itx.clone();
+                let redactor_cell = self.shared.redactor.clone();
                 tokio::spawn(async move {
+                    // Resolving may touch the keychain; keep it off the actor.
+                    let resolved = tokio::task::spawn_blocking(move || launch.resolve())
+                        .await
+                        .unwrap_or_else(|e| Err(format!("secret lookup failed: {e}")));
+                    let (spec, redactor) = match resolved {
+                        Ok(x) => x,
+                        Err(e) => {
+                            let _ = itx.send(Internal::Started(Err(e)));
+                            return;
+                        }
+                    };
+                    // stderr may speak before the handshake completes
+                    *redactor_cell.write().expect("redactor") = Arc::new(redactor.clone());
                     let res = match BackendConn::connect_stdio(&spec, timeout, Some(sink)).await {
                         Ok(c) => match c.list_tools().await {
-                            Ok(tools) => Ok((c, tools)),
+                            Ok(tools) => Ok((c, tools, redactor)),
                             Err(e) => {
                                 c.shutdown().await;
                                 Err(format!("tools/list failed: {e}"))
                             }
                         },
-                        Err(e) => Err(e.to_string()),
+                        Err(e) => Err(redactor.redact(&e.to_string()).into_owned()),
                     };
                     let _ = itx.send(Internal::Started(res));
                 });
@@ -926,8 +1055,20 @@ impl Actor {
         self.touch();
         let timeout = self.opts.call_timeout;
         let itx = self.itx.clone();
+        let redactor = self.shared.redactor();
         tokio::spawn(async move {
-            let res = conn.call_tool(&tool, args, timeout).await;
+            let res = match conn.call_tool(&tool, args, timeout).await {
+                Ok(r) if !redactor.is_empty() => {
+                    let mut v = serde_json::Value::Object(r);
+                    redactor.redact_json(&mut v);
+                    match v {
+                        serde_json::Value::Object(o) => Ok(o),
+                        _ => unreachable!("redaction keeps the shape"),
+                    }
+                }
+                Err(e) => Err(redact_error(e, &redactor)),
+                ok => ok,
+            };
             let lost = matches!(res, Err(ProtoError::Closed)) || conn.is_closed();
             // A transport error (not a tool's own JSON-RPC error) may mean the
             // server died a moment before its pipes report it.
@@ -952,7 +1093,8 @@ impl Actor {
 
     fn on_internal(&mut self, ev: Internal) {
         match ev {
-            Internal::Started(Ok((conn, tools))) => {
+            Internal::Started(Ok((conn, tools, redactor))) => {
+                *self.shared.redactor.write().expect("redactor") = Arc::new(redactor);
                 let pv = conn.protocol_version();
                 self.conn = Some(Arc::new(conn));
                 if let Some(diff) = self.drift(pv.clone(), &tools) {

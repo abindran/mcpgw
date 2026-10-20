@@ -14,6 +14,10 @@
 //! ciphertext is bound to the vault id and secret name through AEAD
 //! associated data, so it can't be moved to another name or vault.
 
+pub mod redact;
+
+pub use redact::Redactor;
+
 use std::{
     collections::BTreeMap,
     io::Write,
@@ -452,6 +456,22 @@ impl Vault {
         f.sync_all().map_err(io)?;
         drop(f);
         std::fs::rename(&tmp, &self.path).map_err(io)
+    }
+
+    /// Re-read the file (secrets changed by another process) with the
+    /// already-unlocked key. Fails if the file now belongs to another vault.
+    pub fn refresh(&mut self) -> Result<()> {
+        let text = std::fs::read_to_string(&self.path).map_err(|source| VaultError::Io {
+            path: self.path.clone(),
+            source,
+        })?;
+        let file: File = serde_json::from_str(&text)
+            .map_err(|e| VaultError::Format(self.path.clone(), e.to_string()))?;
+        if file.id != self.file.id {
+            return Err(VaultError::Locked("the vault file was replaced".into()));
+        }
+        self.file = file;
+        Ok(())
     }
 
     /// Delete the vault's keychain entry (when keychain-protected). Used when

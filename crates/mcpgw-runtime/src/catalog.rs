@@ -101,6 +101,15 @@ pub fn manifest_from(
 
 /// Start a server, read its tools, stop it: the install-time capture.
 pub async fn introspect(spec: &ServerSpec, timeout: Duration) -> Result<ToolManifest, ProtoError> {
+    introspect_with_secrets(spec, timeout, None).await
+}
+
+/// Like [`introspect`], injecting the server's bound secrets.
+pub async fn introspect_with_secrets(
+    spec: &ServerSpec,
+    timeout: Duration,
+    secrets: Option<Arc<dyn crate::SecretResolver>>,
+) -> Result<ToolManifest, ProtoError> {
     let Transport::Stdio {
         command,
         args,
@@ -112,12 +121,21 @@ pub async fn introspect(spec: &ServerSpec, timeout: Duration) -> Result<ToolMani
             "only stdio servers can be introspected until M2-04".into(),
         ));
     };
-    let spec_io = StdioSpec {
-        command: command.clone(),
-        args: args.clone(),
-        env: env.clone(),
-        cwd: cwd.clone(),
+    let launch = crate::manager::Launch {
+        template: StdioSpec {
+            command: command.clone(),
+            args: args.clone(),
+            env: env.clone(),
+            cwd: cwd.clone(),
+        },
+        bindings: spec.secrets.clone(),
+        refs: spec.secret_refs(),
+        resolver: secrets,
     };
+    let (spec_io, _) = tokio::task::spawn_blocking(move || launch.resolve())
+        .await
+        .map_err(|e| ProtoError::Other(e.to_string()))?
+        .map_err(ProtoError::Connect)?;
     let timeout = spec.startup_timeout.map(|d| d.get()).unwrap_or(timeout);
     let conn = BackendConn::connect_stdio(&spec_io, timeout, None).await?;
     let tools = conn.list_tools().await;
