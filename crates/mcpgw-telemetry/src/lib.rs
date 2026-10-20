@@ -4,7 +4,8 @@
 //! `json` lines on stderr, filtered by `MCPGW_LOG`). [`instrument_request`]
 //! wraps one client request in a `request` span carrying `request_id`,
 //! `method` and `tool`, and emits exactly one `request` event when it ends
-//! with `duration_ms` and `outcome`.
+//! with `duration_ms` and `outcome`. [`init_with_otlp`] also exports traces,
+//! metrics and logs over OTLP ([`otel`], M3-11).
 
 use std::{
     fmt::Display,
@@ -15,7 +16,10 @@ use std::{
 };
 
 use tracing::{Instrument, Subscriber};
-use tracing_subscriber::{EnvFilter, fmt::MakeWriter};
+use tracing_subscriber::{EnvFilter, Layer, fmt::MakeWriter, layer::SubscriberExt};
+
+pub mod otel;
+pub use otel::{OtelGuard, OtlpConfig, set_parent, traceparent};
 
 /// Environment variable holding the log filter (`warn`, `mcpgw=debug`, ...).
 pub const LOG_ENV: &str = "MCPGW_LOG";
@@ -71,24 +75,42 @@ fn build<W>(
 where
     W: for<'a> MakeWriter<'a> + Send + Sync + 'static,
 {
+    build_with(format, filter, writer, ansi, None)
+}
+
+/// The stderr layer (filtered by `filter`) plus, when given, the
+/// OpenTelemetry layers (with their own filter, see [`otel`]).
+fn build_with<W>(
+    format: LogFormat,
+    filter: &str,
+    writer: W,
+    ansi: bool,
+    otel: Option<otel::Layers>,
+) -> Box<dyn Subscriber + Send + Sync>
+where
+    W: for<'a> MakeWriter<'a> + Send + Sync + 'static,
+{
     let filter = EnvFilter::try_new(filter).unwrap_or_else(|_| EnvFilter::new("warn"));
-    let builder = tracing_subscriber::fmt()
-        .with_env_filter(filter)
+    let fmt = tracing_subscriber::fmt::layer()
         .with_writer(writer)
         .with_ansi(ansi && format != LogFormat::Json)
         .with_target(true);
-    match format {
-        LogFormat::Pretty => Box::new(builder.pretty().finish()),
-        LogFormat::Compact => Box::new(builder.compact().finish()),
-        LogFormat::Json => Box::new(
-            builder
-                .json()
-                .with_current_span(true)
-                .with_span_list(false)
-                .flatten_event(true)
-                .finish(),
-        ),
-    }
+    let fmt: Box<dyn Layer<tracing_subscriber::Registry> + Send + Sync> = match format {
+        LogFormat::Pretty => fmt.pretty().with_filter(filter).boxed(),
+        LogFormat::Compact => fmt.compact().with_filter(filter).boxed(),
+        LogFormat::Json => fmt
+            .json()
+            .with_current_span(true)
+            .with_span_list(false)
+            .flatten_event(true)
+            .with_filter(filter)
+            .boxed(),
+    };
+    let layers = match otel {
+        Some(o) => vec![fmt, o],
+        None => vec![fmt],
+    };
+    Box::new(tracing_subscriber::registry().with(layers))
 }
 
 /// Install the global subscriber on stderr. The filter comes from
@@ -110,6 +132,40 @@ pub fn init(format: Option<LogFormat>, default_filter: &str) -> Result<(), Strin
     let ansi = std::io::IsTerminal::is_terminal(&std::io::stderr());
     let _ = tracing::subscriber::set_global_default(build(format, &filter, std::io::stderr, ansi));
     Ok(())
+}
+
+/// [`init`], also exporting traces, metrics and logs over OTLP when `otlp`
+/// is given (M3-11). Keep the guard until exit: dropping it flushes.
+pub fn init_with_otlp(
+    format: Option<LogFormat>,
+    default_filter: &str,
+    otlp: Option<&OtlpConfig>,
+) -> Result<Option<OtelGuard>, String> {
+    let Some(cfg) = otlp else {
+        init(format, default_filter)?;
+        return Ok(None);
+    };
+    let format = match format {
+        Some(f) => f,
+        None => match std::env::var(LOG_FORMAT_ENV) {
+            Ok(v) if !v.is_empty() => v.parse()?,
+            _ => LogFormat::default(),
+        },
+    };
+    let filter = std::env::var(LOG_ENV)
+        .ok()
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| default_filter.to_string());
+    let ansi = std::io::IsTerminal::is_terminal(&std::io::stderr());
+    let (layers, guard) = otel::layers(cfg)?;
+    let _ = tracing::subscriber::set_global_default(build_with(
+        format,
+        &filter,
+        std::io::stderr,
+        ansi,
+        Some(layers),
+    ));
+    Ok(Some(guard))
 }
 
 /// A new request id: 16 lowercase hex characters, unique within the process
@@ -140,19 +196,58 @@ where
     E: Display,
     F: Future<Output = Result<T, E>>,
 {
+    instrument_request_from(method, tool, None, fut).await
+}
+
+/// [`instrument_request`], continuing the client's trace when it sent a
+/// W3C `traceparent` (and `tracestate`).
+pub async fn instrument_request_from<T, E, F>(
+    method: &'static str,
+    tool: Option<&str>,
+    parent: Option<(&str, Option<&str>)>,
+    fut: F,
+) -> Result<T, E>
+where
+    E: Display,
+    F: Future<Output = Result<T, E>>,
+{
     let id = request_id();
+    let otel_name = match tool {
+        Some(t) => format!("{method} {t}"),
+        None => method.to_string(),
+    };
     let span = tracing::info_span!(
         "request",
         request_id = %id,
         method,
         tool = tool.unwrap_or(""),
+        otel.name = %otel_name,
+        otel.kind = "server",
+        otel.status_code = tracing::field::Empty,
     );
+    if let Some((tp, ts)) = parent {
+        set_parent(&span, tp, ts);
+    }
     let start = Instant::now();
     let out = fut.instrument(span.clone()).await;
     let duration_ms = (start.elapsed().as_secs_f64() * 1000.0 * 1000.0).round() / 1000.0;
     span.in_scope(|| match &out {
-        Ok(_) => tracing::info!(duration_ms, outcome = "ok", "request"),
-        Err(e) => tracing::warn!(duration_ms, outcome = "error", error = %e, "request"),
+        Ok(_) => tracing::info!(
+            duration_ms,
+            outcome = "ok",
+            histogram.mcpgw_request_duration_ms = duration_ms,
+            "request"
+        ),
+        Err(e) => {
+            tracing::Span::current().record("otel.status_code", "ERROR");
+            tracing::warn!(
+                duration_ms,
+                outcome = "error",
+                error = %e,
+                histogram.mcpgw_request_duration_ms = duration_ms,
+                "request"
+            )
+        }
     });
     out
 }

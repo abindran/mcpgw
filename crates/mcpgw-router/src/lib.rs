@@ -270,34 +270,44 @@ impl ToolProvider for GatewayProvider {
                 }),
                 _ => None,
             };
-            let out = mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
-                // the tool actually being run: the name, or call_tool's target
-                let target = match (meta, name.as_str()) {
-                    (false, _) => Some((name.clone(), arguments.clone())),
-                    (true, meta::CALL) => arguments.as_ref().and_then(|a| {
-                        let t = a.get("name")?.as_str()?.to_string();
-                        Some((t, a.get("arguments").and_then(|v| v.as_object()).cloned()))
-                    }),
-                    _ => None,
-                };
-                if let Some((tool, targs)) = &target
-                    && let mcpgw_core::Decision::Approve { .. } = self.opts.policy.decide(tool)
-                    && let Err(answer) = self.approve(tool, targs, &ctx).await
-                {
-                    return answer;
-                }
-                let res = if meta {
-                    meta::call(&self.manager, &name, arguments, &self.scope()).await
-                } else {
-                    call_in(&self.manager, &name, arguments, &self.scope()).await
-                };
-                match (res, &self.opts.login) {
-                    (Err(e), Some(link)) if login::needs_login(&e) => {
-                        self.login_answer(e, &label, &ctx, link).await
+            // continue the client's trace, when it sent one (M3-11)
+            let parent = ctx
+                .traceparent
+                .as_deref()
+                .map(|tp| (tp, ctx.tracestate.as_deref()));
+            let out = mcpgw_telemetry::instrument_request_from(
+                "tools/call",
+                Some(&label),
+                parent,
+                async {
+                    // the tool actually being run: the name, or call_tool's target
+                    let target = match (meta, name.as_str()) {
+                        (false, _) => Some((name.clone(), arguments.clone())),
+                        (true, meta::CALL) => arguments.as_ref().and_then(|a| {
+                            let t = a.get("name")?.as_str()?.to_string();
+                            Some((t, a.get("arguments").and_then(|v| v.as_object()).cloned()))
+                        }),
+                        _ => None,
+                    };
+                    if let Some((tool, targs)) = &target
+                        && let mcpgw_core::Decision::Approve { .. } = self.opts.policy.decide(tool)
+                        && let Err(answer) = self.approve(tool, targs, &ctx).await
+                    {
+                        return answer;
                     }
-                    (res, _) => res,
-                }
-            })
+                    let res = if meta {
+                        meta::call(&self.manager, &name, arguments, &self.scope()).await
+                    } else {
+                        call_in(&self.manager, &name, arguments, &self.scope()).await
+                    };
+                    match (res, &self.opts.login) {
+                        (Err(e), Some(link)) if login::needs_login(&e) => {
+                            self.login_answer(e, &label, &ctx, link).await
+                        }
+                        (res, _) => res,
+                    }
+                },
+            )
             .await;
             // the question of an approval round isn't a finished call
             if let Some(log) = &self.opts.calls
@@ -312,6 +322,14 @@ impl ToolProvider for GatewayProvider {
                     Err(_) => "error",
                 };
                 let ms = started.elapsed().as_millis() as u64;
+                tracing::info!(
+                    monotonic_counter.mcpgw_tool_calls = 1u64,
+                    histogram.mcpgw_tool_call_duration_ms = ms,
+                    tool = %label,
+                    endpoint = %self.opts.label,
+                    outcome,
+                    "tool call"
+                );
                 if let (Some(a), Some(args)) = (&self.opts.audit, &audit_args) {
                     let actor = match &client {
                         Some(c) => format!("{} / {c}", self.opts.label),

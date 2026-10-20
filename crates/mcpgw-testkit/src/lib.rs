@@ -8,6 +8,7 @@
 
 pub mod container;
 pub mod oauth;
+pub mod otlp;
 pub mod registry;
 pub mod sse;
 
@@ -395,6 +396,23 @@ impl McpClient {
 
     /// Call a tool; `Err` is the JSON-RPC error object (`code`, `message`,
     /// `data`) when the server returned one.
+    /// [`call`](Self::call) with request `_meta` (e.g. a `traceparent`).
+    pub async fn call_meta(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+        meta: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let mut p = rmcp::model::CallToolRequestParams::new(name.to_string());
+        p.arguments = args.as_object().cloned();
+        p.meta = meta
+            .as_object()
+            .cloned()
+            .map(|m| rmcp::model::RequestMetaObject::from(rmcp::model::MetaObject::from(m)));
+        let r = self.svc.call_tool(p).await.map_err(|e| e.to_string())?;
+        Ok(serde_json::to_value(r).expect("result json"))
+    }
+
     pub async fn call_raw(
         &self,
         name: &str,

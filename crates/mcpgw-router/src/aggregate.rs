@@ -15,6 +15,7 @@
 use mcpgw_core::TOOL_SEPARATOR;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use tracing::Instrument;
 
 use mcpgw_runtime::{BackendManager, JsonObject, ProtoError};
 
@@ -234,9 +235,27 @@ pub async fn call_in(
                 data: None,
             })?;
     let account = accounts.get(&server).map(String::as_str);
-    manager
-        .call_tool_as(&server, account, &tool, arguments)
-        .await
+    // the call to the backend is its own (client) span, and its trace
+    // context goes to the backend in `_meta` (M3-11)
+    let span = tracing::info_span!(
+        "backend",
+        otel.name = %format!("backend tools/call {server}"),
+        otel.kind = "client",
+        server = %server,
+        tool = %tool,
+    );
+    async move {
+        let meta = mcpgw_telemetry::traceparent().map(|tp| {
+            let mut m = JsonObject::new();
+            m.insert("traceparent".into(), Value::String(tp));
+            m
+        });
+        manager
+            .call_tool_as_meta(&server, account, &tool, arguments, meta)
+            .await
+    }
+    .instrument(span)
+    .await
 }
 
 #[cfg(test)]

@@ -496,8 +496,26 @@ impl BackendConn {
         arguments: Option<JsonObject>,
         timeout: Duration,
     ) -> Result<JsonObject, ProtoError> {
+        self.call_tool_with_meta(name, arguments, None, timeout)
+            .await
+    }
+
+    /// [`call_tool`](Self::call_tool) with request `_meta` for the backend,
+    /// such as the W3C `traceparent` of the gateway's call (M3-11).
+    pub async fn call_tool_with_meta(
+        &self,
+        name: &str,
+        arguments: Option<JsonObject>,
+        meta: Option<JsonObject>,
+        timeout: Duration,
+    ) -> Result<JsonObject, ProtoError> {
         let mut params = CallToolRequestParams::new(name.to_string());
         params.arguments = arguments;
+        if let Some(m) = meta {
+            params.meta = Some(rmcp::model::RequestMetaObject::from(
+                rmcp::model::MetaObject::from(m),
+            ));
+        }
         let fut = self.service.call_tool(params);
         let result = match tokio::time::timeout(timeout, fut).await {
             Ok(r) => r?,

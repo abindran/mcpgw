@@ -189,6 +189,8 @@ enum Cmd {
     Call {
         tool: String,
         args: Option<JsonObject>,
+        /// Request `_meta` for the backend (trace context).
+        meta: Option<JsonObject>,
         reply: Reply<JsonObject>,
     },
     Ensure(Reply<()>),
@@ -202,6 +204,8 @@ enum Waiter {
     Call {
         tool: String,
         args: Option<JsonObject>,
+        /// Request `_meta` for the backend (trace context).
+        meta: Option<JsonObject>,
         reply: Reply<JsonObject>,
     },
     Ensure(Reply<()>),
@@ -414,6 +418,20 @@ impl BackendManager {
     ) -> Result<JsonObject, ProtoError> {
         let key = self.instance(server, account)?;
         self.call_tool(&key, tool, arguments).await
+    }
+
+    /// [`call_tool_as`](Self::call_tool_as) with request `_meta` for the
+    /// backend.
+    pub async fn call_tool_as_meta(
+        &self,
+        server: &str,
+        account: Option<&str>,
+        tool: &str,
+        arguments: Option<JsonObject>,
+        meta: Option<JsonObject>,
+    ) -> Result<JsonObject, ProtoError> {
+        let key = self.instance(server, account)?;
+        self.call_tool_meta(&key, tool, arguments, meta).await
     }
 
     /// Account instances of `server` (`server@account` keys).
@@ -688,11 +706,24 @@ impl BackendManager {
         tool: &str,
         arguments: Option<JsonObject>,
     ) -> Result<JsonObject, ProtoError> {
+        self.call_tool_meta(server, tool, arguments, None).await
+    }
+
+    /// [`call_tool`](Self::call_tool), passing request `_meta` (such as a
+    /// W3C `traceparent`, M3-11) on to the backend.
+    pub async fn call_tool_meta(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: Option<JsonObject>,
+        meta: Option<JsonObject>,
+    ) -> Result<JsonObject, ProtoError> {
         let h = self.handle(server)?;
         let (reply, rx) = oneshot::channel();
         h.tx.send(Cmd::Call {
             tool: tool.to_string(),
             args: arguments,
+            meta,
             reply,
         })
         .map_err(|_| self.gone(server, &h))?;
@@ -883,6 +914,20 @@ impl Template {
 }
 
 impl Launch {
+    /// What runs the server, for metrics: the command's name (`node`,
+    /// `npx`, `uvx`, `python3` …), the container runtime, or `http`.
+    pub(crate) fn runtime_kind(&self) -> String {
+        match &self.template {
+            Template::Stdio(s) => std::path::Path::new(&s.command)
+                .file_stem()
+                .and_then(|n| n.to_str())
+                .unwrap_or("stdio")
+                .to_string(),
+            Template::Container(c) => c.runtime.clone().unwrap_or_else(|| "container".into()),
+            Template::Http(_) => "http".into(),
+        }
+    }
+
     /// How to launch `cfg`, with secrets from `resolver`.
     pub(crate) fn new(
         cfg: &ServerSpec,
@@ -1336,15 +1381,31 @@ impl Actor {
 
     fn on_cmd(&mut self, cmd: Cmd) {
         match cmd {
-            Cmd::Call { tool, args, reply } => {
+            Cmd::Call {
+                tool,
+                args,
+                meta,
+                reply,
+            } => {
                 if let Some(e) = self.refusal() {
                     let _ = reply.send(Err(e));
                 } else if matches!(self.state, State::Ready | State::Idle | State::Busy { .. }) {
-                    self.dispatch(tool, args, reply);
+                    self.dispatch(tool, args, meta, reply);
                 } else {
                     // this call waits for a start
                     self.shared.update(|s| s.cold_starts += 1);
-                    self.waiters.push(Waiter::Call { tool, args, reply });
+                    tracing::info!(
+                        monotonic_counter.mcpgw_cold_starts = 1u64,
+                        server = %self.shared.name,
+                        runtime = self.launch.runtime_kind(),
+                        "call waits for a start"
+                    );
+                    self.waiters.push(Waiter::Call {
+                        tool,
+                        args,
+                        meta,
+                        reply,
+                    });
                     self.apply(Event::Demand);
                 }
             }
@@ -1433,7 +1494,13 @@ impl Actor {
         }
     }
 
-    fn dispatch(&mut self, tool: String, args: Option<JsonObject>, reply: Reply<JsonObject>) {
+    fn dispatch(
+        &mut self,
+        tool: String,
+        args: Option<JsonObject>,
+        meta: Option<JsonObject>,
+        reply: Reply<JsonObject>,
+    ) {
         if reply.is_closed() {
             return; // the caller gave up while queued; don't run it late
         }
@@ -1447,7 +1514,7 @@ impl Actor {
         let itx = self.itx.clone();
         let redactor = self.shared.redactor();
         tokio::spawn(async move {
-            let res = match conn.call_tool(&tool, args, timeout).await {
+            let res = match conn.call_tool_with_meta(&tool, args, meta, timeout).await {
                 Ok(r) if !redactor.is_empty() => {
                     let mut v = serde_json::Value::Object(r);
                     redactor.redact_json(&mut v);
@@ -1516,6 +1583,15 @@ impl Actor {
                     .start_began
                     .take()
                     .map(|t| t.elapsed().as_millis() as u64);
+                if let Some(ms) = started_ms {
+                    // cold-start time per runtime (node, uvx, docker, http …)
+                    tracing::info!(
+                        histogram.mcpgw_server_start_ms = ms,
+                        server = %self.shared.name,
+                        runtime = self.launch.runtime_kind(),
+                        "server started"
+                    );
+                }
                 self.shared.update(|s| {
                     s.protocol_version = pv.clone();
                     if started_ms.is_some() {
@@ -1575,7 +1651,12 @@ impl Actor {
                     self.shared.update(|s| s.last_error = None);
                     for w in std::mem::take(&mut self.waiters) {
                         match w {
-                            Waiter::Call { tool, args, reply } => self.dispatch(tool, args, reply),
+                            Waiter::Call {
+                                tool,
+                                args,
+                                meta,
+                                reply,
+                            } => self.dispatch(tool, args, meta, reply),
                             Waiter::Ensure(reply) => {
                                 let _ = reply.send(Ok(()));
                             }

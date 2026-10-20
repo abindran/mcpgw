@@ -110,6 +110,11 @@ pub struct GatewayConfig {
     /// Default: `true`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prewarm: Option<bool>,
+    /// OTLP/HTTP endpoint for traces, metrics and logs of the daemon, e.g.
+    /// `http://127.0.0.1:4318` (M3-11). `OTEL_EXPORTER_OTLP_ENDPOINT`
+    /// overrides it. Default: no export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub otlp_endpoint: Option<String>,
     /// Package cache for npm and PyPI servers (M3-08). Default: `runtimes`
     /// next to the store.
     #[serde(default, skip_serializing_if = "Option::is_none")]

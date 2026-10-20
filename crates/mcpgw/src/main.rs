@@ -416,10 +416,25 @@ fn parse_kv(s: &str) -> Result<(String, String), String> {
 fn main() -> ExitCode {
     mcpgw_core::tls::install();
     let cli = Cli::parse();
-    if let Err(e) = mcpgw_telemetry::init(cli.log_format, "warn") {
-        eprintln!("mcpgw: {e}");
-        return ExitCode::FAILURE;
-    }
+    // The daemon (serve) exports traces, metrics and logs over OTLP when an
+    // endpoint is configured (M3-11); the guard flushes them at exit.
+    let otlp = match &cli.cmd {
+        Cmd::Serve { .. } => {
+            let path = cli.config.clone().unwrap_or_else(Config::default_path);
+            let configured = Config::load_or_default(&path)
+                .ok()
+                .and_then(|c| c.gateway.otlp_endpoint);
+            mcpgw_telemetry::OtlpConfig::from_env(configured.as_deref())
+        }
+        _ => None,
+    };
+    let _otel = match mcpgw_telemetry::init_with_otlp(cli.log_format, "warn", otlp.as_ref()) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("mcpgw: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
     match run(cli) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {

@@ -63,6 +63,11 @@ pub struct CallContext {
     pub client_name: Option<String>,
     /// The answer to an earlier [`ProtoError::Elicit`].
     pub input: Option<Input>,
+    /// The client's W3C trace context (`_meta.traceparent`, else the
+    /// `traceparent` HTTP header), to continue its trace (M3-11).
+    pub traceparent: Option<String>,
+    /// Its `tracestate`, likewise.
+    pub tracestate: Option<String>,
 }
 
 impl CallContext {
@@ -248,12 +253,31 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
             }),
             _ => None,
         };
+        let trace = |k: &str| {
+            request
+                .meta
+                .as_ref()
+                .and_then(|m| m.get(k))
+                .or_else(|| context.meta.get(k))
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+                .or_else(|| {
+                    context
+                        .extensions
+                        .get::<axum::http::request::Parts>()
+                        .and_then(|p| p.headers.get(k))
+                        .and_then(|v| v.to_str().ok())
+                        .map(str::to_string)
+                })
+        };
         let mut ctx = CallContext {
             url_elicitation: elicitation.is_some_and(|e| e.url.is_some()),
             mrtr,
             form_elicitation: !modern && form,
             client_name: context.client_info().map(|i| i.name),
             input,
+            traceparent: trace("traceparent"),
+            tracestate: trace("tracestate"),
         };
         let out = loop {
             let res = self

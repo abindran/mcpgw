@@ -209,6 +209,16 @@ fn validate(cfg: &Config) -> Result<(), Issue> {
             hint: Some("remove it for the default of 16".into()),
         });
     }
+    if let Some(u) = &cfg.gateway.otlp_endpoint
+        && !(u.starts_with("http://") || u.starts_with("https://"))
+    {
+        return Err(Issue {
+            server: None,
+            field: "otlp_endpoint",
+            message: format!("OTLP endpoint {u:?} is not an http(s) URL"),
+            hint: Some("e.g. \"http://127.0.0.1:4318\" (OTLP over HTTP)".into()),
+        });
+    }
     if let Some(u) = &cfg.gateway.registry_url
         && !(u.starts_with("http://") || u.starts_with("https://"))
     {

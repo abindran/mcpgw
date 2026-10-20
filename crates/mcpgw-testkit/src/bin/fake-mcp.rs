@@ -17,6 +17,7 @@
 //! | `FAKE_STDERR` | line written to stderr at startup |
 //! | `FAKE_SPAWN_LOG` | file; the process appends its pid on start |
 //! | `FAKE_CALL_LOG` | file; each tool call appends the tool name |
+//! | `FAKE_META_LOG` | file; each tool call appends its request `_meta` as a JSON line |
 //! | `FAKE_REQUIRE_HEADER` | `--http` only: `Name=value` every request must carry, else 401 |
 //! | `FAKE_AUTH_SERVER` | `--http` only: OAuth-protected. Requests need `Authorization: Bearer at-…`, else 401 with `resource_metadata`; serves protected resource metadata naming this issuer |
 //!
@@ -247,9 +248,22 @@ impl ServerHandler for Fake {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(path) = env("FAKE_META_LOG")
+            && let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+        {
+            let mut meta = serde_json::Map::new();
+            meta.extend(context.meta.0.0.clone());
+            if let Some(m) = &request.meta {
+                meta.extend(m.0.0.clone());
+            }
+            writeln!(f, "{}", Value::Object(meta)).ok();
+        }
         if let Some(path) = env("FAKE_CALL_LOG")
             && let Ok(mut f) = std::fs::OpenOptions::new()
                 .create(true)

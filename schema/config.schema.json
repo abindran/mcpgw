@@ -110,6 +110,13 @@
           ],
           "description": "How often the daemon checks for OAuth tokens to refresh.\nDefault: `\"60s\"`."
         },
+        "otlp_endpoint": {
+          "description": "OTLP/HTTP endpoint for traces, metrics and logs of the daemon, e.g.\n`http://127.0.0.1:4318` (M3-11). `OTEL_EXPORTER_OTLP_ENDPOINT`\noverrides it. Default: no export.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "pinned_tools": {
           "description": "Public tool names always listed in `hybrid` mode.",
           "items": {
