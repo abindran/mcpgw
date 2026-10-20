@@ -13,6 +13,7 @@ mod auth;
 mod clients;
 mod control;
 mod daemon;
+mod doctor;
 mod registry;
 mod secrets;
 mod serve;
@@ -64,6 +65,14 @@ enum Cmd {
     Status,
     /// CPU, memory and process counts of running container servers.
     Stats,
+    /// Find and explain misconfigurations: config, vault, secrets,
+    /// commands, Docker, ports, the daemon, logins, profiles and client
+    /// configs. Fails if anything is broken.
+    Doctor {
+        /// Print the checks as JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Check servers' tools for poisoning signs (hidden characters,
     /// injection phrases, instructions about other tools).
     Scan {
@@ -449,6 +458,10 @@ type AnyResult<T> = Result<T, Box<dyn std::error::Error>>;
 fn run(cli: Cli) -> AnyResult<()> {
     let explicit_config = cli.config.clone();
     let path = cli.config.unwrap_or_else(Config::default_path);
+    // doctor reports a config that doesn't load instead of stopping at it
+    if let Cmd::Doctor { json } = cli.cmd {
+        return doctor::run(&path, json);
+    }
     let config = Config::load_or_default(&path)?;
     mcpgw_runtime::packages::set_dir(config.gateway.runtimes_path());
     match cli.cmd {
@@ -463,6 +476,7 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Down => servers::down(&config),
         Cmd::Status => servers::status(&config),
         Cmd::Stats => servers::stats(&config),
+        Cmd::Doctor { .. } => unreachable!("handled before the config loads"),
         Cmd::Scan { server } => servers::scan(&config, server.as_deref()),
         Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
         Cmd::Add(a) if a.command.is_none() && a.url.is_none() && a.image.is_none() => {

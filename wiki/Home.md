@@ -92,7 +92,7 @@ M2 exit check: [M2-Exit](M2-Exit.md).
 | [M3-09](M3-09-BM25-Search.md) | BM25 tool search | ✅ |
 | [M3-10](M3-10-Tool-Scanner.md) | Tool description scanner | ✅ |
 | [M3-11](M3-11-OpenTelemetry.md) | OpenTelemetry OTLP export | ✅ |
-| M3-12 | `mcpgw doctor` | ⏳ |
+| [M3-12](M3-12-Doctor.md) | `mcpgw doctor` | ✅ |
 
 ### M4 — Extensions and v1.0
 
