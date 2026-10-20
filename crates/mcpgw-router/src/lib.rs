@@ -8,7 +8,7 @@ pub mod aggregate;
 
 use std::sync::Arc;
 
-pub use aggregate::{call_public, list_all_tools, public_name, split_name};
+pub use aggregate::{MAX_TOOL_NAME, call_public, list_all_tools, public_name, resolve, split_name};
 use mcpgw_proto::front::{self, BoxFuture, FrontInfo, ToolProvider};
 use mcpgw_runtime::{BackendManager, JsonObject, ProtoError};
 

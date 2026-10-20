@@ -68,8 +68,12 @@ impl Transport {
 /// One backend tool server (`[[server]]` in the config file).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ServerSpec {
-    /// Unique server name; tools appear as `<name>__<tool>`.
+    /// Unique server name.
     pub name: String,
+    /// Shorter prefix for its tools' public names (`<alias>__<tool>`).
+    /// Default: the name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alias: Option<String>,
     /// Connection details.
     #[serde(flatten)]
     pub transport: Transport,
@@ -97,10 +101,16 @@ fn is_true(b: &bool) -> bool {
 }
 
 impl ServerSpec {
+    /// Prefix of this server's public tool names: the alias, else the name.
+    pub fn prefix(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
+    }
+
     /// A spec with defaults for everything but name and transport.
     pub fn new(name: impl Into<String>, transport: Transport) -> Self {
         Self {
             name: name.into(),
+            alias: None,
             transport,
             enabled: true,
             idle_timeout: None,
@@ -113,6 +123,11 @@ impl ServerSpec {
     /// command/URL, http(s) URL.
     pub fn validate(&self) -> Result<()> {
         validate_server_name(&self.name)?;
+        if let Some(a) = &self.alias {
+            validate_server_name(a).map_err(|_| {
+                Error::Config(format!("invalid alias {a:?} for server {}", self.name))
+            })?;
+        }
         let empty = match &self.transport {
             Transport::Stdio { command, .. } => command.trim().is_empty(),
             Transport::Http { url, .. } => url.trim().is_empty(),

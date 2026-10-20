@@ -962,6 +962,7 @@ dependencies = [
  "mcpgw-telemetry",
  "mcpgw-testkit",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
 ]

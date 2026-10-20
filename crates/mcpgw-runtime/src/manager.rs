@@ -218,6 +218,7 @@ impl Registry {
 /// Owns all backend actors.
 pub struct BackendManager {
     backends: BTreeMap<String, Handle>,
+    prefixes: BTreeMap<String, String>,
     opts: ManagerOptions,
     catalog: Arc<Catalog>,
     tasks: std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>,
@@ -313,8 +314,22 @@ impl BackendManager {
             backends.insert(cfg.name.clone(), Handle { shared, tx });
         }
         let _ = registry.peers.set(backends.values().cloned().collect());
+        // Tool-name prefixes (alias or name); on a clash the later server
+        // falls back to its unique name.
+        let mut prefixes: BTreeMap<String, String> = BTreeMap::new();
+        let mut taken = std::collections::HashSet::new();
+        for cfg in servers {
+            let mut p = cfg.prefix().to_string();
+            if !taken.insert(p.clone()) {
+                tracing::warn!(server = %cfg.name, prefix = %p, "tool prefix already used; using the server name");
+                p = cfg.name.clone();
+                taken.insert(p.clone());
+            }
+            prefixes.insert(cfg.name.clone(), p);
+        }
         Self {
             backends,
+            prefixes,
             opts,
             catalog,
             tasks: std::sync::Mutex::new(tasks),
@@ -324,6 +339,19 @@ impl BackendManager {
     /// The tool catalog.
     pub fn catalog(&self) -> &Arc<Catalog> {
         &self.catalog
+    }
+
+    /// Prefix of a server's public tool names (its alias or name).
+    pub fn prefix(&self, server: &str) -> Option<&str> {
+        self.prefixes.get(server).map(String::as_str)
+    }
+
+    /// The server whose tools use `prefix`.
+    pub fn server_for_prefix(&self, prefix: &str) -> Option<&str> {
+        self.prefixes
+            .iter()
+            .find(|(_, p)| p.as_str() == prefix)
+            .map(|(n, _)| n.as_str())
     }
 
     /// Names of all configured backends.

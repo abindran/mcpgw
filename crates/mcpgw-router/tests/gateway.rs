@@ -137,3 +137,64 @@ async fn aggregates_two_backends_and_routes_by_prefix() {
     }
     m.shutdown().await;
 }
+
+/// Two servers with a tool named `search` both work; long and dotted names
+/// get stable, routable public names; an alias replaces the prefix.
+#[tokio::test(flavor = "multi_thread")]
+async fn namespacing_keeps_same_named_tools_apart() {
+    let long = "list_pull_request_review_comments_for_repository_in_organization";
+    let gh_tools = format!(
+        r#"[{{"name":"search","reply":"github results"}},{{"name":"{long}","reply":"long ok"}},{{"name":"read.file","reply":"dotted ok"}}]"#
+    );
+    let gl_tools = r#"[{"name":"search","reply":"gitlab results"}]"#;
+    let mut gl = mcpgw_testkit::stdio("gitlab-enterprise", &[("FAKE_TOOLS", gl_tools)]);
+    gl.alias = Some("gl".into());
+    let m = BackendManager::start(
+        &[
+            mcpgw_testkit::stdio("github", &[("FAKE_TOOLS", &gh_tools)]),
+            gl,
+        ],
+        ManagerOptions {
+            eager: true,
+            ..ManagerOptions::default()
+        },
+    );
+    assert!(m.wait_ready(Duration::from_secs(20)).await);
+
+    let tools = mcpgw_router::list_all_tools(&m).await;
+    let names: Vec<String> = tools
+        .iter()
+        .map(|t| t["name"].as_str().unwrap().to_string())
+        .collect();
+    assert!(
+        names.iter().all(|n| n.len() <= mcpgw_router::MAX_TOOL_NAME),
+        "{names:?}"
+    );
+    assert!(names.contains(&"github__search".to_string()), "{names:?}");
+    assert!(names.contains(&"gl__search".to_string()), "{names:?}");
+    let long_public = mcpgw_router::public_name("github", long);
+    let dotted_public = mcpgw_router::public_name("github", "read.file");
+    assert!(
+        names.contains(&long_public) && names.contains(&dotted_public),
+        "{names:?}"
+    );
+
+    let call = |n: String| {
+        let m = &m;
+        async move {
+            let r = mcpgw_router::call_public(m, &n, None).await.unwrap();
+            r["content"][0]["text"].as_str().unwrap().to_string()
+        }
+    };
+    assert_eq!(call("github__search".into()).await, "github results");
+    assert_eq!(call("gl__search".into()).await, "gitlab results");
+    assert_eq!(call(long_public).await, "long ok");
+    assert_eq!(call(dotted_public).await, "dotted ok");
+    // the server name is not a prefix when an alias is set
+    assert!(
+        mcpgw_router::call_public(&m, "gitlab-enterprise__search", None)
+            .await
+            .is_err()
+    );
+    m.shutdown().await;
+}

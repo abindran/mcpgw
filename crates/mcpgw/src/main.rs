@@ -57,6 +57,9 @@ enum Cmd {
         /// Environment variable for the command, KEY=VALUE (repeatable).
         #[arg(long = "env", value_parser = parse_kv)]
         env: Vec<(String, String)>,
+        /// Shorter prefix for its tools (`<alias>__<tool>`).
+        #[arg(long)]
+        alias: Option<String>,
         /// Register but do not start it.
         #[arg(long)]
         disabled: bool,
@@ -123,6 +126,7 @@ fn run(cli: Cli) -> AnyResult<()> {
             command,
             url,
             env,
+            alias,
             disabled,
             no_introspect,
             args,
@@ -148,6 +152,18 @@ fn run(cli: Cli) -> AnyResult<()> {
             let existed = s.server(&name)?.is_some();
             let mut spec = ServerSpec::new(name.clone(), transport);
             spec.enabled = !disabled;
+            spec.alias = alias;
+            let clash = effective_servers(&config.servers, &s)?
+                .into_iter()
+                .find(|o| o.name != spec.name && o.prefix() == spec.prefix());
+            if let Some(o) = clash {
+                return Err(format!(
+                    "tool prefix {:?} is already used by server {:?}; pick another --alias",
+                    spec.prefix(),
+                    o.name
+                )
+                .into());
+            }
             s.upsert_server(&spec)?;
             let verb = if existed { "updated" } else { "added" };
             // A changed spec may expose different tools: drop the old pin.

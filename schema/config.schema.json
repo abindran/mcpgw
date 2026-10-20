@@ -144,6 +144,13 @@
         }
       ],
       "properties": {
+        "alias": {
+          "description": "Shorter prefix for its tools' public names (`<alias>__<tool>`).\nDefault: the name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "enabled": {
           "description": "Whether the gateway may start this server. Default: `true`.",
           "type": "boolean"
@@ -160,7 +167,7 @@
           "description": "Stop the server after this long without calls. Default: gateway-wide."
         },
         "name": {
-          "description": "Unique server name; tools appear as `<name>__<tool>`.",
+          "description": "Unique server name.",
           "type": "string"
         },
         "startup_timeout": {

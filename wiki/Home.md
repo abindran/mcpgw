@@ -47,7 +47,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | [M1-06](M1-06-Idle-Reaper-and-Cap.md) | Idle reaper and `max_running` cap | ✅ |
 | [M1-07](M1-07-Manifest-Capture.md) | Manifest capture with SHA-256 pin | ✅ |
 | [M1-08](M1-08-Drift-Check.md) | Drift check and quarantine | ✅ |
-| M1-09 | Aggregating router, 64-char names with hash suffix | ⏳ |
+| [M1-09](M1-09-Aggregating-Router.md) | Aggregating router, 64-char names with hash suffix | ✅ |
 | M1-10 | Meta-tools mode | ⏳ |
 | M1-11 | Vault v1 | ⏳ |
 | M1-12 | Secret binding, env injection, redaction | ⏳ |
