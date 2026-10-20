@@ -11,9 +11,11 @@ pub mod front;
 pub mod http;
 pub mod limits;
 pub mod local;
+pub mod progress;
 pub mod relay;
 pub mod spike_bridge;
 pub mod spike_server;
+pub mod tasks;
 
 /// Protocol versions the gateway bridges between.
 ///
@@ -23,6 +25,7 @@ pub mod spike_server;
 pub use backend::{BackendConn, JsonObject, ProtoError, StderrSink, StdioSpec};
 pub use http::HttpSpec;
 pub use local::LocalTools;
+pub use progress::{Progress, ProgressSink};
 
 pub mod version {
     /// Protocol version presented to LLM clients (server side).

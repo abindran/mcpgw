@@ -220,6 +220,10 @@ impl ToolProvider for GatewayProvider {
         (self.opts.mode != Mode::Meta).then(|| self.manager.catalog().changes())
     }
 
+    fn task_scope(&self) -> String {
+        self.opts.label.clone()
+    }
+
     fn list_ttl_ms(&self) -> Option<u64> {
         Some(match self.opts.mode {
             Mode::Meta => META_LIST_TTL_MS,

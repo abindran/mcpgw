@@ -317,6 +317,8 @@ pub fn serve(
         let opts = ManagerOptions {
             idle_timeout: config.gateway.idle_timeout(),
             max_running: config.gateway.max_running(),
+            call_timeout: config.gateway.call_timeout(),
+            max_call_time: config.gateway.max_call_time(),
             ..ManagerOptions::default()
         };
         let vault = vault(config);

@@ -140,6 +140,28 @@
             }
           ]
         },
+        "call_timeout": {
+          "description": "How long a tool call may go without a sign of life (its result or a\nprogress notification) before it fails. Default: `\"2m\"`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "max_call_time": {
+          "description": "The longest a tool call may run, progress or not. Default: `\"1h\"`.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "max_running": {
           "description": "Most servers running at once; starting one more stops the least\nrecently used idle server. Default: 16.",
           "type": [

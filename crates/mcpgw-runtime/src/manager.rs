@@ -19,6 +19,7 @@ use std::{
 
 use crate::container::{ContainerInfo, ContainerTemplate};
 use mcpgw_core::{ManifestDiff, ServerSpec, ToolManifest, Transport};
+use mcpgw_proto::progress::ProgressSink;
 use mcpgw_proto::{BackendConn, HttpSpec, JsonObject, ProtoError, StderrSink, StdioSpec};
 use mcpgw_vault::Redactor;
 use secrecy::{ExposeSecret, SecretString};
@@ -44,8 +45,11 @@ pub const STDERR_LINES: usize = 200;
 pub struct ManagerOptions {
     /// Spawn + handshake deadline.
     pub connect_timeout: Duration,
-    /// Per tool-call deadline.
+    /// Per tool-call deadline: how long a backend may stay silent. Progress
+    /// notifications reset it (M4-09).
     pub call_timeout: Duration,
+    /// The longest a tool call may run at all, progress or not.
+    pub max_call_time: Duration,
     /// Interval between health pings.
     pub health_interval: Duration,
     /// Deadline for one health ping.
@@ -71,6 +75,7 @@ impl Default for ManagerOptions {
         Self {
             connect_timeout: Duration::from_secs(30),
             call_timeout: Duration::from_secs(120),
+            max_call_time: Duration::from_secs(3600),
             health_interval: Duration::from_secs(30),
             ping_timeout: Duration::from_secs(10),
             backoff_initial: Duration::from_millis(500),
@@ -191,6 +196,8 @@ enum Cmd {
         args: Option<JsonObject>,
         /// Request `_meta` for the backend (trace context).
         meta: Option<JsonObject>,
+        /// Where the backend's progress goes (M4-09).
+        progress: ProgressSink,
         reply: Reply<JsonObject>,
     },
     Ensure(Reply<()>),
@@ -206,6 +213,8 @@ enum Waiter {
         args: Option<JsonObject>,
         /// Request `_meta` for the backend (trace context).
         meta: Option<JsonObject>,
+        /// Where the backend's progress goes (M4-09).
+        progress: ProgressSink,
         reply: Reply<JsonObject>,
     },
     Ensure(Reply<()>),
@@ -724,10 +733,13 @@ impl BackendManager {
             tool: tool.to_string(),
             args: arguments,
             meta,
+            // the front's sink for this call, if it asked for progress
+            progress: mcpgw_proto::progress::current(),
             reply,
         })
         .map_err(|_| self.gone(server, &h))?;
-        let limit = self.opts.connect_timeout + self.opts.call_timeout;
+        // a backstop: the backend call has its own idle and total limits
+        let limit = self.opts.connect_timeout + self.opts.max_call_time;
         match tokio::time::timeout(limit, rx).await {
             Ok(Ok(r)) => r,
             Ok(Err(_)) => Err(ProtoError::Unavailable(format!(
@@ -1467,12 +1479,13 @@ impl Actor {
                 tool,
                 args,
                 meta,
+                progress,
                 reply,
             } => {
                 if let Some(e) = self.refusal() {
                     let _ = reply.send(Err(e));
                 } else if matches!(self.state, State::Ready | State::Idle | State::Busy { .. }) {
-                    self.dispatch(tool, args, meta, reply);
+                    self.dispatch(tool, args, meta, progress, reply);
                 } else {
                     // this call waits for a start
                     self.shared.update(|s| s.cold_starts += 1);
@@ -1486,6 +1499,7 @@ impl Actor {
                         tool,
                         args,
                         meta,
+                        progress,
                         reply,
                     });
                     self.apply(Event::Demand);
@@ -1581,7 +1595,8 @@ impl Actor {
         tool: String,
         args: Option<JsonObject>,
         meta: Option<JsonObject>,
-        reply: Reply<JsonObject>,
+        progress: ProgressSink,
+        mut reply: Reply<JsonObject>,
     ) {
         if reply.is_closed() {
             return; // the caller gave up while queued; don't run it late
@@ -1592,11 +1607,25 @@ impl Actor {
         };
         self.apply(Event::CallStart);
         self.touch();
-        let timeout = self.opts.call_timeout;
+        let limits = mcpgw_proto::backend::CallLimits {
+            idle: self.opts.call_timeout,
+            max: self.opts.max_call_time,
+        };
         let itx = self.itx.clone();
         let redactor = self.shared.redactor();
         tokio::spawn(async move {
-            let res = match conn.call_tool_with_meta(&tool, args, meta, timeout).await {
+            let call = conn.call_tool_with(&tool, args, meta, limits, progress);
+            // a caller that goes away (client cancelled, task cancelled)
+            // drops the call, which cancels it at the backend (M4-09)
+            let res = tokio::select! {
+                r = call => r,
+                _ = reply.closed() => {
+                    tracing::info!(%tool, "call cancelled by its caller");
+                    let _ = itx.send(Internal::CallDone { lost: false, failed: false });
+                    return;
+                }
+            };
+            let res = match res {
                 Ok(r) if !redactor.is_empty() => {
                     let mut v = serde_json::Value::Object(r);
                     redactor.redact_json(&mut v);
@@ -1737,8 +1766,9 @@ impl Actor {
                                 tool,
                                 args,
                                 meta,
+                                progress,
                                 reply,
-                            } => self.dispatch(tool, args, meta, reply),
+                            } => self.dispatch(tool, args, meta, progress, reply),
                             Waiter::Ensure(reply) => {
                                 let _ = reply.send(Ok(()));
                             }

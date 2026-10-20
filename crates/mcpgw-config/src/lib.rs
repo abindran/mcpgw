@@ -97,6 +97,13 @@ pub struct GatewayConfig {
     /// `idle_timeout` overrides it). Default: `"10m"`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idle_timeout: Option<mcpgw_core::Duration>,
+    /// How long a tool call may go without a sign of life (its result or a
+    /// progress notification) before it fails. Default: `"2m"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_timeout: Option<mcpgw_core::Duration>,
+    /// The longest a tool call may run, progress or not. Default: `"1h"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_call_time: Option<mcpgw_core::Duration>,
     /// Most servers running at once; starting one more stops the least
     /// recently used idle server. Default: 16.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -165,6 +172,20 @@ impl GatewayConfig {
         self.vault_path
             .clone()
             .unwrap_or_else(|| self.store_path().with_file_name("vault.json"))
+    }
+
+    /// Effective call timeout (configured or 2 minutes).
+    pub fn call_timeout(&self) -> std::time::Duration {
+        self.call_timeout
+            .map(|d| d.get())
+            .unwrap_or(std::time::Duration::from_secs(120))
+    }
+
+    /// Effective longest call (configured or 1 h).
+    pub fn max_call_time(&self) -> std::time::Duration {
+        self.max_call_time
+            .map(|d| d.get())
+            .unwrap_or(std::time::Duration::from_secs(3600))
     }
 
     /// Effective idle timeout (configured or 10 minutes).

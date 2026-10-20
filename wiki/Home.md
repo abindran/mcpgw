@@ -108,7 +108,7 @@ M3 exit check: [M3-Exit](M3-Exit.md).
 | [M4-06](M4-06-OpenAPI-Auth.md) | Adapter auth mapping | ✅ |
 | [M4-07](M4-07-Cedar-Policies.md) | Cedar policies | ✅ |
 | M4-08 | Embeddings search | ⛔ dropped |
-| M4-09 | Tasks extension pass-through | ⏳ |
+| [M4-09](M4-09-Long-Calls-and-Tasks.md) | Tasks extension pass-through | ✅ |
 | M4-10 | `mcpgw dev` | ⏳ |
 | M4-11 | v1.0 docs | ⏳ |
 

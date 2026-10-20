@@ -45,6 +45,62 @@ pub trait ToolProvider: Send + Sync + 'static {
     fn list_ttl_ms(&self) -> Option<u64> {
         None
     }
+
+    /// Which endpoint this is, for tasks (M4-09): a task is only visible
+    /// to the endpoint that created it.
+    fn task_scope(&self) -> String {
+        String::new()
+    }
+}
+
+/// How one attempt at a call ended.
+enum Outcome {
+    /// The `CallToolResult`.
+    Done(JsonObject),
+    /// Still running: it continues as this task.
+    Task(rmcp::model::Task),
+}
+
+/// Aborts a spawned call when the request that started it goes away.
+struct AbortOnDrop(Option<tokio::task::AbortHandle>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        if let Some(a) = self.0.take() {
+            a.abort();
+        }
+    }
+}
+
+/// The JSON-RPC error object for a failed task.
+fn error_object(e: ProtoError) -> JsonObject {
+    match serde_json::to_value(to_error_data(e)) {
+        Ok(Value::Object(o)) => o,
+        _ => JsonObject::new(),
+    }
+}
+
+/// Feed a call that became a task into its task: progress becomes the
+/// status message, the outcome its result or error.
+async fn follow(
+    id: String,
+    mut job: tokio::task::JoinHandle<Result<JsonObject, ProtoError>>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::progress::Progress>,
+) {
+    let tasks = crate::tasks::Tasks::global();
+    loop {
+        tokio::select! {
+            r = &mut job => {
+                match r {
+                    Ok(Ok(result)) => tasks.complete(&id, result),
+                    Ok(Err(e)) => tasks.fail(&id, error_object(e)),
+                    Err(_) => {} // aborted by tasks/cancel, already recorded
+                }
+                return;
+            }
+            Some(p) = rx.recv() => tasks.progress(&id, &p),
+        }
+    }
 }
 
 /// What the gateway knows about the client making a call.
@@ -132,15 +188,83 @@ pub fn to_error_data(e: ProtoError) -> ErrorData {
     }
 }
 
+impl<P: ToolProvider> Front<P> {
+    /// Run one attempt at a call: progress goes to the client while it
+    /// waits, a cancelled request stops the call, and for a client that
+    /// declared tasks a call still running after [`crate::tasks::TASK_AFTER`]
+    /// continues as a task (M4-09).
+    async fn run(
+        &self,
+        name: String,
+        arguments: Option<JsonObject>,
+        ctx: CallContext,
+        context: &RequestContext<RoleServer>,
+        token: Option<rmcp::model::ProgressToken>,
+        tasks_ok: bool,
+    ) -> Result<Outcome, ProtoError> {
+        let (sink, mut rx) = crate::progress::ProgressSink::channel();
+        let provider = self.provider.clone();
+        let mut job = tokio::spawn(crate::progress::with_progress(sink, async move {
+            provider.call_tool(name, arguments, ctx).await
+        }));
+        let mut guard = AbortOnDrop(Some(job.abort_handle()));
+        let become_task = tokio::time::sleep(crate::tasks::TASK_AFTER);
+        tokio::pin!(become_task);
+        loop {
+            tokio::select! {
+                r = &mut job => {
+                    guard.0 = None;
+                    // progress sent before the end still reaches the client
+                    while let Ok(p) = rx.try_recv() {
+                        notify(context, &token, p).await;
+                    }
+                    let out = r.map_err(|e| ProtoError::Other(e.to_string()))??;
+                    return Ok(Outcome::Done(out));
+                }
+                Some(p) = rx.recv() => notify(context, &token, p).await,
+                _ = context.ct.cancelled() => {
+                    return Err(ProtoError::Other("cancelled by the client".into()));
+                }
+                _ = &mut become_task, if tasks_ok => {
+                    let abort = guard.0.take().expect("the call's abort handle");
+                    let task = crate::tasks::Tasks::global()
+                        .create(&self.provider.task_scope(), abort);
+                    tokio::spawn(follow(task.task_id.clone(), job, rx));
+                    return Ok(Outcome::Task(task));
+                }
+            }
+        }
+    }
+}
+
+/// Pass a call's progress to the client, under the client's token.
+async fn notify(
+    context: &RequestContext<RoleServer>,
+    token: &Option<rmcp::model::ProgressToken>,
+    p: crate::progress::Progress,
+) {
+    let Some(t) = token else {
+        return;
+    };
+    let mut n = rmcp::model::ProgressNotificationParam::new(t.clone(), p.progress);
+    n.total = p.total;
+    n.message = p.message;
+    let _ = context.peer.notify_progress(n).await;
+}
+
 impl<P: ToolProvider> ServerHandler for Front<P> {
     fn get_info(&self) -> ServerConfig {
         let caps = if self.provider.changes().is_some() {
             ServerCapabilities::builder()
                 .enable_tools()
                 .enable_tool_list_changed()
+                .enable_tasks()
                 .build()
         } else {
-            ServerCapabilities::builder().enable_tools().build()
+            ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tasks()
+                .build()
         };
         let mut cfg = ServerConfig::new(caps).with_server_info(Implementation::new(
             self.info.name.clone(),
@@ -270,6 +394,12 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
                         .map(str::to_string)
                 })
         };
+        let token = request
+            .meta
+            .as_ref()
+            .and_then(|m| m.get_progress_token())
+            .or_else(|| context.meta.get_progress_token());
+        let tasks_ok = caps.as_ref().is_some_and(|c| c.supports_tasks());
         let mut ctx = CallContext {
             url_elicitation: elicitation.is_some_and(|e| e.url.is_some()),
             mrtr,
@@ -281,11 +411,13 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
         };
         let out = loop {
             let res = self
-                .provider
-                .call_tool(
+                .run(
                     request.name.to_string(),
                     request.arguments.clone(),
                     ctx.clone(),
+                    &context,
+                    token.clone(),
+                    tasks_ok,
                 )
                 .await;
             match res {
@@ -330,7 +462,10 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
                     ctx.input = Some(Input { state, response });
                 }
                 Err(e) => return Err(to_error_data(e)),
-                Ok(out) => break out,
+                Ok(Outcome::Task(task)) => {
+                    return Ok(rmcp::model::CreateTaskResult::new(task).into());
+                }
+                Ok(Outcome::Done(out)) => break out,
             }
         };
         let result: CallToolResult = serde_json::from_value(Value::Object(out)).map_err(|e| {
@@ -341,6 +476,42 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
             )
         })?;
         Ok(result.into())
+    }
+
+    /// SEP-2663 `tasks/get` (M4-09).
+    async fn get_task(
+        &self,
+        request: rmcp::model::GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::GetTaskResult, ErrorData> {
+        crate::tasks::Tasks::global()
+            .get(&self.provider.task_scope(), &request.task_id)
+            .map(rmcp::model::GetTaskResult::new)
+            .map_err(|e| ErrorData::invalid_params(format!("no task {}", e.0), None))
+    }
+
+    /// SEP-2663 `tasks/cancel`: stops the call, at the backend too.
+    async fn cancel_task(
+        &self,
+        request: rmcp::model::CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        crate::tasks::Tasks::global()
+            .cancel(&self.provider.task_scope(), &request.task_id)
+            .map_err(|e| ErrorData::invalid_params(format!("no task {}", e.0), None))
+    }
+
+    /// SEP-2663 `tasks/update`: gateway tasks never wait for input (approvals
+    /// are asked before a call starts).
+    async fn update_task(
+        &self,
+        request: rmcp::model::UpdateTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        Err(ErrorData::invalid_params(
+            format!("task {} has no input requests", request.task_id),
+            None,
+        ))
     }
 }
 

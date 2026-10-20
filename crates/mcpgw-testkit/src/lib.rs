@@ -145,11 +145,35 @@ pub struct TestHandler {
     answer: Option<bool>,
     asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
     list_changed: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    progress: std::sync::Arc<std::sync::Mutex<Vec<Progress>>>,
+}
+
+/// A `notifications/progress` the test client received.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Progress {
+    /// Progress so far.
+    pub progress: f64,
+    /// The total, if sent.
+    pub total: Option<f64>,
+    /// The message, if sent.
+    pub message: Option<String>,
 }
 
 impl rmcp::ClientHandler for TestHandler {
     fn get_info(&self) -> rmcp::model::ClientConfig {
         self.cfg.clone()
+    }
+
+    async fn on_progress(
+        &self,
+        params: rmcp::model::ProgressNotificationParam,
+        _context: rmcp::service::NotificationContext<rmcp::RoleClient>,
+    ) {
+        self.progress.lock().unwrap().push(Progress {
+            progress: params.progress,
+            total: params.total,
+            message: params.message,
+        });
     }
 
     async fn on_tool_list_changed(
@@ -187,6 +211,8 @@ pub struct ClientKind {
     pub url_elicitation: bool,
     /// Declare form elicitation and answer every question with this.
     pub approve: Option<bool>,
+    /// Declare the SEP-2663 tasks extension.
+    pub tasks: bool,
 }
 
 fn handler(kind: ClientKind, asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> TestHandler {
@@ -194,7 +220,11 @@ fn handler(kind: ClientKind, asked: std::sync::Arc<std::sync::Mutex<Vec<String>>
         ClientCapabilities, ElicitationCapability, FormElicitationCapability,
         UrlElicitationCapability,
     };
-    let mut caps = ClientCapabilities::default();
+    let mut caps = if kind.tasks {
+        ClientCapabilities::builder().enable_tasks().build()
+    } else {
+        ClientCapabilities::default()
+    };
     let mut el = ElicitationCapability::new();
     if kind.url_elicitation {
         el = el.with_url(UrlElicitationCapability::new());
@@ -213,6 +243,7 @@ fn handler(kind: ClientKind, asked: std::sync::Arc<std::sync::Mutex<Vec<String>>
         answer: kind.approve,
         asked,
         list_changed: Default::default(),
+        progress: Default::default(),
     }
 }
 
@@ -439,9 +470,90 @@ impl McpClient {
             .to_string())
     }
 
+    /// The progress notifications received so far.
+    pub fn progress(&self) -> Vec<Progress> {
+        self.svc.service().progress.lock().unwrap().clone()
+    }
+
+    /// Start a call that can be cancelled ([`RunningCall::cancel`]).
+    pub async fn start_call(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<RunningCall, String> {
+        let mut p = rmcp::model::CallToolRequestParams::new(name.to_string());
+        p.arguments = args.as_object().cloned();
+        let req = rmcp::model::ClientRequest::CallToolRequest(rmcp::model::CallToolRequest::new(p));
+        let handle = self
+            .svc
+            .peer()
+            .send_cancellable_request(req, rmcp::service::PeerRequestOptions::no_options())
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(RunningCall(handle))
+    }
+
+    /// One `tools/call` round as raw JSON: a `CallToolResult`, or, for a
+    /// client that declared tasks, a `CreateTaskResult` (`resultType: "task"`).
+    pub async fn call_once(
+        &self,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        let mut p = rmcp::model::CallToolRequestParams::new(name.to_string());
+        p.arguments = args.as_object().cloned();
+        let r = self
+            .svc
+            .peer()
+            .call_tool_once(p)
+            .await
+            .map_err(|e| e.to_string())?;
+        let r: rmcp::model::ServerResult = r.into();
+        Ok(serde_json::to_value(r).expect("result json"))
+    }
+
+    /// `tasks/get`, as raw JSON.
+    pub async fn get_task(&self, id: &str) -> Result<serde_json::Value, String> {
+        let r = self
+            .svc
+            .peer()
+            .get_task(rmcp::model::GetTaskParams::new(id))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(serde_json::to_value(r).expect("task json"))
+    }
+
+    /// `tasks/cancel`.
+    pub async fn cancel_task(&self, id: &str) -> Result<(), String> {
+        self.svc
+            .peer()
+            .cancel_task(rmcp::model::CancelTaskParams::new(id))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
     /// Hang up.
     pub async fn close(self) {
         let _ = self.svc.cancel().await;
+    }
+}
+
+/// A call started with [`McpClient::start_call`].
+pub struct RunningCall(rmcp::service::RequestHandle<rmcp::RoleClient>);
+
+impl RunningCall {
+    /// Send `notifications/cancelled` for it.
+    pub async fn cancel(self) -> Result<(), String> {
+        self.0
+            .cancel(Some("test cancelled it".into()))
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    /// Wait for the result (`CallToolResult` JSON).
+    pub async fn finish(self) -> Result<serde_json::Value, String> {
+        let r = self.0.await_response().await.map_err(|e| e.to_string())?;
+        Ok(serde_json::to_value(r).expect("result json"))
     }
 }
 

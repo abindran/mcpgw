@@ -58,6 +58,9 @@ enum Protocol {
 
 struct Settings {
     protocol: Protocol,
+    /// FAKE_TASKS=1: run `sleep` as a SEP-2663 task for clients that
+    /// declare the tasks extension.
+    tasks: bool,
     tools: Vec<Value>,
     prefix: String,
     crash_after: Option<u64>,
@@ -68,6 +71,29 @@ struct Settings {
 struct Fake {
     s: Arc<Settings>,
     calls: Arc<AtomicU64>,
+    tasks: Arc<rmcp::task_manager::TaskManager>,
+}
+
+/// A line in FAKE_CALL_LOG.
+fn log_call(line: &str) {
+    if let Some(path) = env("FAKE_CALL_LOG")
+        && let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+    {
+        writeln!(f, "{line}").ok();
+    }
+}
+
+/// `sleep` with `steps`: `ms` in that many steps, reporting each.
+fn steps(args: &Map<String, Value>) -> Option<(u64, u64)> {
+    let n = args
+        .get("steps")
+        .and_then(Value::as_u64)
+        .filter(|n| *n > 0)?;
+    let ms = args.get("ms").and_then(Value::as_u64).unwrap_or(0);
+    Some((n, ms / n))
 }
 
 fn env(k: &str) -> Option<String> {
@@ -121,6 +147,7 @@ fn settings() -> Settings {
         prefix: env("FAKE_PREFIX").unwrap_or_default(),
         crash_after: env("FAKE_CRASH_AFTER").and_then(|v| v.parse().ok()),
         hang_ping: env("FAKE_HANG_PING").as_deref() == Some("1"),
+        tasks: env("FAKE_TASKS").as_deref() == Some("1"),
     }
 }
 
@@ -206,7 +233,31 @@ fn internal(e: impl std::fmt::Display) -> ErrorData {
 
 impl ServerHandler for Fake {
     fn get_info(&self) -> ServerConfig {
-        ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
+        let caps = ServerCapabilities::builder().enable_tools();
+        let caps = if self.s.tasks {
+            caps.enable_tasks()
+        } else {
+            caps
+        };
+        ServerConfig::new(caps.build())
+    }
+
+    async fn get_task(
+        &self,
+        request: rmcp::model::GetTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::GetTaskResult, ErrorData> {
+        self.tasks
+            .get_task(&request.task_id)
+            .map(rmcp::model::GetTaskResult::new)
+    }
+
+    async fn cancel_task(
+        &self,
+        request: rmcp::model::CancelTaskParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<(), ErrorData> {
+        self.tasks.cancel_task(&request.task_id)
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
@@ -261,13 +312,61 @@ impl ServerHandler for Fake {
             }
             writeln!(f, "{}", Value::Object(meta)).ok();
         }
-        if let Some(path) = env("FAKE_CALL_LOG")
-            && let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
+        log_call(&request.name);
+        let args = request.arguments.clone().unwrap_or_default();
+        if request.name == "sleep"
+            && let Some((n, step)) = steps(&args)
         {
-            writeln!(f, "{}", request.name).ok();
+            // M4-09: a long call that reports progress and stops when cancelled
+            let tasks_ok = context
+                .client_capabilities()
+                .is_some_and(|c| c.supports_tasks());
+            if self.s.tasks && tasks_ok {
+                let task = self.tasks.spawn(
+                    rmcp::task_manager::TaskOptions::new().with_poll_interval_ms(100),
+                    move |ctx| {
+                        Box::pin(async move {
+                            for i in 1..=n {
+                                tokio::select! {
+                                    _ = tokio::time::sleep(Duration::from_millis(step)) => {}
+                                    _ = ctx.cancelled() => {
+                                        log_call(&format!("sleep cancelled at {i}"));
+                                        return Err(rmcp::task_manager::TaskExit::Cancelled);
+                                    }
+                                }
+                                ctx.set_status_message(format!("step {i} of {n}"));
+                            }
+                            log_call("sleep done");
+                            Ok(CallToolResult::success(vec![ContentBlock::text("slept")]))
+                        })
+                    },
+                );
+                return Ok(CallToolResponse::Task(rmcp::model::CreateTaskResult::new(
+                    task,
+                )));
+            }
+            let token = request
+                .meta
+                .as_ref()
+                .and_then(|m| m.get_progress_token())
+                .or_else(|| context.meta.get_progress_token());
+            for i in 1..=n {
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(step)) => {}
+                    _ = context.ct.cancelled() => {
+                        log_call(&format!("sleep cancelled at {i}"));
+                        return Err(ErrorData::internal_error("cancelled", None));
+                    }
+                }
+                if let Some(t) = &token {
+                    let p = rmcp::model::ProgressNotificationParam::new(t.clone(), i as f64)
+                        .with_total(n as f64)
+                        .with_message(format!("step {i} of {n}"));
+                    let _ = context.peer.notify_progress(p).await;
+                }
+            }
+            log_call("sleep done");
+            return Ok(text("slept"));
         }
         let out = self
             .run(&request.name, request.arguments.unwrap_or_default())
@@ -391,6 +490,7 @@ async fn main() {
     let fake = Fake {
         s: Arc::new(settings()),
         calls: Arc::new(AtomicU64::new(0)),
+        tasks: Arc::new(rmcp::task_manager::TaskManager::new()),
     };
     if let Some(i) = args.iter().position(|a| a == "--http") {
         let addr = args.get(i + 1).map(String::as_str).unwrap_or("127.0.0.1:0");

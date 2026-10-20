@@ -129,9 +129,117 @@ async fn run_cleanup(commands: Vec<Vec<String>>) {
     }
 }
 
+/// The gateway's side of a backend session: it routes the backend's
+/// progress to the calls that asked (M4-09) and declares the tasks
+/// extension, so a backend may run a long call as a task.
 #[derive(Clone, Default)]
-struct GatewayClient;
-impl ClientHandler for GatewayClient {}
+struct GatewayClient {
+    routes: Arc<crate::progress::Routes>,
+}
+
+impl ClientHandler for GatewayClient {
+    fn get_info(&self) -> rmcp::model::ClientConfig {
+        let mut cfg = rmcp::model::ClientConfig::default();
+        cfg.capabilities = rmcp::model::ClientCapabilities::builder()
+            .enable_tasks()
+            .build();
+        cfg
+    }
+
+    async fn on_progress(
+        &self,
+        params: rmcp::model::ProgressNotificationParam,
+        _context: rmcp::service::NotificationContext<RoleClient>,
+    ) {
+        self.routes.deliver(
+            params.progress_token,
+            crate::progress::Progress {
+                progress: params.progress,
+                total: params.total,
+                message: params.message,
+            },
+        );
+    }
+}
+
+/// Limits for one call (M4-09).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallLimits {
+    /// How long the backend may stay silent: the call fails when neither
+    /// the result nor progress arrives for this long.
+    pub idle: Duration,
+    /// How long the call may run at all, progress or not.
+    pub max: Duration,
+}
+
+impl CallLimits {
+    /// `timeout` for both: a call that must finish in `timeout`.
+    pub fn fixed(timeout: Duration) -> Self {
+        Self {
+            idle: timeout,
+            max: timeout,
+        }
+    }
+}
+
+/// Sends `notifications/cancelled` for a request whose caller went away.
+struct CancelOnDrop {
+    peer: Option<rmcp::service::Peer<RoleClient>>,
+    id: rmcp::model::RequestId,
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        let Some(peer) = self.peer.take() else {
+            return;
+        };
+        let id = self.id.clone();
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move {
+                let p = rmcp::model::CancelledNotificationParam::new(
+                    Some(id),
+                    Some("cancelled by the client".into()),
+                );
+                let _ = peer.notify_cancelled(p).await;
+            });
+        }
+    }
+}
+
+/// Sends `tasks/cancel` for a backend task whose caller went away.
+struct CancelTaskOnDrop {
+    peer: Option<rmcp::service::Peer<RoleClient>>,
+    id: String,
+}
+
+impl Drop for CancelTaskOnDrop {
+    fn drop(&mut self) {
+        let Some(peer) = self.peer.take() else {
+            return;
+        };
+        let id = std::mem::take(&mut self.id);
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.spawn(async move {
+                let _ = peer
+                    .cancel_task(rmcp::model::CancelTaskParams::new(id))
+                    .await;
+            });
+        }
+    }
+}
+
+/// A JSON-RPC error object (`{code, message, data}`) as a [`ProtoError`].
+fn rpc_from_json(e: &JsonObject) -> ProtoError {
+    ProtoError::Rpc {
+        code: e.get("code").and_then(Value::as_i64).unwrap_or(-32603) as i32,
+        message: e
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("task failed")
+            .to_string(),
+        data: e.get("data").cloned(),
+    }
+}
 
 /// The lifecycle used toward backends.
 ///
@@ -277,6 +385,7 @@ impl Drop for TreeGuard {
 /// A live connection to one backend.
 pub struct BackendConn {
     service: RunningService<RoleClient, GatewayClient>,
+    routes: Arc<crate::progress::Routes>,
     // Declared after `service` so it drops (kills the tree) last.
     pub(crate) _tree: TreeGuard,
 }
@@ -438,10 +547,13 @@ impl BackendConn {
         T: rmcp::transport::IntoTransport<RoleClient, E, A>,
         E: std::error::Error + Send + Sync + 'static,
     {
-        let fut = GatewayClient.serve_with_lifecycle(transport, lifecycle);
+        let client = GatewayClient::default();
+        let routes = client.routes.clone();
+        let fut = client.serve_with_lifecycle(transport, lifecycle);
         match tokio::time::timeout(timeout, fut).await {
             Ok(Ok(service)) => Ok(Self {
                 service,
+                routes,
                 _tree: TreeGuard::none(),
             }),
             Ok(Err(e)) => Err(ProtoError::Connect(e.to_string())),
@@ -509,6 +621,30 @@ impl BackendConn {
         meta: Option<JsonObject>,
         timeout: Duration,
     ) -> Result<JsonObject, ProtoError> {
+        self.call_tool_with(
+            name,
+            arguments,
+            meta,
+            CallLimits::fixed(timeout),
+            crate::progress::ProgressSink::default(),
+        )
+        .await
+    }
+
+    /// Call a tool as a long call (M4-09): the backend's progress goes to
+    /// `progress` and keeps the call alive (`limits.idle` counts from the
+    /// last sign of life, `limits.max` from the start). Dropping the future
+    /// cancels the call at the backend. A backend that answers with a task
+    /// (SEP-2663) is polled until the task ends; its status messages become
+    /// progress.
+    pub async fn call_tool_with(
+        &self,
+        name: &str,
+        arguments: Option<JsonObject>,
+        meta: Option<JsonObject>,
+        limits: CallLimits,
+        progress: crate::progress::ProgressSink,
+    ) -> Result<JsonObject, ProtoError> {
         let mut params = CallToolRequestParams::new(name.to_string());
         params.arguments = arguments;
         if let Some(m) = meta {
@@ -516,15 +652,111 @@ impl BackendConn {
                 rmcp::model::MetaObject::from(m),
             ));
         }
-        let fut = self.service.call_tool(params);
-        let result = match tokio::time::timeout(timeout, fut).await {
-            Ok(r) => r?,
-            Err(_) => return Err(ProtoError::Timeout(timeout)),
+        let req = ClientRequest::CallToolRequest(rmcp::model::CallToolRequest::new(params.clone()));
+        let options = PeerRequestOptions::with_timeout(limits.idle)
+            .reset_timeout_on_progress()
+            .with_max_total_timeout(limits.max);
+        let started = tokio::time::Instant::now();
+        let handle = self.service.send_request_with_option(req, options).await?;
+        let _route = self
+            .routes
+            .register(handle.progress_token.clone(), progress.clone());
+        let mut cancel = CancelOnDrop {
+            peer: Some(handle.peer.clone()),
+            id: handle.id.clone(),
         };
-        match serde_json::to_value(result) {
+        let response = handle.await_response().await;
+        // answered, or timed out (rmcp cancels those itself)
+        cancel.peer = None;
+        let result = match response? {
+            ServerResult::CallToolResult(r) => serde_json::to_value(r),
+            ServerResult::CreateTaskResult(t) => {
+                let left = limits.max.saturating_sub(started.elapsed());
+                return self.follow_task(t.task, limits.idle, left, &progress).await;
+            }
+            // MRTR: let rmcp drive the rounds, as before M4-09
+            ServerResult::InputRequiredResult(_) => {
+                let fut = self.service.call_tool(params);
+                match tokio::time::timeout(limits.idle, fut).await {
+                    Ok(r) => serde_json::to_value(r?),
+                    Err(_) => return Err(ProtoError::Timeout(limits.idle)),
+                }
+            }
+            _ => {
+                return Err(ProtoError::Other(
+                    "unexpected response to tools/call".into(),
+                ));
+            }
+        };
+        match result {
             Ok(Value::Object(o)) => Ok(o),
             Ok(_) => Err(ProtoError::Other("result is not an object".into())),
             Err(e) => Err(ProtoError::Other(e.to_string())),
+        }
+    }
+
+    /// Poll a backend task until it ends.
+    async fn follow_task(
+        &self,
+        task: rmcp::model::Task,
+        idle: Duration,
+        max: Duration,
+        progress: &crate::progress::ProgressSink,
+    ) -> Result<JsonObject, ProtoError> {
+        use rmcp::model::{GetTaskParams, TaskPayload};
+        let peer = self.service.peer().clone();
+        let id = task.task_id.clone();
+        let mut cancel = CancelTaskOnDrop {
+            peer: Some(peer.clone()),
+            id: id.clone(),
+        };
+        let deadline = tokio::time::Instant::now() + max;
+        let mut interval = task.poll_interval_ms;
+        let mut last = task.status_message.clone();
+        let mut steps = 0.0;
+        loop {
+            let wait = Duration::from_millis(interval.unwrap_or(1000))
+                .clamp(Duration::from_millis(50), Duration::from_secs(5));
+            if tokio::time::Instant::now() + wait > deadline {
+                return Err(ProtoError::Timeout(max)); // `cancel` stops the task
+            }
+            tokio::time::sleep(wait).await;
+            let got = tokio::time::timeout(idle, peer.get_task(GetTaskParams::new(id.clone())))
+                .await
+                .map_err(|_| ProtoError::Timeout(idle))??;
+            let t = got.task;
+            interval = t.task.poll_interval_ms.or(interval);
+            if t.task.status_message != last {
+                last = t.task.status_message.clone();
+                if let Some(m) = &last {
+                    steps += 1.0;
+                    progress.send(crate::progress::Progress {
+                        progress: steps,
+                        total: None,
+                        message: Some(m.clone()),
+                    });
+                }
+            }
+            match t.payload {
+                TaskPayload::Completed { result } => {
+                    cancel.peer = None;
+                    return Ok(result);
+                }
+                TaskPayload::Failed { error } => {
+                    cancel.peer = None;
+                    return Err(rpc_from_json(&error));
+                }
+                TaskPayload::Cancelled => {
+                    cancel.peer = None;
+                    return Err(ProtoError::Other("the server cancelled the task".into()));
+                }
+                TaskPayload::InputRequired { .. } => {
+                    return Err(ProtoError::Other(
+                        "the server's task asks for input, which mcpgw doesn't relay yet".into(),
+                    ));
+                }
+                _ => {}
+            }
         }
     }
 
@@ -553,7 +785,9 @@ impl BackendConn {
     /// Close the session: stdin closes, the server gets a moment to exit
     /// on its own, then whatever is left of its process tree is killed.
     pub async fn shutdown(self) {
-        let Self { service, mut _tree } = self;
+        let Self {
+            service, mut _tree, ..
+        } = self;
         let _ = service.cancel().await;
         _tree.wait_exit(Duration::from_secs(2)).await;
         _tree.finish().await;
