@@ -675,7 +675,8 @@ pub fn openapi() -> Value {
                     "source": {"enum": ["config", "store"]}, "state": {"type": ["string", "null"]},
                     "pid": {"type": ["integer", "null"]}, "restarts": {"type": ["integer", "null"]},
                     "container": {"oneOf": [{"type": "null"}, {"type": "object", "properties": {
-                        "runtime": {"type": "string"}, "name": {"type": "string"}, "image": {"type": "string"}}}]},
+                        "runtime": {"type": "string"}, "name": {"type": "string"}, "image": {"type": "string"},
+                        "rootless": {"type": "boolean"}}}]},
                     "protocol_version": {"type": ["string", "null"]}, "last_error": {"type": ["string", "null"]},
                     "tools": {"type": "integer"}, "pin": {"type": ["string", "null"]}, "spec": {"$ref": "#/components/schemas/ServerSpec"}
                 }},

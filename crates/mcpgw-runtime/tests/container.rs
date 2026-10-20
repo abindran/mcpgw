@@ -88,6 +88,7 @@ async fn starts_on_first_call_and_is_removed_when_idle() {
     let st = m.status_of(&name).unwrap();
     let c = st.container.clone().expect("container info");
     assert_eq!((c.runtime.as_str(), c.image.as_str()), ("docker", IMAGE));
+    assert!(c.rootless.is_some(), "{c:?}");
     assert!(c.name.starts_with(&format!("mcpgw-{name}-")), "{c:?}");
     assert_eq!(containers_of(&name), std::slice::from_ref(&c.name));
     assert_eq!(
@@ -250,11 +251,18 @@ async fn pinned_digest_failed_start_and_sweep() {
     docker(&["rm", "-f", &other]);
 }
 
-/// Podman runs the same server (only where Podman is installed; Ubuntu CI
-/// runners have it).
+/// Podman runs the same server (where Podman is installed; required on the
+/// Linux CI runners, which have it).
 #[tokio::test(flavor = "multi_thread")]
 async fn podman_runs_the_same_server() {
     if !podman_available() {
+        // the Linux CI runners have Podman: there it must run
+        let required = cfg!(target_os = "linux")
+            && std::env::var("MCPGW_TEST_CONTAINERS").as_deref() == Ok("1");
+        assert!(
+            !required,
+            "MCPGW_TEST_CONTAINERS=1 on Linux but Podman is not available"
+        );
         eprintln!("podman_runs_the_same_server: skipped (no Podman)");
         return;
     }

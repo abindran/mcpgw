@@ -35,11 +35,12 @@ entries this way as well.
 
 ## How it runs (`mcpgw-runtime::container`)
 
-- **stdio over attach:** each start runs `<runtime> run -i --rm --name
+- **stdio over attach:** each start runs `<runtime> run -i --name
   mcpgw-<server>-<8 hex> --label mcpgw.managed=1 --label
   mcpgw.server=<server> --label mcpgw.pid=<pid> [--label
-  mcpgw.instance=<id>] -e NAME… <run_args> <image>[@digest] <args>` as the
-  stdio child. Handshake, stderr capture, health pings, crash detection,
+  mcpgw.instance=<id>] -e NAME… <sandbox flags> <run_args>
+  <image>[@digest] <args>` as the stdio child. The sandbox flags were added
+  in [M3-02](M3-02-Sandbox-Profiles.md). Handshake, stderr capture, health pings, crash detection,
   idle stop, LRU eviction and drift quarantine are the same as for a local
   process.
 - **Pull by digest:** `mcpgw add` pulls the image and pins its registry
@@ -52,8 +53,11 @@ entries this way as well.
   redacted from results as usual. Secret placeholders are refused in
   `run_args`. `-d`, `--detach`, `--name`, `-t` and `--tty` are refused
   there too, since mcpgw manages them.
-- **Removal:** when a server stops (idle, eviction, disable, shutdown) the
-  CLI is closed, then killed, then `rm -f <name>` runs and is awaited. A
+- **Removal:** containers run without `--rm`, and mcpgw always removes
+  them itself, so a dead one can be inspected first (M3-02). When a server
+  stops (idle, eviction, disable, shutdown) the CLI is closed, then killed,
+  then `rm -f <name>` runs. Each server's actor waits for its removals
+  before it exits, so `mcpgw down` leaves nothing behind. A
   failed handshake removes its container before any retry starts. A
   dropped connection removes it in the background. Each start gets a fresh
   name, so a slow removal can never hit a newer container.

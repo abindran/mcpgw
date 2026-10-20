@@ -106,7 +106,7 @@ async fn container_server_through_the_daemon() {
         "{added}"
     );
     assert!(
-        added.contains(&format!("added server {name} (2 tools, pin ")),
+        added.contains(&format!("added server {name} (5 tools, pin ")),
         "{added}"
     );
     assert!(
@@ -138,7 +138,7 @@ async fn container_server_through_the_daemon() {
     assert_eq!(ctr.len(), 1, "{ctr:?}");
     let st = e.ok(&["status"]);
     assert!(
-        st.contains(&format!("{name}\tidle\t2 tools\tdocker {}", ctr[0])),
+        st.contains(&format!("{name}\tidle\t5 tools\tdocker {}", ctr[0])),
         "{st}"
     );
     let stats = e.ok(&["stats"]);

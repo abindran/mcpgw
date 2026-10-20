@@ -12,16 +12,21 @@ use mcpgw_core::{ServerSpec, Transport};
 /// Image the test server runs in.
 pub const IMAGE: &str = "node:22-alpine";
 
-/// An MCP server over stdio (line-delimited JSON-RPC) with tools `echo`
-/// and `env`. It logs "node-fake ready" to stderr and exits when stdin
-/// closes.
+/// An MCP server over stdio (line-delimited JSON-RPC) with tools `echo`,
+/// `env` (read a variable), `alloc` (hold `mib` more MiB of touched memory),
+/// `write` (create a file at `path`) and `uid`. It logs "node-fake ready" to
+/// stderr and exits when stdin closes.
 pub const SERVER_JS: &str = r#"
 const rl = require('readline').createInterface({ input: process.stdin });
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\n');
 const tools = [
   { name: 'echo', description: 'Echo text back', inputSchema: { type: 'object', properties: { text: { type: 'string' } } } },
   { name: 'env', description: 'Read an environment variable', inputSchema: { type: 'object', properties: { name: { type: 'string' } } } },
+  { name: 'alloc', description: 'Hold more memory', inputSchema: { type: 'object', properties: { mib: { type: 'number' } } } },
+  { name: 'write', description: 'Create a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
+  { name: 'uid', description: 'The user id', inputSchema: { type: 'object' } },
 ];
+const held = [];
 console.error('node-fake ready');
 rl.on('line', (l) => {
   let m;
@@ -37,6 +42,15 @@ rl.on('line', (l) => {
     case 'tools/call':
       if (m.params.name === 'echo') return ok({ content: [{ type: 'text', text: String(a.text) }] });
       if (m.params.name === 'env') return ok({ content: [{ type: 'text', text: String(process.env[a.name] ?? '') }] });
+      if (m.params.name === 'alloc') {
+        for (let i = 0; i < a.mib; i++) held.push(Buffer.alloc(1 << 20, 1));
+        return ok({ content: [{ type: 'text', text: `holding ${held.length} MiB` }] });
+      }
+      if (m.params.name === 'write') {
+        try { require('fs').writeFileSync(a.path, 'x'); return ok({ content: [{ type: 'text', text: 'written' }] }); }
+        catch (e) { return ok({ content: [{ type: 'text', text: e.code || String(e) }] }); }
+      }
+      if (m.params.name === 'uid') return ok({ content: [{ type: 'text', text: String(process.getuid()) }] });
       return err(-32602, 'unknown tool');
     case 'ping': return ok({});
     default: return err(-32601, 'method not found');
@@ -79,6 +93,7 @@ pub fn node_server(name: &str) -> ServerSpec {
             args: vec!["node".into(), "-e".into(), SERVER_JS.into()],
             env: Default::default(),
             run_args: Vec::new(),
+            sandbox: Default::default(),
         },
     )
 }

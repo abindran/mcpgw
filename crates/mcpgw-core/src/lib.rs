@@ -8,6 +8,7 @@ pub mod duration;
 pub mod manifest;
 pub mod oauth;
 pub mod profile;
+pub mod sandbox;
 pub mod secret;
 pub mod server;
 pub mod tls;
@@ -17,6 +18,7 @@ pub use duration::Duration;
 pub use manifest::{ManifestDiff, ToolDef, ToolManifest};
 pub use oauth::{OAuthEndpoints, OAuthProvider, oauth_secret_name};
 pub use profile::{Decision, Mode, Policy, Profile, glob_match};
+pub use sandbox::{ByteSize, Limits, Sandbox};
 pub use secret::{SecretMeta, validate_secret_name};
 pub use server::{
     ACCOUNT_PLACEHOLDER, CONTAINER_RUNTIMES, DEFAULT_ACCOUNT, RegistryRef, SECRET_PLACEHOLDER,

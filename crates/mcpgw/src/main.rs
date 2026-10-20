@@ -181,6 +181,18 @@ struct AddArgs {
     /// --run-arg=127.0.0.1:8085:8085`.
     #[arg(long = "run-arg", requires = "image", allow_hyphen_values = true)]
     run_args: Vec<String>,
+    /// Sandbox for --image: standard (default), strict or off.
+    #[arg(long, requires = "image", value_parser = parse_sandbox)]
+    sandbox: Option<mcpgw_core::Sandbox>,
+    /// Memory limit, e.g. 256MiB (container servers).
+    #[arg(long, requires = "image")]
+    memory: Option<mcpgw_core::ByteSize>,
+    /// CPU limit in cores, e.g. 0.5 (container servers).
+    #[arg(long, requires = "image")]
+    cpus: Option<f64>,
+    /// Process limit (container servers).
+    #[arg(long, requires = "image")]
+    pids: Option<u32>,
     /// Remote MCP URL: Streamable HTTP, or a legacy `…/sse` endpoint.
     #[arg(long)]
     url: Option<String>,
@@ -340,6 +352,11 @@ enum SecretCmd {
     },
 }
 
+fn parse_sandbox(s: &str) -> Result<mcpgw_core::Sandbox, String> {
+    serde_json::from_value(serde_json::Value::String(s.into()))
+        .map_err(|_| format!("sandbox must be standard, strict or off, not {s:?}"))
+}
+
 fn parse_kv(s: &str) -> Result<(String, String), String> {
     match s.split_once('=') {
         Some((k, v)) if !k.is_empty() => Ok((k.into(), v.into())),
@@ -425,6 +442,7 @@ fn run(cli: Cli) -> AnyResult<()> {
                     args: a.args,
                     env: a.env.into_iter().collect(),
                     run_args: a.run_args,
+                    sandbox: a.sandbox.unwrap_or_default(),
                 },
                 (Some(command), None) => Transport::Stdio {
                     command,
@@ -443,6 +461,11 @@ fn run(cli: Cli) -> AnyResult<()> {
             spec.alias = a.alias;
             spec.stateful = a.stateful;
             spec.secrets = a.secrets.into_iter().collect();
+            spec.limits = mcpgw_core::Limits {
+                memory: a.memory,
+                cpus: a.cpus,
+                pids: a.pids,
+            };
             servers::add(&config, &path, spec, !a.no_introspect)
         }
         Cmd::Remove { name } => servers::remove(&config, &path, &name),

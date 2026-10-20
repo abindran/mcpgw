@@ -332,6 +332,9 @@
                   "name": {
                     "type": "string"
                   },
+                  "rootless": {
+                    "type": "boolean"
+                  },
                   "runtime": {
                     "type": "string"
                   }
@@ -412,6 +415,19 @@
       },
       "ServerSpec": {
         "$defs": {
+          "ByteSize": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]+ ?([kKmMgG]i?[bB]?|[bB])?$",
+                "type": "string"
+              },
+              {
+                "minimum": 0,
+                "type": "integer"
+              }
+            ],
+            "description": "A size such as \"256MiB\", \"512m\" or \"1GiB\", or bytes."
+          },
           "Duration": {
             "anyOf": [
               {
@@ -424,6 +440,41 @@
               }
             ],
             "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds."
+          },
+          "Limits": {
+            "additionalProperties": false,
+            "description": "Resource limits for a server.",
+            "properties": {
+              "cpus": {
+                "description": "CPU cap in cores, e.g. `0.5`.",
+                "format": "double",
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "memory": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ByteSize"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Memory cap; exceeding it kills the server (no swap)."
+              },
+              "pids": {
+                "description": "Most processes (and threads) at once.",
+                "format": "uint32",
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              }
+            },
+            "type": "object"
           },
           "RegistryRef": {
             "description": "A pinned MCP Registry entry.",
@@ -442,6 +493,26 @@
               "version"
             ],
             "type": "object"
+          },
+          "Sandbox": {
+            "description": "How tightly a container server is confined.",
+            "oneOf": [
+              {
+                "const": "off",
+                "description": "No restrictions beyond the server's own [`Limits`].",
+                "type": "string"
+              },
+              {
+                "const": "standard",
+                "description": "All capabilities dropped, no privilege escalation, 1 GiB memory and\n512 processes unless set.",
+                "type": "string"
+              },
+              {
+                "const": "strict",
+                "description": "`standard`, plus a read-only root filesystem with a 64 MiB tmpfs at\n`/tmp`, running as uid/gid 65534 (nobody), and defaults of 512 MiB,\n1 CPU and 128 processes.",
+                "type": "string"
+              }
+            ]
           }
         },
         "description": "One backend tool server (`[[server]]` in the config file).",
@@ -539,7 +610,7 @@
                 "type": "string"
               },
               "run_args": {
-                "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`.",
+                "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`. They\ncome after the sandbox's flags, so they can add to them\n(`--cap-add=…`).",
                 "items": {
                   "type": "string"
                 },
@@ -551,6 +622,10 @@
                   "string",
                   "null"
                 ]
+              },
+              "sandbox": {
+                "$ref": "#/$defs/Sandbox",
+                "description": "Confinement: `standard` (default), `strict` or `off`."
               },
               "transport": {
                 "const": "container",
@@ -586,6 +661,10 @@
               }
             ],
             "description": "Stop the server after this long without calls. Default: gateway-wide."
+          },
+          "limits": {
+            "$ref": "#/$defs/Limits",
+            "description": "Resource limits (container servers): `{ memory = \"256MiB\", cpus =\n0.5, pids = 64 }`. Unset ones come from the sandbox profile."
           },
           "name": {
             "description": "Unique server name.",

@@ -1,6 +1,6 @@
 //! Backend server specification.
 
-use crate::{Duration, Error, Result};
+use crate::{Duration, Error, Limits, Result, Sandbox};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
@@ -55,9 +55,14 @@ pub enum Transport {
         /// through the runtime's environment, never on its command line).
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         env: BTreeMap<String, String>,
-        /// Extra `run` flags, e.g. `["-p", "127.0.0.1:8085:8085"]`.
+        /// Extra `run` flags, e.g. `["-p", "127.0.0.1:8085:8085"]`. They
+        /// come after the sandbox's flags, so they can add to them
+        /// (`--cap-add=…`).
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         run_args: Vec<String>,
+        /// Confinement: `standard` (default), `strict` or `off`.
+        #[serde(default, skip_serializing_if = "Sandbox::is_default")]
+        sandbox: Sandbox,
     },
 }
 
@@ -125,6 +130,7 @@ impl Transport {
             args: Vec::new(),
             env: BTreeMap::new(),
             run_args: Vec::new(),
+            sandbox: Sandbox::default(),
         }
     }
 
@@ -190,6 +196,10 @@ pub struct ServerSpec {
     /// everything the server sends back.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub secrets: BTreeMap<String, String>,
+    /// Resource limits (container servers): `{ memory = "256MiB", cpus =
+    /// 0.5, pids = 64 }`. Unset ones come from the sandbox profile.
+    #[serde(default, skip_serializing_if = "Limits::is_empty")]
+    pub limits: Limits,
     /// Where it was installed from, when `mcpgw add` took it from the MCP
     /// Registry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -295,6 +305,7 @@ impl ServerSpec {
             stateful: false,
             startup_timeout: None,
             secrets: BTreeMap::new(),
+            limits: Limits::default(),
             registry: None,
         }
     }
@@ -388,6 +399,15 @@ impl ServerSpec {
         if empty {
             return Err(Error::Config(format!(
                 "server {} has an empty command/url/image",
+                self.name
+            )));
+        }
+        self.limits
+            .validate()
+            .map_err(|m| Error::Config(format!("server {}: {m}", self.name)))?;
+        if !self.limits.is_empty() && !matches!(self.transport, Transport::Container { .. }) {
+            return Err(Error::Config(format!(
+                "server {}: limits are enforced for container servers only",
                 self.name
             )));
         }

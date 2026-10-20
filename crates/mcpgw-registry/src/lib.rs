@@ -549,6 +549,7 @@ pub fn plan(server: &ServerJson, opts: &PlanOptions) -> Result<InstallPlan, Stri
                     args,
                     env,
                     run_args,
+                    sandbox: Default::default(),
                 },
             );
             spec.secrets = std::mem::take(&mut r.bindings);

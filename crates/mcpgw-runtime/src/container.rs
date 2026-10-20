@@ -1,7 +1,7 @@
 //! Container launcher (M3-01): Docker or Podman.
 //!
-//! A `container` server runs as `<runtime> run -i --rm --name mcpgw-<server>-<id>`
-//! with MCP over the attached stdin/stdout, so it goes through the same
+//! A `container` server runs as `<runtime> run -i --name mcpgw-<server>-<id>`
+//! under its sandbox profile (M3-02), with MCP over the attached stdin/stdout, so it goes through the same
 //! stdio path (handshake, stderr capture, crash detection) as a local
 //! process. Each start gets a fresh name. When the server stops (idle,
 //! eviction, shutdown, failed handshake) the CLI is killed and the
@@ -10,9 +10,14 @@
 //!
 //! Images are pinned by digest when one is known (`repo:tag@sha256:…`) and
 //! pulled before the handshake, so a slow download never times it out.
+//!
+//! Containers run without `--rm`: mcpgw always removes them itself, and a
+//! container that died is first inspected ([`post_mortem`]) so a kill at
+//! its memory limit is reported as such.
 
 use std::{collections::BTreeMap, sync::OnceLock, time::Duration};
 
+use mcpgw_core::{Limits, Sandbox};
 use mcpgw_proto::{BackendConn, ProtoError, StderrSink, StdioSpec};
 
 /// Label on every container mcpgw starts.
@@ -57,6 +62,39 @@ pub struct ContainerInfo {
     pub name: String,
     /// Image reference it runs (pinned by digest when known).
     pub image: String,
+    /// Whether the runtime itself runs without root (rootless Docker,
+    /// Podman as a user); `None` if it couldn't tell.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rootless: Option<bool>,
+}
+
+/// Whether `runtime` runs rootless (asked once per runtime).
+pub async fn rootless(runtime: &str) -> Option<bool> {
+    static CACHE: OnceLock<std::sync::Mutex<BTreeMap<String, Option<bool>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    if let Some(v) = cache.lock().ok().and_then(|c| c.get(runtime).copied()) {
+        return v;
+    }
+    let format = if runtime == "podman" {
+        "{{.Host.Security.Rootless}}"
+    } else {
+        "{{json .SecurityOptions}}"
+    };
+    let v = match output(runtime, &["info", "--format", format]).await {
+        Ok(o) if o.status.success() => {
+            let t = String::from_utf8_lossy(&o.stdout);
+            Some(if runtime == "podman" {
+                t.trim() == "true"
+            } else {
+                t.contains("name=rootless")
+            })
+        }
+        _ => None,
+    };
+    if let Ok(mut c) = cache.lock() {
+        c.insert(runtime.to_string(), v);
+    }
+    v
 }
 
 /// How to start a container server (secrets already filled in).
@@ -74,6 +112,10 @@ pub struct ContainerTemplate {
     pub env: BTreeMap<String, String>,
     /// Extra `run` flags.
     pub run_args: Vec<String>,
+    /// Confinement profile.
+    pub sandbox: Sandbox,
+    /// The server's own limits (unset ones come from the profile).
+    pub limits: Limits,
 }
 
 fn container_name(server: &str) -> String {
@@ -96,9 +138,7 @@ fn container_name(server: &str) -> String {
 impl ContainerTemplate {
     /// The `run` invocation for one start, named `name`.
     pub fn stdio(&self, runtime: &str, name: &str) -> StdioSpec {
-        let mut args: Vec<String> = ["run", "-i", "--rm", "--name", name]
-            .map(String::from)
-            .into();
+        let mut args: Vec<String> = ["run", "-i", "--name", name].map(String::from).into();
         let mut label = |k: &str, v: &str| {
             args.push("--label".into());
             args.push(format!("{k}={v}"));
@@ -114,6 +154,8 @@ impl ContainerTemplate {
             args.push("-e".into());
             args.push(k.clone());
         }
+        let limits = self.limits.or(&self.sandbox.default_limits());
+        args.extend(self.sandbox.run_flags(&limits));
         args.extend(self.run_args.iter().cloned());
         args.push(self.image.clone());
         args.extend(self.args.iter().cloned());
@@ -138,12 +180,14 @@ impl ContainerTemplate {
             .map_err(ProtoError::Connect)?;
         let name = container_name(&self.server);
         let conn = BackendConn::connect_stdio(&self.stdio(&runtime, &name), timeout, sink).await?;
+        let rootless = rootless(&runtime).await;
         Ok((
             conn,
             ContainerInfo {
                 runtime,
                 name,
                 image: self.image.clone(),
+                rootless,
             },
         ))
     }
@@ -207,6 +251,46 @@ pub async fn ensure_image(
             "{runtime} pull {image} failed: {}",
             first_line(&o.stderr)
         ))
+    }
+}
+
+/// Why a container stopped, if it says: `out of memory (killed at its
+/// 256MiB limit)`, `exited with code 3`. Inspects the (stopped, not yet
+/// removed) container.
+pub async fn post_mortem(info: &ContainerInfo) -> Option<String> {
+    let o = output(
+        &info.runtime,
+        &[
+            "inspect",
+            "--format",
+            "{{.State.Status}}|{{.State.OOMKilled}}|{{.State.ExitCode}}|{{.HostConfig.Memory}}",
+            &info.name,
+        ],
+    )
+    .await
+    .ok()?;
+    if !o.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    let parts: Vec<&str> = text.split('|').collect();
+    let [status, oom, code, memory] = parts[..] else {
+        return None;
+    };
+    if status == "running" {
+        return None;
+    }
+    let limit = memory
+        .parse::<u64>()
+        .ok()
+        .filter(|m| *m > 0)
+        .map(|m| format!(" at its {} limit", mcpgw_core::ByteSize(m)))
+        .unwrap_or_default();
+    match (oom, code) {
+        ("true", _) => Some(format!("out of memory: the container was killed{limit}")),
+        (_, "137") => Some(format!("the container was killed (SIGKILL){limit}")),
+        (_, "0") => None,
+        (_, c) => Some(format!("the container exited with code {c}")),
     }
 }
 
@@ -312,6 +396,11 @@ mod tests {
             args: vec!["stdio".into()],
             env: [("TOKEN".to_string(), "s3cret".to_string())].into(),
             run_args: vec!["-p".into(), "127.0.0.1:1:1".into()],
+            sandbox: Sandbox::Strict,
+            limits: Limits {
+                memory: Some(mcpgw_core::ByteSize::mib(256)),
+                ..Default::default()
+            },
         };
         let name = container_name(&t.server);
         assert!(
@@ -321,9 +410,14 @@ mod tests {
         let s = t.stdio("docker", &name);
         assert_eq!(s.command, "docker");
         let args = s.args.join(" ");
-        assert!(args.starts_with(&format!("run -i --rm --name {name} --label mcpgw.managed=1 --label mcpgw.server=GitHub_x --label mcpgw.pid=")), "{args}");
+        assert!(args.starts_with(&format!("run -i --name {name} --label mcpgw.managed=1 --label mcpgw.server=GitHub_x --label mcpgw.pid=")), "{args}");
         assert!(
-            args.ends_with("-e TOKEN -p 127.0.0.1:1:1 ghcr.io/x/y:1@sha256:ab stdio"),
+            args.ends_with(
+                "-e TOKEN --cap-drop=ALL --security-opt=no-new-privileges --read-only \
+                 --tmpfs=/tmp:rw,nosuid,nodev,size=64m --user=65534:65534 \
+                 --memory=268435456 --memory-swap=268435456 --cpus=1 --pids-limit=128 \
+                 -p 127.0.0.1:1:1 ghcr.io/x/y:1@sha256:ab stdio"
+            ),
             "{args}"
         );
         assert!(!args.contains("s3cret"));

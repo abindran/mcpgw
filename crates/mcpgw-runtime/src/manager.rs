@@ -200,7 +200,15 @@ enum Waiter {
 
 enum Internal {
     Started(Result<Box<Started>, String>),
-    CallDone { lost: bool, failed: bool },
+    /// Why a lost container died (see `container::post_mortem`).
+    PostMortem {
+        lost: String,
+        cause: String,
+    },
+    CallDone {
+        lost: bool,
+        failed: bool,
+    },
     Ping(Result<(), String>),
     Recheck,
 }
@@ -849,6 +857,7 @@ impl Launch {
                 args,
                 env,
                 run_args,
+                sandbox,
             } => Template::Container(ContainerTemplate {
                 server: server.to_string(),
                 runtime: runtime.clone(),
@@ -856,6 +865,8 @@ impl Launch {
                 args: args.clone(),
                 env: env.clone(),
                 run_args: run_args.clone(),
+                sandbox: *sandbox,
+                limits: cfg.limits.clone(),
             }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),
@@ -1013,6 +1024,8 @@ struct Actor {
     conn: Option<Arc<BackendConn>>,
     /// The container behind `conn`, if any.
     container: Option<ContainerInfo>,
+    /// Background closes still running (see `closing`).
+    closes: Vec<tokio::task::JoinHandle<()>>,
     waiters: Vec<Waiter>,
     retry_at: Option<tokio::time::Instant>,
     ping_inflight: bool,
@@ -1049,6 +1062,7 @@ impl Actor {
             ever_connected: false,
             conn: None,
             container: None,
+            closes: Vec::new(),
             waiters: Vec::new(),
             retry_at: None,
             ping_inflight: false,
@@ -1117,6 +1131,10 @@ impl Actor {
         }
         if let Some(c) = self.conn.take() {
             close(c).await;
+        }
+        // Earlier closes (a container's removal) finish before we report out.
+        for t in self.closes.drain(..) {
+            let _ = t.await;
         }
         self.publish();
         if let Some(r) = self.exiting.take() {
@@ -1207,12 +1225,12 @@ impl Actor {
             }
             Action::Close => {
                 if let Some(c) = self.conn.take() {
-                    tokio::spawn(close(c));
+                    self.closing(close(c));
                 }
             }
             Action::Retry => {
                 if let Some(c) = self.conn.take() {
-                    tokio::spawn(close(c));
+                    self.closing(close(c));
                 }
                 let attempt = match self.state {
                     State::Backoff { attempt } => attempt,
@@ -1384,6 +1402,16 @@ impl Actor {
 
     fn on_internal(&mut self, ev: Internal) {
         match ev {
+            Internal::PostMortem { lost, cause } => {
+                tracing::warn!(server = %self.shared.name, %cause, "container died");
+                (self.sink)(&format!("mcpgw: {cause}"));
+                // unless something newer has been reported since
+                self.shared.update(|s| {
+                    if s.last_error.as_deref() == Some(lost.as_str()) {
+                        s.last_error = Some(format!("{lost}: {cause}"));
+                    }
+                });
+            }
             Internal::Started(Ok(started)) => {
                 let (conn, tools, redactor, container) = *started;
                 *self.shared.redactor.write().expect("redactor") = Arc::new(redactor);
@@ -1402,7 +1430,7 @@ impl Actor {
                 }
                 if !self.apply(Event::StartOk) {
                     if let Some(c) = self.conn.take() {
-                        tokio::spawn(close(c));
+                        self.closing(close(c));
                     }
                     return;
                 }
@@ -1505,7 +1533,18 @@ impl Actor {
             return;
         }
         tracing::warn!(server = %self.shared.name, error = %why, "backend lost");
-        self.shared.update(|s| s.last_error = Some(why));
+        self.shared.update(|s| s.last_error = Some(why.clone()));
+        // A dead container is inspected before it's removed, to say why it
+        // died (out of memory at its limit, an exit code).
+        if let (Some(info), Some(conn)) = (self.container.clone(), self.conn.take()) {
+            let itx = self.itx.clone();
+            self.closing(async move {
+                if let Some(cause) = crate::container::post_mortem(&info).await {
+                    let _ = itx.send(Internal::PostMortem { lost: why, cause });
+                }
+                close(conn).await;
+            });
+        }
         self.apply(Event::Lost);
     }
 
@@ -1527,6 +1566,13 @@ impl Actor {
             let r = conn.ping(timeout).await.map_err(|e| e.to_string());
             let _ = itx.send(Internal::Ping(r));
         });
+    }
+
+    /// Close a connection in the background, tracked so the actor waits for
+    /// it before exiting (the runtime may end right after).
+    fn closing(&mut self, f: impl std::future::Future<Output = ()> + Send + 'static) {
+        self.closes.retain(|t| !t.is_finished());
+        self.closes.push(tokio::spawn(f));
     }
 
     fn on_retry(&mut self) {
