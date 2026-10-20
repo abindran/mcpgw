@@ -16,6 +16,7 @@
 //! | `FAKE_HANG_PING` | `1`: never answer `ping` (health-check tests) |
 //! | `FAKE_STDERR` | line written to stderr at startup |
 //! | `FAKE_SPAWN_LOG` | file; the process appends its pid on start |
+//! | `FAKE_CALL_LOG` | file; each tool call appends the tool name |
 //! | `FAKE_REQUIRE_HEADER` | `--http` only: `Name=value` every request must carry, else 401 |
 //! | `FAKE_AUTH_SERVER` | `--http` only: OAuth-protected. Requests need `Authorization: Bearer at-…`, else 401 with `resource_metadata`; serves protected resource metadata naming this issuer |
 //!
@@ -235,6 +236,14 @@ impl ServerHandler for Fake {
         _context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let n = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+        if let Some(path) = env("FAKE_CALL_LOG")
+            && let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(path)
+        {
+            writeln!(f, "{}", request.name).ok();
+        }
         let out = self
             .run(&request.name, request.arguments.unwrap_or_default())
             .await;

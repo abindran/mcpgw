@@ -23,6 +23,27 @@ pub struct AdminState {
     pub manager: Arc<BackendManager>,
     /// Signalled by `POST /admin/shutdown`.
     pub shutdown: Arc<tokio::sync::Notify>,
+    /// Pending approvals (M2-09).
+    pub approvals: Arc<mcpgw_runtime::Approvals>,
+}
+
+async fn approvals(State(s): State<AdminState>) -> Json<Value> {
+    Json(json!({ "approvals": s.approvals.list() }))
+}
+
+async fn decide(s: AdminState, id: String, approve: bool) -> Response {
+    match s.approvals.decide(&id, approve) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => err(StatusCode::NOT_FOUND, e),
+    }
+}
+
+async fn approve(State(s): State<AdminState>, Path(id): Path<String>) -> Response {
+    decide(s, id, true).await
+}
+
+async fn deny(State(s): State<AdminState>, Path(id): Path<String>) -> Response {
+    decide(s, id, false).await
 }
 
 /// One server in `GET /admin/status`.
@@ -201,5 +222,8 @@ pub fn router(state: AdminState) -> Router {
         .route("/admin/servers/{name}/pin", post(pin))
         .route("/admin/servers/{name}/logs", get(logs))
         .route("/admin/shutdown", post(shutdown))
+        .route("/admin/approvals", get(approvals))
+        .route("/admin/approvals/{id}/approve", post(approve))
+        .route("/admin/approvals/{id}/deny", post(deny))
         .with_state(state)
 }

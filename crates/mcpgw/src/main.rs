@@ -113,6 +113,18 @@ enum Cmd {
         /// Server name.
         name: String,
     },
+    /// List tool calls waiting for approval.
+    Approvals,
+    /// Approve a waiting tool call (id from `mcpgw approvals`).
+    Approve {
+        /// Approval id.
+        id: String,
+    },
+    /// Refuse a waiting tool call.
+    Deny {
+        /// Approval id.
+        id: String,
+    },
     /// Manage secrets in the vault.
     #[command(subcommand)]
     Secret(SecretCmd),
@@ -316,6 +328,37 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Logs { name, lines } => servers::logs(&config, name.as_deref(), lines),
         Cmd::Pin { name } => servers::pin(&config, &name),
         Cmd::Restart { name } => servers::restart(&config, &name),
+        Cmd::Approvals => {
+            let c = control::Control::connect(&config)?.ok_or("the daemon is not running")?;
+            let list = c.approvals()?;
+            if list.is_empty() {
+                println!("no calls waiting for approval");
+            }
+            for a in list {
+                let s = |k: &str| a[k].as_str().unwrap_or_default().to_string();
+                println!(
+                    "{}\t{}\t{}\t{}\t{}",
+                    s("id"),
+                    s("status"),
+                    s("tool"),
+                    s("endpoint"),
+                    s("arguments")
+                );
+            }
+            Ok(())
+        }
+        Cmd::Approve { id } => {
+            let c = control::Control::connect(&config)?.ok_or("the daemon is not running")?;
+            c.decide(&id, true)?;
+            println!("approved {id}");
+            Ok(())
+        }
+        Cmd::Deny { id } => {
+            let c = control::Control::connect(&config)?.ok_or("the daemon is not running")?;
+            c.decide(&id, false)?;
+            println!("denied {id}");
+            Ok(())
+        }
         Cmd::Secret(SecretCmd::Set { name, description }) => {
             secrets::cmd::set(&config, &name, description)
         }

@@ -36,14 +36,44 @@ pub trait ToolProvider: Send + Sync + 'static {
 }
 
 /// What the gateway knows about the client making a call.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct CallContext {
     /// The client handles URL-mode elicitation (MCP 2025-11-25), so a
     /// `-32042` "URL elicitation required" error will show it a link.
     pub url_elicitation: bool,
+    /// The client speaks 2026-07-28 and handles form elicitation, so input
+    /// is requested with MRTR (`InputRequiredResult`) and comes back on the
+    /// retried call.
+    pub mrtr: bool,
+    /// A legacy client that handles form elicitation on its session.
+    pub form_elicitation: bool,
     /// The client's name, if it said.
     pub client_name: Option<String>,
+    /// The answer to an earlier [`ProtoError::Elicit`].
+    pub input: Option<Input>,
 }
+
+impl CallContext {
+    /// Whether the front end can ask this client a question.
+    pub fn can_ask(&self) -> bool {
+        self.mrtr || self.form_elicitation
+    }
+}
+
+/// A client's answer to [`ProtoError::Elicit`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Input {
+    /// The `state` of the question.
+    pub state: String,
+    /// The elicitation result: `{"action": "accept", "content": {…}}`.
+    pub response: Value,
+}
+
+/// Key of the approval question in MRTR input requests and responses.
+const INPUT_KEY: &str = "approval";
+
+/// How long a legacy client gets to answer an elicitation.
+const ELICIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// JSON-RPC error code: the request needs the user to visit a URL first.
 pub const URL_ELICITATION_REQUIRED: i32 = -32042;
@@ -123,18 +153,83 @@ impl<P: ToolProvider> ServerHandler for Front<P> {
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
         let caps = context.client_capabilities();
-        let ctx = CallContext {
-            url_elicitation: caps
-                .as_ref()
-                .and_then(|c| c.elicitation.as_ref())
-                .is_some_and(|e| e.url.is_some()),
-            client_name: context.client_info().map(|i| i.name),
+        let elicitation = caps.as_ref().and_then(|c| c.elicitation.as_ref());
+        let modern = context
+            .protocol_version()
+            .is_some_and(|v| v >= rmcp::model::ProtocolVersion::V_2026_07_28);
+        // an empty `elicitation: {}` means form (2025-06-18)
+        let form = elicitation.is_some_and(|e| e.form.is_some() || e.url.is_none());
+        // only ask what the client can answer: MRTR carries an elicitation too
+        let mrtr = modern && form;
+        // an MRTR retry carries the answer and our state
+        let input = match (&request.request_state, &request.input_responses) {
+            (Some(state), Some(r)) => r.get(INPUT_KEY).map(|response| Input {
+                state: state.clone(),
+                response: response.clone(),
+            }),
+            _ => None,
         };
-        let out = self
-            .provider
-            .call_tool(request.name.to_string(), request.arguments, ctx)
-            .await
-            .map_err(to_error_data)?;
+        let mut ctx = CallContext {
+            url_elicitation: elicitation.is_some_and(|e| e.url.is_some()),
+            mrtr,
+            form_elicitation: !modern && form,
+            client_name: context.client_info().map(|i| i.name),
+            input,
+        };
+        let out = loop {
+            let res = self
+                .provider
+                .call_tool(
+                    request.name.to_string(),
+                    request.arguments.clone(),
+                    ctx.clone(),
+                )
+                .await;
+            match res {
+                Err(ProtoError::Elicit {
+                    state,
+                    message,
+                    schema,
+                }) if ctx.mrtr => {
+                    let ask: rmcp::model::InputRequest = serde_json::from_value(serde_json::json!({
+                        "method": "elicitation/create",
+                        "params": {"mode": "form", "message": message, "requestedSchema": schema},
+                    }))
+                    .map_err(|e| ErrorData::new(ErrorCode(INTERNAL_ERROR), e.to_string(), None))?;
+                    let requests = [(INPUT_KEY.to_string(), ask)].into_iter().collect();
+                    return Ok(
+                        rmcp::model::InputRequiredResult::new(Some(requests), Some(state)).into(),
+                    );
+                }
+                Err(ProtoError::Elicit {
+                    state,
+                    message,
+                    schema,
+                }) if ctx.form_elicitation && ctx.input.is_none() => {
+                    let params: rmcp::model::ElicitRequestParams =
+                        serde_json::from_value(serde_json::json!({
+                            "mode": "form", "message": message, "requestedSchema": schema,
+                        }))
+                        .map_err(|e| {
+                            ErrorData::new(ErrorCode(INTERNAL_ERROR), e.to_string(), None)
+                        })?;
+                    let response = match context
+                        .peer
+                        .create_elicitation_with_timeout(params, Some(ELICIT_TIMEOUT))
+                        .await
+                    {
+                        Ok(r) => serde_json::to_value(r).unwrap_or_default(),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "elicitation failed");
+                            serde_json::json!({"action": "cancel"})
+                        }
+                    };
+                    ctx.input = Some(Input { state, response });
+                }
+                Err(e) => return Err(to_error_data(e)),
+                Ok(out) => break out,
+            }
+        };
         let result: CallToolResult = serde_json::from_value(Value::Object(out)).map_err(|e| {
             ErrorData::new(
                 ErrorCode(INTERNAL_ERROR),

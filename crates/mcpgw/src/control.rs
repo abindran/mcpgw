@@ -169,6 +169,25 @@ impl Control {
         Ok(())
     }
 
+    /// Pending approvals.
+    pub fn approvals(&self) -> AnyResult<Vec<Value>> {
+        let v = self
+            .call(reqwest::Method::GET, "/admin/approvals", None)?
+            .unwrap_or_default();
+        Ok(v["approvals"].as_array().cloned().unwrap_or_default())
+    }
+
+    /// Approve or deny one.
+    pub fn decide(&self, id: &str, approve: bool) -> AnyResult<()> {
+        let verb = if approve { "approve" } else { "deny" };
+        self.call(
+            reqwest::Method::POST,
+            &format!("/admin/approvals/{id}/{verb}"),
+            None,
+        )?;
+        Ok(())
+    }
+
     /// Ask the daemon to exit.
     pub fn shutdown(&self) -> AnyResult<()> {
         self.call(reqwest::Method::POST, "/admin/shutdown", None)?;

@@ -42,6 +42,18 @@ pub enum ProtoError {
     /// The backend is not currently connected (starting/restarting/disabled).
     #[error("backend unavailable: {0}")]
     Unavailable(String),
+    /// The call needs the user's answer first (approvals, M2-09). The front
+    /// end asks the client (MRTR or elicitation) and calls again with the
+    /// answer in [`crate::front::CallContext::input`].
+    #[error("input required: {message}")]
+    Elicit {
+        /// Handle echoed back with the answer.
+        state: String,
+        /// The question.
+        message: String,
+        /// JSON Schema of the expected answer (an elicitation form).
+        schema: Value,
+    },
     /// Anything else.
     #[error("{0}")]
     Other(String),

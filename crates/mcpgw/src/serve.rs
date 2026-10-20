@@ -42,7 +42,23 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         servers: None,
         policy: config.gateway.policy.clone(),
         label: "the default endpoint".into(),
+        approvals: Some(approvals()),
+        approval_timeout: approval_timeout(config),
     }
+}
+
+/// The daemon's pending approvals, shared by every endpoint (M2-09).
+pub fn approvals() -> Arc<mcpgw_runtime::Approvals> {
+    static A: std::sync::OnceLock<Arc<mcpgw_runtime::Approvals>> = std::sync::OnceLock::new();
+    A.get_or_init(Default::default).clone()
+}
+
+fn approval_timeout(config: &Config) -> Duration {
+    config
+        .gateway
+        .approval_timeout
+        .map(|d| d.get())
+        .unwrap_or(Duration::from_secs(120))
 }
 
 /// Profiles from the config file and the store (the file wins on a clash).
@@ -70,6 +86,8 @@ fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::Ga
         login: None,
         policy: p.policy.clone(),
         label: format!("profile {}", p.name),
+        approvals: Some(approvals()),
+        approval_timeout: approval_timeout(config),
     }
 }
 
@@ -348,6 +366,7 @@ async fn serve_http(
     let admin = mcpgw_api::admin::router(mcpgw_api::admin::AdminState {
         manager: mgr.clone(),
         shutdown: stop.clone(),
+        approvals: approvals(),
     });
     let m = mgr.clone();
     let oauth = mcpgw_api::oauth::OAuthState {

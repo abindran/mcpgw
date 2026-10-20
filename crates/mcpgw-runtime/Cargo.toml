@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+serde.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
 mcpgw-core.workspace = true
 mcpgw-proto.workspace = true
 mcpgw-vault.workspace = true

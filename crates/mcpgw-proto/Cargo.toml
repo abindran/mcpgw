@@ -13,7 +13,7 @@ repository.workspace = true
 # that no other workspace crate imports `rmcp`.
 [dependencies]
 # Pinned in the M0-04 spike (see wiki/M0-04-rmcp-Server-Spike.md).
-rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "macros", "transport-child-process", "transport-streamable-http-server", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "macros", "transport-child-process", "transport-streamable-http-server", "transport-streamable-http-client-reqwest", "elicitation"] }
 futures = "0.3"
 mcpgw-core.workspace = true
 reqwest.workspace = true

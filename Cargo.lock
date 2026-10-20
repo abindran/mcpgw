@@ -1635,12 +1635,15 @@ name = "mcpgw-runtime"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "getrandom 0.4.3",
  "mcpgw-core",
  "mcpgw-proto",
  "mcpgw-testkit",
  "mcpgw-vault",
  "secrecy",
+ "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
  "tracing",
 ]
@@ -2160,6 +2163,7 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "tracing",
+ "url",
  "uuid",
 ]
 

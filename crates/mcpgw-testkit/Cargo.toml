@@ -13,7 +13,7 @@ description = "Fake MCP servers and helpers for mcpgw integration tests (test-on
 # exception to the dependency rule (see scripts/check-deps.sh).
 [dependencies]
 mcpgw-core.workspace = true
-rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "transport-child-process", "transport-streamable-http-server", "transport-streamable-http-client-reqwest"] }
+rmcp = { version = "3.5.1", features = ["server", "client", "transport-io", "transport-child-process", "transport-streamable-http-server", "transport-streamable-http-client-reqwest", "elicitation"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "form", "query"] }
 sha2.workspace = true
 base64 = "0.22"

@@ -68,7 +68,7 @@ M1 exit check: [M1-Exit](M1-Exit.md).
 | [M2-06](M2-06-URL-Elicitation-for-Auth.md) | URL-mode elicitation for auth | ✅ |
 | [M2-07](M2-07-Profiles.md) | Profiles | ✅ |
 | [M2-08](M2-08-Tool-Policy.md) | Tool policy | ✅ |
-| M2-09 | Approvals | ⏳ |
+| [M2-09](M2-09-Approvals.md) | Approvals | ✅ |
 | M2-10 | Direct-mode change propagation | ⏳ |
 | M2-11 | Admin REST API v1 with OpenAPI | ⏳ |
 | M2-12 | Minimal web UI | ⏳ |

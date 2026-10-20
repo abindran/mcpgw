@@ -82,6 +82,10 @@ pub struct GatewayConfig {
     /// `policy = { deny = ["*__delete_*"], approve = ["gh__merge_*"] }`.
     #[serde(default, skip_serializing_if = "mcpgw_core::Policy::is_empty")]
     pub policy: mcpgw_core::Policy,
+    /// How long a call to an `approve`-listed tool waits for `mcpgw approve`
+    /// when the client can't be asked. Default: `"2m"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_timeout: Option<mcpgw_core::Duration>,
     /// Public tool names always listed in `hybrid` mode.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pinned_tools: Vec<String>,

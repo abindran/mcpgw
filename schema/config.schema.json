@@ -36,6 +36,17 @@
           },
           "type": "array"
         },
+        "approval_timeout": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How long a call to an `approve`-listed tool waits for `mcpgw approve`\nwhen the client can't be asked. Default: `\"2m\"`."
+        },
         "client_metadata_url": {
           "description": "HTTPS URL of a client ID metadata document describing mcpgw, used as\nthe OAuth client id for remote MCP servers that accept them\n(otherwise mcpgw registers itself dynamically).",
           "type": [

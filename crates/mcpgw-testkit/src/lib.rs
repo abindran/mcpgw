@@ -129,21 +129,76 @@ impl Drop for HttpFake {
 /// An MCP client for tests: rmcp with the same lifecycle real clients use
 /// (2026-07-28 preferred, 2025-11-25 accepted).
 pub struct McpClient {
-    svc: rmcp::service::RunningService<rmcp::RoleClient, rmcp::model::ClientConfig>,
+    svc: rmcp::service::RunningService<rmcp::RoleClient, TestHandler>,
+    asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 
-/// Client identity and capabilities; `url_elicitation` declares support for
-/// URL-mode elicitation.
-fn client_config(url_elicitation: bool) -> rmcp::model::ClientConfig {
-    use rmcp::model::{ClientCapabilities, ElicitationCapability, UrlElicitationCapability};
+/// The test client's handler: its declared capabilities, and how it answers
+/// form elicitations (as a user clicking "approve" or "deny").
+#[derive(Clone)]
+pub struct TestHandler {
+    cfg: rmcp::model::ClientConfig,
+    answer: Option<bool>,
+    asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl rmcp::ClientHandler for TestHandler {
+    fn get_info(&self) -> rmcp::model::ClientConfig {
+        self.cfg.clone()
+    }
+
+    async fn create_elicitation(
+        &self,
+        request: rmcp::model::ElicitRequestParams,
+        _context: rmcp::service::RequestContext<rmcp::RoleClient>,
+    ) -> Result<rmcp::model::ElicitResult, rmcp::ErrorData> {
+        use rmcp::model::{ElicitRequestParams, ElicitResult, ElicitationAction};
+        let message = match &request {
+            ElicitRequestParams::FormElicitationParams { message, .. }
+            | ElicitRequestParams::UrlElicitationParams { message, .. } => message.clone(),
+            _ => String::new(),
+        };
+        self.asked.lock().unwrap().push(message);
+        Ok(match self.answer {
+            Some(yes) => ElicitResult::new(ElicitationAction::Accept)
+                .with_content(serde_json::json!({"approve": yes})),
+            None => ElicitResult::new(ElicitationAction::Decline),
+        })
+    }
+}
+
+/// What a test client declares and does.
+#[derive(Clone, Copy, Default)]
+pub struct ClientKind {
+    /// Declare URL-mode elicitation.
+    pub url_elicitation: bool,
+    /// Declare form elicitation and answer every question with this.
+    pub approve: Option<bool>,
+}
+
+fn handler(kind: ClientKind, asked: std::sync::Arc<std::sync::Mutex<Vec<String>>>) -> TestHandler {
+    use rmcp::model::{
+        ClientCapabilities, ElicitationCapability, FormElicitationCapability,
+        UrlElicitationCapability,
+    };
     let mut caps = ClientCapabilities::default();
-    if url_elicitation {
-        caps.elicitation =
-            Some(ElicitationCapability::new().with_url(UrlElicitationCapability::new()));
+    let mut el = ElicitationCapability::new();
+    if kind.url_elicitation {
+        el = el.with_url(UrlElicitationCapability::new());
+    }
+    if kind.approve.is_some() {
+        el = el.with_form(FormElicitationCapability::new());
+    }
+    if kind.url_elicitation || kind.approve.is_some() {
+        caps.elicitation = Some(el);
     }
     let mut cfg = rmcp::model::ClientConfig::default();
     cfg.capabilities = caps;
-    cfg
+    TestHandler {
+        cfg,
+        answer: kind.approve,
+        asked,
+    }
 }
 
 fn lifecycle() -> rmcp::ClientLifecycleMode {
@@ -157,25 +212,56 @@ fn lifecycle() -> rmcp::ClientLifecycleMode {
 impl McpClient {
     /// Connect over Streamable HTTP, sending `Authorization: Bearer <token>`.
     pub async fn http(url: &str, token: Option<&str>) -> Result<Self, String> {
-        Self::http_with(url, token, lifecycle(), false).await
+        Self::http_with(url, token, lifecycle(), ClientKind::default()).await
     }
 
     /// Like [`McpClient::http`], as a client that supports URL elicitation.
     pub async fn http_url_elicitation(url: &str, token: Option<&str>) -> Result<Self, String> {
-        Self::http_with(url, token, lifecycle(), true).await
+        let kind = ClientKind {
+            url_elicitation: true,
+            ..Default::default()
+        };
+        Self::http_with(url, token, lifecycle(), kind).await
+    }
+
+    /// A Streamable HTTP client of the given kind; `legacy` speaks
+    /// 2025-11-25 (`initialize`, sessions), otherwise 2026-07-28.
+    pub async fn http_kind(
+        url: &str,
+        token: Option<&str>,
+        kind: ClientKind,
+        legacy: bool,
+    ) -> Result<Self, String> {
+        let lc = if legacy {
+            rmcp::ClientLifecycleMode::Initialize
+        } else {
+            lifecycle()
+        };
+        Self::http_with(url, token, lc, kind).await
+    }
+
+    /// Messages of the elicitations this client was shown.
+    pub fn asked(&self) -> Vec<String> {
+        self.asked.lock().unwrap().clone()
     }
 
     /// Like [`McpClient::http`] but as a 2025-11-25 client (`initialize`,
     /// HTTP sessions).
     pub async fn http_legacy(url: &str, token: Option<&str>) -> Result<Self, String> {
-        Self::http_with(url, token, rmcp::ClientLifecycleMode::Initialize, false).await
+        Self::http_with(
+            url,
+            token,
+            rmcp::ClientLifecycleMode::Initialize,
+            ClientKind::default(),
+        )
+        .await
     }
 
     async fn http_with(
         url: &str,
         token: Option<&str>,
         lifecycle: rmcp::ClientLifecycleMode,
-        url_elicitation: bool,
+        kind: ClientKind,
     ) -> Result<Self, String> {
         use rmcp::{
             ClientServiceExt,
@@ -190,11 +276,12 @@ impl McpClient {
             cfg = cfg.auth_header(t.to_string());
         }
         let t = StreamableHttpClientTransport::from_config(cfg);
-        let svc = client_config(url_elicitation)
+        let asked = std::sync::Arc::default();
+        let svc = handler(kind, std::sync::Arc::clone(&asked))
             .serve_with_lifecycle(t, lifecycle)
             .await
             .map_err(|e| e.to_string())?;
-        Ok(Self { svc })
+        Ok(Self { svc, asked })
     }
 
     /// Spawn `cmd` and speak MCP over its stdio (e.g. `mcpgw connect`).
@@ -213,11 +300,12 @@ impl McpClient {
     ) -> Result<Self, String> {
         use rmcp::{ClientServiceExt, transport::TokioChildProcess};
         let t = TokioChildProcess::new(cmd).map_err(|e| e.to_string())?;
-        let svc = client_config(false)
+        let asked = std::sync::Arc::default();
+        let svc = handler(ClientKind::default(), std::sync::Arc::clone(&asked))
             .serve_with_lifecycle(t, lifecycle)
             .await
             .map_err(|e| e.to_string())?;
-        Ok(Self { svc })
+        Ok(Self { svc, asked })
     }
 
     /// Negotiated protocol version.

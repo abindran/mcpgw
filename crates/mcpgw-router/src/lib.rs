@@ -42,6 +42,12 @@ pub struct GatewayOptions {
     pub policy: mcpgw_core::Policy,
     /// Name of this endpoint in messages (`profile frontend`).
     pub label: String,
+    /// Where approvals for `approve`-listed tools are kept (M2-09). Without
+    /// it such tools are refused.
+    pub approvals: Option<Arc<mcpgw_runtime::Approvals>>,
+    /// How long a call waits for `mcpgw approve` when the client can't be
+    /// asked. Zero means the default of two minutes.
+    pub approval_timeout: std::time::Duration,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -73,6 +79,76 @@ impl GatewayProvider {
             accounts: self.opts.accounts.clone(),
             policy: self.opts.policy.clone(),
             label: self.opts.label.clone(),
+        }
+    }
+
+    /// Get a human's approval for this exact call. `Ok(())` lets it run;
+    /// `Err` is the answer to give instead (a refusal, or the question).
+    async fn approve(
+        &self,
+        tool: &str,
+        args: &Option<JsonObject>,
+        ctx: &front::CallContext,
+    ) -> Result<(), Result<JsonObject, ProtoError>> {
+        let refuse = |text: String| Err(Ok(meta_error(text)));
+        let Some(ap) = &self.opts.approvals else {
+            return refuse(format!(
+                "Tool {tool} needs approval, but approvals are not available here."
+            ));
+        };
+        // the client answered an earlier question (MRTR retry or elicitation)
+        if let Some(input) = &ctx.input {
+            let yes = input.response["action"] == "accept"
+                && input.response["content"]["approve"] == true;
+            let _ = ap.decide(&input.state, yes); // `mcpgw approve` may have decided first
+            return match ap.redeem(&input.state, tool, args) {
+                Ok(()) => Ok(()),
+                Err(e) => refuse(format!("Tool {tool} was not run: {e}.")),
+            };
+        }
+        let id = ap.request(tool, args, &self.opts.label, ctx.client_name.clone());
+        let shown = args
+            .as_ref()
+            .map(|a| serde_json::Value::Object(a.clone()).to_string())
+            .unwrap_or_else(|| "{}".into());
+        let shown: String = shown.chars().take(500).collect();
+        if ctx.can_ask() {
+            return Err(Err(ProtoError::Elicit {
+                state: id.clone(),
+                message: format!(
+                    "Allow {tool} on {}?\nArguments: {shown}\n(or run `mcpgw approve {id}`)",
+                    self.opts.label
+                ),
+                schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {"approve": {"type": "boolean", "title": "Approve this call", "default": false}},
+                    "required": ["approve"]
+                }),
+            }));
+        }
+        // the client can't be asked: a person approves from the CLI
+        let wait = if self.opts.approval_timeout.is_zero() {
+            std::time::Duration::from_secs(120)
+        } else {
+            self.opts.approval_timeout
+        };
+        tracing::warn!(%id, tool, "approval needed: run `mcpgw approve {id}` or `mcpgw deny {id}`");
+        match ap.wait(&id, wait).await {
+            Some(true) => match ap.redeem(&id, tool, args) {
+                Ok(()) => Ok(()),
+                Err(e) => refuse(format!("Tool {tool} was not run: {e}.")),
+            },
+            Some(false) => {
+                ap.cancel(&id);
+                refuse(format!("Tool {tool} was not approved."))
+            }
+            None => {
+                ap.cancel(&id);
+                refuse(format!(
+                    "Tool {tool} needs approval and none came within {}s. Ask the user to watch `mcpgw approvals` and approve it, then call it again.",
+                    wait.as_secs()
+                ))
+            }
         }
     }
 
@@ -154,6 +230,21 @@ impl ToolProvider for GatewayProvider {
                 _ => name.clone(),
             };
             mcpgw_telemetry::instrument_request("tools/call", Some(&label), async {
+                // the tool actually being run: the name, or call_tool's target
+                let target = match (meta, name.as_str()) {
+                    (false, _) => Some((name.clone(), arguments.clone())),
+                    (true, meta::CALL) => arguments.as_ref().and_then(|a| {
+                        let t = a.get("name")?.as_str()?.to_string();
+                        Some((t, a.get("arguments").and_then(|v| v.as_object()).cloned()))
+                    }),
+                    _ => None,
+                };
+                if let Some((tool, targs)) = &target
+                    && let mcpgw_core::Decision::Approve { .. } = self.opts.policy.decide(tool)
+                    && let Err(answer) = self.approve(tool, targs, &ctx).await
+                {
+                    return answer;
+                }
                 let res = if meta {
                     meta::call(&self.manager, &name, arguments, &self.scope()).await
                 } else {
@@ -169,6 +260,13 @@ impl ToolProvider for GatewayProvider {
             .await
         })
     }
+}
+
+fn meta_error(text: String) -> JsonObject {
+    serde_json::json!({"content": [{"type": "text", "text": text}], "isError": true})
+        .as_object()
+        .cloned()
+        .expect("object")
 }
 
 /// Default identity advertised to clients.
