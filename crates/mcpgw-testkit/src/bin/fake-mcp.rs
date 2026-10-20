@@ -222,9 +222,6 @@ impl ServerHandler for Fake {
     }
 
     async fn ping(&self, _context: RequestContext<RoleServer>) -> Result<(), ErrorData> {
-        if self.s.hang_ping {
-            std::future::pending::<()>().await;
-        }
         Ok(())
     }
 
@@ -400,7 +397,27 @@ async fn main() {
         serve_http(fake, addr).await;
         return;
     }
-    let io = (tokio::io::stdin(), tokio::io::stdout());
+    // FAKE_HANG_PING: the server never sees a `ping` (rmcp answers it before
+    // any handler would run), so the gateway's health check times out
+    let stdin: std::pin::Pin<Box<dyn tokio::io::AsyncRead + Send>> = if fake.s.hang_ping {
+        let (mut tx, rx) = tokio::io::duplex(1 << 16);
+        tokio::spawn(async move {
+            use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+            let mut lines = tokio::io::BufReader::new(tokio::io::stdin()).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line.contains("\"method\":\"ping\"") {
+                    continue;
+                }
+                if tx.write_all(format!("{line}\n").as_bytes()).await.is_err() {
+                    break;
+                }
+            }
+        });
+        Box::pin(rx)
+    } else {
+        Box::pin(tokio::io::stdin())
+    };
+    let io = (stdin, tokio::io::stdout());
     match fake.serve(io).await {
         Ok(svc) => {
             let _ = svc.waiting().await;

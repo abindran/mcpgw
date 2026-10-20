@@ -249,6 +249,21 @@ async fn failed_health_check_triggers_restart() {
     m.shutdown().await;
 }
 
+/// A server that answers `ping` with an error is alive: 2026-07-28 servers
+/// may not implement it (-32601), and health checks restarted them, even in
+/// the middle of a call.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_ping_answered_with_an_error_is_alive() {
+    let m = BackendManager::start(&[server("fx", &[("FAKE_PROTOCOL", "modern")])], fast());
+    assert!(m.wait_ready(Duration::from_secs(20)).await);
+    // about ten health checks
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let st = m.status_of("fx").unwrap();
+    assert_eq!(st.restarts, 0, "{:?}", st.last_error);
+    assert!(st.last_error.is_none(), "{:?}", st.last_error);
+    m.shutdown().await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn repeated_start_failures_end_in_failed_until_reset() {
     let bad = ServerSpec::new("bad", Transport::stdio("/nonexistent/mcp-server", vec![]));

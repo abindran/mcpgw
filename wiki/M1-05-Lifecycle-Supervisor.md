@@ -67,3 +67,17 @@ such as a call ending after its connection was already lost).
   - a lazy start failure is reported to the caller
   - crash restart, health-check restart, disabled and unsupported servers,
     the slow-legacy-start regression, process-tree cleanup, stderr capture
+
+## Fix (found in M4-09)
+
+A health-check `ping` answered with a JSON-RPC **error** counts as alive. 2026-07-28
+servers may not implement `ping` and reply -32601; before the fix that marked them
+lost, so every such server was restarted every 30 s, even in the middle of a call (it
+broke cancelling a 10-minute call). Only timeouts and transport errors fail a health
+check now. Test: `lifecycle.rs::a_ping_answered_with_an_error_is_alive`.
+
+The fix also showed that `failed_health_check_triggers_restart` had been passing
+for the wrong reason. rmcp answers `ping` before any handler runs, so
+`FAKE_HANG_PING` hung nothing; the restart came from the -32601 above. The fake now
+drops `ping` requests on its stdin, so the gateway's health check really times out.
+

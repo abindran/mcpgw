@@ -538,10 +538,15 @@ impl BackendConn {
             .service
             .send_request_with_option(req, PeerRequestOptions::with_timeout(timeout))
             .await?;
-        match handle.await_response().await? {
-            ServerResult::EmptyResult(_) => Ok(()),
+        match handle.await_response().await {
+            Ok(ServerResult::EmptyResult(_)) => Ok(()),
             // Some servers answer ping with a non-empty object; still alive.
-            _ => Ok(()),
+            Ok(_) => Ok(()),
+            // An error *reply* is an answer too: 2026-07-28 servers may not
+            // implement `ping` (-32601), and that must not get them restarted
+            // in the middle of a long call (found by M4-09's 10-minute test).
+            Err(ServiceError::McpError(_)) => Ok(()),
+            Err(e) => Err(e.into()),
         }
     }
 
