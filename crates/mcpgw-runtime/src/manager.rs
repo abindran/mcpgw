@@ -918,12 +918,26 @@ impl Launch {
     /// `npx`, `uvx`, `python3` …), the container runtime, or `http`.
     pub(crate) fn runtime_kind(&self) -> String {
         match &self.template {
-            Template::Stdio(s) => std::path::Path::new(&s.command)
-                .file_stem()
-                .and_then(|n| n.to_str())
-                .unwrap_or("stdio")
-                .to_string(),
-            Template::Container(c) => c.runtime.clone().unwrap_or_else(|| "container".into()),
+            Template::Stdio(s) => {
+                let p = std::path::Path::new(&s.command);
+                // a cached PyPI package runs a venv script: report python
+                let venv = p
+                    .parent()
+                    .and_then(|d| d.file_name())
+                    .is_some_and(|d| d == "bin" || d == "Scripts")
+                    && p.ancestors()
+                        .any(|a| a.file_name().is_some_and(|n| n == "venv"));
+                if venv {
+                    "python".into()
+                } else {
+                    p.file_stem()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("stdio")
+                        .to_string()
+                }
+            }
+            Template::Container(c) => crate::container::pick_runtime(c.runtime.as_deref())
+                .unwrap_or_else(|_| "container".into()),
             Template::Http(_) => "http".into(),
         }
     }
@@ -1820,6 +1834,26 @@ async fn close(conn: Arc<BackendConn>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_kinds_for_metrics() {
+        let kind = |command: &str| {
+            let spec = ServerSpec::new("s", Transport::stdio(command, vec![]));
+            Launch::new(&spec, None, "s", "default").runtime_kind()
+        };
+        assert_eq!(kind("npx"), "npx");
+        assert_eq!(kind("/usr/local/bin/node"), "node");
+        assert_eq!(
+            kind("/data/runtimes/pypi/mcp-server-git-1a2b/venv/bin/mcp-server-git"),
+            "python"
+        );
+        assert_eq!(kind("/usr/bin/python3"), "python3");
+        let http = ServerSpec::new("h", Transport::http("https://x/mcp"));
+        assert_eq!(
+            Launch::new(&http, None, "h", "default").runtime_kind(),
+            "http"
+        );
+    }
 
     #[test]
     fn backoff_doubles_and_caps() {
