@@ -44,6 +44,7 @@ fn container(t: &Transport) -> (&str, &[String], &BTreeMap<String, String>, &[St
             digest: None,
             runtime: None,
             sandbox: mcpgw_core::Sandbox::Standard,
+            egress: None,
         } => (image, args, env, run_args),
         other => panic!("not an unpinned container: {other:?}"),
     }

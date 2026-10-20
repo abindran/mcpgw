@@ -93,29 +93,37 @@ pub struct StdioSpec {
     pub env: BTreeMap<String, String>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Command run after the process is gone, e.g. `docker rm -f <name>`
-    /// for a container the runtime CLI was attached to. It runs once: on
-    /// shutdown (awaited), after a failed handshake (awaited, before any
-    /// retry), or in the background when the connection is dropped.
-    pub cleanup: Option<Vec<String>>,
+    /// Commands run in order after the process is gone, e.g. `docker rm -f
+    /// <name>` for a container the runtime CLI was attached to. They run
+    /// once: on shutdown (awaited), after a failed handshake (awaited,
+    /// before any retry), or in the background when the connection is
+    /// dropped.
+    pub cleanup: Vec<Vec<String>>,
+    /// Commands run after `cleanup` once the connection is over for good:
+    /// at its end, or after the last failed attempt, but not between a
+    /// failed handshake and its retry (e.g. removing a container's network,
+    /// which the retry still needs).
+    pub teardown: Vec<Vec<String>>,
 }
 
-/// Run a cleanup command, quietly, within 30 s.
-async fn run_cleanup(argv: Vec<String>) {
-    let Some((cmd, args)) = argv.split_first() else {
-        return;
-    };
-    let mut c = tokio::process::Command::new(cmd);
-    c.args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(true);
-    match tokio::time::timeout(Duration::from_secs(30), c.status()).await {
-        Ok(Ok(s)) if s.success() => tracing::debug!(command = ?argv, "cleanup done"),
-        Ok(Ok(s)) => tracing::debug!(command = ?argv, status = %s, "cleanup exited non-zero"),
-        Ok(Err(e)) => tracing::warn!(command = ?argv, error = %e, "cleanup failed"),
-        Err(_) => tracing::warn!(command = ?argv, "cleanup timed out"),
+/// Run cleanup commands in order, quietly, each within 30 s.
+async fn run_cleanup(commands: Vec<Vec<String>>) {
+    for argv in commands {
+        let Some((cmd, args)) = argv.split_first() else {
+            continue;
+        };
+        let mut c = tokio::process::Command::new(cmd);
+        c.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true);
+        match tokio::time::timeout(Duration::from_secs(30), c.status()).await {
+            Ok(Ok(s)) if s.success() => tracing::debug!(command = ?argv, "cleanup done"),
+            Ok(Ok(s)) => tracing::debug!(command = ?argv, status = %s, "cleanup exited non-zero"),
+            Ok(Err(e)) => tracing::warn!(command = ?argv, error = %e, "cleanup failed"),
+            Err(_) => tracing::warn!(command = ?argv, "cleanup timed out"),
+        }
     }
 }
 
@@ -166,7 +174,8 @@ pub(crate) struct TreeGuard {
     /// Background tasks of the connection (the SSE bridge), aborted on drop.
     pub(crate) tasks: Vec<tokio::task::JoinHandle<()>>,
     child: Option<std::sync::Mutex<Box<dyn process_wrap::tokio::ChildWrapper>>>,
-    cleanup: Option<Vec<String>>,
+    cleanup: Vec<Vec<String>>,
+    teardown: Vec<Vec<String>>,
 }
 
 impl TreeGuard {
@@ -175,7 +184,8 @@ impl TreeGuard {
             pid: None,
             child: None,
             tasks: Vec::new(),
-            cleanup: None,
+            cleanup: Vec::new(),
+            teardown: Vec::new(),
         }
     }
 
@@ -185,9 +195,9 @@ impl TreeGuard {
             let _ = c.start_kill();
             let _ = tokio::time::timeout(Duration::from_secs(5), c.wait()).await;
         }
-        if let Some(argv) = self.cleanup.take() {
-            run_cleanup(argv).await;
-        }
+        let mut all = std::mem::take(&mut self.cleanup);
+        all.append(&mut self.teardown);
+        run_cleanup(all).await;
     }
 
     /// Whether the server process has exited (crashed or quit).
@@ -212,28 +222,33 @@ impl Drop for TreeGuard {
         for t in self.tasks.drain(..) {
             t.abort();
         }
-        let cleanup = self.cleanup.take();
+        let mut cleanup = std::mem::take(&mut self.cleanup);
+        cleanup.append(&mut self.teardown);
         if let Some(mut c) = self.child.take().and_then(|c| c.into_inner().ok()) {
             let _ = c.start_kill();
             // Reap, so no zombie is left behind on Unix.
             if let Ok(rt) = tokio::runtime::Handle::try_current() {
                 rt.spawn(async move {
                     let _ = c.wait().await;
-                    if let Some(argv) = cleanup {
-                        run_cleanup(argv).await;
-                    }
+                    run_cleanup(cleanup).await;
                 });
                 return;
             }
         }
-        if let Some((cmd, args)) = cleanup.as_ref().and_then(|a| a.split_first()) {
-            // no async runtime left: fire and forget
-            let _ = std::process::Command::new(cmd)
-                .args(args)
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .spawn();
+        if !cleanup.is_empty() {
+            // no async runtime left: run them in order on a thread
+            std::thread::spawn(move || {
+                for argv in cleanup {
+                    if let Some((cmd, args)) = argv.split_first() {
+                        let _ = std::process::Command::new(cmd)
+                            .args(args)
+                            .stdin(Stdio::null())
+                            .stdout(Stdio::null())
+                            .stderr(Stdio::null())
+                            .status();
+                    }
+                }
+            });
         }
     }
 }
@@ -264,6 +279,18 @@ impl BackendConn {
     /// process behind `npx`. stderr is piped line by line to `stderr`, or to
     /// the debug log when no sink is given.
     pub async fn connect_stdio(
+        spec: &StdioSpec,
+        timeout: Duration,
+        stderr: Option<StderrSink>,
+    ) -> Result<Self, ProtoError> {
+        let r = Self::connect_stdio_attempts(spec, timeout, stderr).await;
+        if r.is_err() {
+            run_cleanup(spec.teardown.clone()).await;
+        }
+        r
+    }
+
+    async fn connect_stdio_attempts(
         spec: &StdioSpec,
         timeout: Duration,
         stderr: Option<StderrSink>,
@@ -326,6 +353,7 @@ impl BackendConn {
             child: Some(std::sync::Mutex::new(child)),
             tasks: Vec::new(),
             cleanup: spec.cleanup.clone(),
+            teardown: spec.teardown.clone(),
         };
         match Self::connect_transport((stdout, stdin), timeout, lifecycle).await {
             Ok(mut conn) => {
@@ -333,7 +361,9 @@ impl BackendConn {
                 Ok(conn)
             }
             Err(e) => {
-                // clean up fully before a retry starts the server again
+                // clean up this attempt fully before a retry starts the
+                // server again; the teardown waits for the final outcome
+                tree.teardown.clear();
                 tree.finish().await;
                 Err(e)
             }

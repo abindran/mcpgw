@@ -184,6 +184,18 @@ struct AddArgs {
     /// Sandbox for --image: standard (default), strict or off.
     #[arg(long, requires = "image", value_parser = parse_sandbox)]
     sandbox: Option<mcpgw_core::Sandbox>,
+    /// Let the container reach only this host:port (repeatable), e.g.
+    /// `--egress api.github.com:443`.
+    #[arg(
+        long,
+        requires = "image",
+        value_name = "HOST:PORT",
+        conflicts_with = "no_network"
+    )]
+    egress: Vec<String>,
+    /// Give the container no network at all.
+    #[arg(long, requires = "image")]
+    no_network: bool,
     /// Memory limit, e.g. 256MiB (container servers).
     #[arg(long, requires = "image")]
     memory: Option<mcpgw_core::ByteSize>,
@@ -443,6 +455,13 @@ fn run(cli: Cli) -> AnyResult<()> {
                     env: a.env.into_iter().collect(),
                     run_args: a.run_args,
                     sandbox: a.sandbox.unwrap_or_default(),
+                    egress: if a.no_network {
+                        Some(Vec::new())
+                    } else if a.egress.is_empty() {
+                        None
+                    } else {
+                        Some(a.egress)
+                    },
                 },
                 (Some(command), None) => Transport::Stdio {
                     command,

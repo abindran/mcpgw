@@ -14,7 +14,9 @@ pub const IMAGE: &str = "node:22-alpine";
 
 /// An MCP server over stdio (line-delimited JSON-RPC) with tools `echo`,
 /// `env` (read a variable), `alloc` (hold `mib` more MiB of touched memory),
-/// `write` (create a file at `path`) and `uid`. It logs "node-fake ready" to
+/// `write` (create a file at `path`), `uid`, and `connect` (open a TCP, or
+/// with `tls` a verified TLS, connection to `host`:`port`, optionally with
+/// another `servername`; answers `ok …`, `error <code>` or `timeout`). It logs "node-fake ready" to
 /// stderr and exits when stdin closes.
 pub const SERVER_JS: &str = r#"
 const rl = require('readline').createInterface({ input: process.stdin });
@@ -25,6 +27,7 @@ const tools = [
   { name: 'alloc', description: 'Hold more memory', inputSchema: { type: 'object', properties: { mib: { type: 'number' } } } },
   { name: 'write', description: 'Create a file', inputSchema: { type: 'object', properties: { path: { type: 'string' } } } },
   { name: 'uid', description: 'The user id', inputSchema: { type: 'object' } },
+  { name: 'connect', description: 'Open a connection', inputSchema: { type: 'object', properties: { host: { type: 'string' }, port: { type: 'number' }, tls: { type: 'boolean' }, servername: { type: 'string' } } } },
 ];
 const held = [];
 console.error('node-fake ready');
@@ -51,6 +54,19 @@ rl.on('line', (l) => {
         catch (e) { return ok({ content: [{ type: 'text', text: e.code || String(e) }] }); }
       }
       if (m.params.name === 'uid') return ok({ content: [{ type: 'text', text: String(process.getuid()) }] });
+      if (m.params.name === 'connect') {
+        let done = false;
+        const reply = (text) => { if (!done) { done = true; ok({ content: [{ type: 'text', text }] }); } };
+        const opts = { host: a.host, port: a.port, servername: a.servername || a.host, timeout: 5000 };
+        const sock = a.tls
+          ? require('tls').connect(opts, () => { const c = sock.getPeerCertificate(); sock.destroy(); reply('ok ' + ((c.subject && c.subject.CN) || '')); })
+          : require('net').connect(opts, () => { sock.destroy(); reply('ok'); });
+        sock.setTimeout(5000);
+        sock.on('timeout', () => { sock.destroy(); reply('timeout'); });
+        sock.on('error', (e) => reply('error ' + (e.code || e.message)));
+        sock.on('close', () => reply('error closed'));
+        return;
+      }
       return err(-32602, 'unknown tool');
     case 'ping': return ok({});
     default: return err(-32601, 'method not found');
@@ -94,6 +110,7 @@ pub fn node_server(name: &str) -> ServerSpec {
             env: Default::default(),
             run_args: Vec::new(),
             sandbox: Default::default(),
+            egress: None,
         },
     )
 }

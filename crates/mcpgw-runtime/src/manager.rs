@@ -848,7 +848,8 @@ impl Launch {
                 args: args.clone(),
                 env: env.clone(),
                 cwd: cwd.clone(),
-                cleanup: None,
+                cleanup: Vec::new(),
+                teardown: Vec::new(),
             }),
             Transport::Container {
                 image,
@@ -858,6 +859,7 @@ impl Launch {
                 env,
                 run_args,
                 sandbox,
+                egress,
             } => Template::Container(ContainerTemplate {
                 server: server.to_string(),
                 runtime: runtime.clone(),
@@ -867,6 +869,7 @@ impl Launch {
                 run_args: run_args.clone(),
                 sandbox: *sandbox,
                 limits: cfg.limits.clone(),
+                egress: egress.clone(),
             }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),

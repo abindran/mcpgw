@@ -598,6 +598,16 @@
                   "null"
                 ]
               },
+              "egress": {
+                "description": "Network allowlist, `[\"api.github.com:443\"]`: the container can\nreach these host:port pairs and nothing else. `[]` means no\nnetwork at all. Unset: unrestricted.",
+                "items": {
+                  "type": "string"
+                },
+                "type": [
+                  "array",
+                  "null"
+                ]
+              },
               "env": {
                 "additionalProperties": {
                   "type": "string"

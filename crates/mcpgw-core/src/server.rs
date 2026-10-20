@@ -63,7 +63,44 @@ pub enum Transport {
         /// Confinement: `standard` (default), `strict` or `off`.
         #[serde(default, skip_serializing_if = "Sandbox::is_default")]
         sandbox: Sandbox,
+        /// Network allowlist, `["api.github.com:443"]`: the container can
+        /// reach these host:port pairs and nothing else. `[]` means no
+        /// network at all. Unset: unrestricted.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        egress: Option<Vec<String>>,
     },
+}
+
+/// Split an egress entry `host:port`, checking both parts.
+pub fn parse_egress(entry: &str) -> std::result::Result<(String, u16), String> {
+    let (host, port) = entry
+        .rsplit_once(':')
+        .ok_or_else(|| format!("egress {entry:?} must be host:port"))?;
+    let port: u16 = port
+        .parse()
+        .ok()
+        .filter(|p| *p > 0)
+        .ok_or_else(|| format!("egress {entry:?} has a bad port"))?;
+    let host = host.to_ascii_lowercase();
+    let label_ok = |l: &str| {
+        !l.is_empty()
+            && l.len() <= 63
+            && !l.starts_with('-')
+            && !l.ends_with('-')
+            && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    };
+    if host.len() > 253 || !host.split('.').all(label_ok) {
+        return Err(format!("egress {entry:?}: {host:?} is not a host name"));
+    }
+    if host
+        .split('.')
+        .all(|l| l.chars().all(|c| c.is_ascii_digit()))
+    {
+        return Err(format!(
+            "egress {entry:?}: give a host name, not an IP address (names are what the allowlist routes)"
+        ));
+    }
+    Ok((host, port))
 }
 
 /// Container runtimes mcpgw drives.
@@ -131,6 +168,7 @@ impl Transport {
             env: BTreeMap::new(),
             run_args: Vec::new(),
             sandbox: Sandbox::default(),
+            egress: None,
         }
     }
 
@@ -416,9 +454,23 @@ impl ServerSpec {
             runtime,
             run_args,
             env,
+            egress,
             ..
         } = &self.transport
         {
+            for e in egress.iter().flatten() {
+                parse_egress(e).map_err(|m| Error::Config(format!("server {}: {m}", self.name)))?;
+            }
+            let network_flag = |a: &String| {
+                let f = a.split('=').next().unwrap_or(a);
+                matches!(f, "--network" | "--net" | "--add-host" | "--dns")
+            };
+            if egress.is_some() && run_args.iter().any(network_flag) {
+                return Err(Error::Config(format!(
+                    "server {}: --network, --add-host and --dns can't be combined with egress",
+                    self.name
+                )));
+            }
             let bad = |m: String| Err(Error::Config(format!("server {}: {m}", self.name)));
             if let Some(d) = digest {
                 let hex = d.strip_prefix("sha256:").unwrap_or("");
@@ -545,6 +597,37 @@ mod tests {
             let e = s.validate().unwrap_err().to_string();
             assert!(e.contains(needle), "{field}: {e}");
         }
+        for (entry, ok) in [
+            ("api.github.com:443", true),
+            ("API.GitHub.com:443", true),
+            ("localhost:8080", true),
+            ("api.github.com", false),
+            ("api.github.com:0", false),
+            ("api.github.com:99999", false),
+            ("1.1.1.1:443", false),
+            ("*.github.com:443", false),
+            ("-bad.com:443", false),
+        ] {
+            assert_eq!(parse_egress(entry).is_ok(), ok, "{entry}");
+        }
+        assert_eq!(
+            parse_egress("API.GitHub.com:443").unwrap(),
+            ("api.github.com".into(), 443)
+        );
+        let mut s = ServerSpec::new("c", Transport::container("x"));
+        if let Transport::Container { egress, .. } = &mut s.transport {
+            *egress = Some(vec!["api.github.com:443".into()]);
+        }
+        s.validate().unwrap();
+        if let Transport::Container { run_args, .. } = &mut s.transport {
+            run_args.push("--network=host".into());
+        }
+        assert!(
+            s.validate()
+                .unwrap_err()
+                .to_string()
+                .contains("can't be combined with egress")
+        );
         let empty = ServerSpec::new("c", Transport::container(" "));
         assert!(empty.validate().is_err());
     }

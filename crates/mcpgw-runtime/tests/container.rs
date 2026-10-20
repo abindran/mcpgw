@@ -245,7 +245,27 @@ async fn pinned_digest_failed_start_and_sweep() {
         "sleep",
         "120",
     ]);
+    let orphan_net = tag("ctr-orphan-net");
+    docker(&[
+        "network",
+        "create",
+        "--internal",
+        "--label",
+        &format!("mcpgw.instance={instance}"),
+        "--label",
+        "mcpgw.pid=999999999",
+        &orphan_net,
+    ]);
     assert_eq!(mcpgw_runtime::container::sweep().await, 1);
+    let nets = docker(&[
+        "network",
+        "ls",
+        "--filter",
+        &format!("name={orphan_net}"),
+        "--format",
+        "{{.Name}}",
+    ]);
+    assert!(nets.is_empty(), "orphan network left: {nets}");
     assert!(until(|| containers_of(&orphan).is_empty(), 20).await);
     assert_eq!(containers_of(&other), std::slice::from_ref(&other));
     docker(&["rm", "-f", &other]);

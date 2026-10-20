@@ -116,6 +116,8 @@ pub struct ContainerTemplate {
     pub sandbox: Sandbox,
     /// The server's own limits (unset ones come from the profile).
     pub limits: Limits,
+    /// Network allowlist (`host:port`); `Some([])` is no network.
+    pub egress: Option<Vec<String>>,
 }
 
 fn container_name(server: &str) -> String {
@@ -138,17 +140,14 @@ fn container_name(server: &str) -> String {
 impl ContainerTemplate {
     /// The `run` invocation for one start, named `name`.
     pub fn stdio(&self, runtime: &str, name: &str) -> StdioSpec {
+        self.stdio_with(runtime, name, &[])
+    }
+
+    /// [`stdio`](Self::stdio) with extra network flags (from the egress
+    /// setup) before the user's run flags.
+    fn stdio_with(&self, runtime: &str, name: &str, network: &[String]) -> StdioSpec {
         let mut args: Vec<String> = ["run", "-i", "--name", name].map(String::from).into();
-        let mut label = |k: &str, v: &str| {
-            args.push("--label".into());
-            args.push(format!("{k}={v}"));
-        };
-        label(MANAGED_LABEL, "1");
-        label(SERVER_LABEL, &self.server);
-        label(PID_LABEL, &std::process::id().to_string());
-        if let Some(i) = INSTANCE.get() {
-            label(INSTANCE_LABEL, i);
-        }
+        args.extend(labels(&self.server));
         // values travel in the CLI's environment, not on its command line
         for k in self.env.keys() {
             args.push("-e".into());
@@ -156,6 +155,10 @@ impl ContainerTemplate {
         }
         let limits = self.limits.or(&self.sandbox.default_limits());
         args.extend(self.sandbox.run_flags(&limits));
+        if self.egress.as_ref().is_some_and(|e| e.is_empty()) {
+            args.push("--network=none".into());
+        }
+        args.extend(network.iter().cloned());
         args.extend(self.run_args.iter().cloned());
         args.push(self.image.clone());
         args.extend(self.args.iter().cloned());
@@ -164,7 +167,8 @@ impl ContainerTemplate {
             args,
             env: self.env.clone(),
             cwd: None,
-            cleanup: Some(vec![runtime.into(), "rm".into(), "-f".into(), name.into()]),
+            cleanup: vec![vec![runtime.into(), "rm".into(), "-f".into(), name.into()]],
+            teardown: Vec::new(),
         }
     }
 
@@ -179,7 +183,18 @@ impl ContainerTemplate {
             .await
             .map_err(ProtoError::Connect)?;
         let name = container_name(&self.server);
-        let conn = BackendConn::connect_stdio(&self.stdio(&runtime, &name), timeout, sink).await?;
+        let spec = match self.egress.as_deref() {
+            Some(list) if !list.is_empty() => {
+                let gw = Egress::start(&runtime, &self.server, &name, list, sink.as_ref())
+                    .await
+                    .map_err(ProtoError::Connect)?;
+                let mut spec = self.stdio_with(&runtime, &name, &gw.server_flags);
+                spec.teardown = gw.teardown;
+                spec
+            }
+            _ => self.stdio(&runtime, &name),
+        };
+        let conn = BackendConn::connect_stdio(&spec, timeout, sink).await?;
         let rootless = rootless(&runtime).await;
         Ok((
             conn,
@@ -190,6 +205,195 @@ impl ContainerTemplate {
                 rootless,
             },
         ))
+    }
+}
+
+/// The `--label` flags every mcpgw container and network gets.
+fn labels(server: &str) -> Vec<String> {
+    let mut v = vec![
+        format!("{MANAGED_LABEL}=1"),
+        format!("{SERVER_LABEL}={server}"),
+        format!("{PID_LABEL}={}", std::process::id()),
+    ];
+    if let Some(i) = INSTANCE.get() {
+        v.push(format!("{INSTANCE_LABEL}={i}"));
+    }
+    v.into_iter()
+        .flat_map(|l| ["--label".to_string(), l])
+        .collect()
+}
+
+/// Image of the egress proxy sidecar (official nginx, stream module).
+pub const EGRESS_IMAGE: &str = "docker.io/library/nginx:1.27-alpine";
+
+/// The nginx config for an allowlist: one listener per port. A port with a
+/// single host passes connections straight through; a port shared by
+/// several hosts routes TLS by SNI and refuses unknown names.
+pub fn egress_conf(allow: &[(String, u16)]) -> String {
+    let mut by_port: BTreeMap<u16, Vec<&str>> = BTreeMap::new();
+    for (h, p) in allow {
+        let hosts = by_port.entry(*p).or_default();
+        if !hosts.contains(&h.as_str()) {
+            hosts.push(h);
+        }
+    }
+    let mut c = String::from(
+        "worker_processes 1;\npid /tmp/nginx.pid;\nerror_log /dev/stderr notice;\n\
+         events { worker_connections 512; }\nstream {\n\
+         \x20 log_format egress '$remote_addr -> $ssl_preread_server_name:$server_port via $upstream_addr $status';\n\
+         \x20 access_log /dev/stdout egress;\n\
+         \x20 proxy_connect_timeout 10s;\n\
+         \x20 upstream mcpgw_deny { server 127.0.0.1:1; }\n",
+    );
+    for (port, hosts) in &by_port {
+        if let [host] = hosts[..] {
+            c += &format!("  server {{ listen {port}; proxy_pass {host}:{port}; }}\n");
+            continue;
+        }
+        let mut map = format!("  map $ssl_preread_server_name $p{port} {{\n");
+        for (i, h) in hosts.iter().enumerate() {
+            c += &format!("  upstream p{port}_{i} {{ server {h}:{port}; }}\n");
+            map += &format!("    {h} p{port}_{i};\n");
+        }
+        map += "    default mcpgw_deny;\n  }\n";
+        c += &map;
+        c += &format!("  server {{ listen {port}; ssl_preread on; proxy_pass $p{port}; }}\n");
+    }
+    c + "}\n"
+}
+
+/// A server's egress allowlist in place: an internal network and the
+/// proxy sidecar on it.
+struct Egress {
+    /// `--network` and `--add-host` flags for the server container.
+    server_flags: Vec<String>,
+    /// Removes the sidecar and the network.
+    teardown: Vec<Vec<String>>,
+}
+
+impl Egress {
+    async fn start(
+        runtime: &str,
+        server: &str,
+        name: &str,
+        list: &[String],
+        sink: Option<&StderrSink>,
+    ) -> Result<Egress, String> {
+        let allow: Vec<(String, u16)> = list
+            .iter()
+            .map(|e| mcpgw_core::parse_egress(e))
+            .collect::<Result<_, _>>()?;
+        let (net, side) = (format!("{name}-net"), format!("{name}-egress"));
+        let teardown = vec![
+            vec![runtime.into(), "rm".into(), "-f".into(), side.clone()],
+            vec![runtime.into(), "network".into(), "rm".into(), net.clone()],
+        ];
+        let r = Self::setup(runtime, server, &net, &side, &allow, sink).await;
+        match r {
+            Ok(ip) => {
+                let mut server_flags = vec![format!("--network={net}")];
+                let mut seen = std::collections::BTreeSet::new();
+                for (h, _) in &allow {
+                    if seen.insert(h) {
+                        server_flags.push(format!("--add-host={h}:{ip}"));
+                    }
+                }
+                Ok(Egress {
+                    server_flags,
+                    teardown,
+                })
+            }
+            Err(e) => {
+                for argv in &teardown {
+                    let a: Vec<&str> = argv[1..].iter().map(String::as_str).collect();
+                    let _ = output(runtime, &a).await;
+                }
+                Err(format!("egress proxy for {server}: {e}"))
+            }
+        }
+    }
+
+    /// Create the network and the sidecar; returns the sidecar's address on
+    /// the internal network once nginx is up.
+    async fn setup(
+        runtime: &str,
+        server: &str,
+        net: &str,
+        side: &str,
+        allow: &[(String, u16)],
+        sink: Option<&StderrSink>,
+    ) -> Result<String, String> {
+        let check = |what: &str, o: std::process::Output| {
+            if o.status.success() {
+                Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
+            } else {
+                Err(format!("{what}: {}", first_line(&o.stderr)))
+            }
+        };
+        ensure_image(runtime, EGRESS_IMAGE, sink).await?;
+        let l = labels(server);
+        let mut a: Vec<&str> = vec!["network", "create", "--internal"];
+        a.extend(l.iter().map(String::as_str));
+        a.push(net);
+        check("network create", output(runtime, &a).await?)?;
+        // the config travels in the environment and is written at start
+        let script = "printf '%s' \"$MCPGW_EGRESS_CONF\" > /tmp/nginx.conf && exec nginx -c /tmp/nginx.conf -g 'daemon off;'";
+        let mut a: Vec<&str> = vec!["run", "-d", "--name", side];
+        a.extend(l.iter().map(String::as_str));
+        a.extend([
+            "--memory=64m",
+            "--pids-limit=64",
+            "-e",
+            "MCPGW_EGRESS_CONF",
+            EGRESS_IMAGE,
+            "sh",
+            "-c",
+            script,
+        ]);
+        let conf = egress_conf(allow);
+        let o = tokio::process::Command::new(runtime)
+            .args(&a)
+            .env("MCPGW_EGRESS_CONF", &conf)
+            .stdin(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await
+            .map_err(|e| format!("{runtime}: {e}"))?;
+        check("starting the proxy", o)?;
+        check(
+            "network connect",
+            output(runtime, &["network", "connect", net, side]).await?,
+        )?;
+        let format = format!("{{{{(index .NetworkSettings.Networks \"{net}\").IPAddress}}}}");
+        let ip = check(
+            "inspect",
+            output(runtime, &["inspect", "--format", &format, side]).await?,
+        )?;
+        if ip.is_empty() {
+            return Err("the proxy has no address on its network".into());
+        }
+        // ready once nginx says so; a bad upstream name stops it instead
+        for _ in 0..100 {
+            let logs = output(runtime, &["logs", side]).await?;
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&logs.stdout),
+                String::from_utf8_lossy(&logs.stderr)
+            );
+            if text.contains("start worker process") {
+                return Ok(ip);
+            }
+            if text.contains("[emerg]") {
+                let why = text
+                    .lines()
+                    .find(|l| l.contains("[emerg]"))
+                    .unwrap_or("")
+                    .to_string();
+                return Err(why);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        Err("the proxy did not start within 10 s".into())
     }
 }
 
@@ -379,6 +583,29 @@ pub async fn sweep() -> usize {
                 removed += 1;
             }
         }
+        // then their egress networks
+        let net_format = format!("{{{{.Name}}}}\t{{{{.Label \"{PID_LABEL}\"}}}}");
+        let Ok(o) = output(
+            rt,
+            &[
+                "network",
+                "ls",
+                "--filter",
+                &filter,
+                "--format",
+                &net_format,
+            ],
+        )
+        .await
+        else {
+            continue;
+        };
+        for line in String::from_utf8_lossy(&o.stdout).lines() {
+            let (name, pid) = line.split_once('\t').unwrap_or((line, ""));
+            if !name.is_empty() && pid != me {
+                let _ = output(rt, &["network", "rm", name]).await;
+            }
+        }
     }
     removed
 }
@@ -401,6 +628,7 @@ mod tests {
                 memory: Some(mcpgw_core::ByteSize::mib(256)),
                 ..Default::default()
             },
+            egress: None,
         };
         let name = container_name(&t.server);
         assert!(
@@ -422,7 +650,14 @@ mod tests {
         );
         assert!(!args.contains("s3cret"));
         assert_eq!(s.env["TOKEN"], "s3cret");
-        assert_eq!(s.cleanup.unwrap(), ["docker", "rm", "-f", name.as_str()]);
+        assert_eq!(s.cleanup, [["docker", "rm", "-f", name.as_str()]]);
+        let mut none = t.clone();
+        none.egress = Some(vec![]);
+        assert!(
+            none.stdio("docker", &name)
+                .args
+                .contains(&"--network=none".to_string())
+        );
     }
 
     #[test]
@@ -437,5 +672,40 @@ mod tests {
             "localhost:5000/x"
         );
         assert_eq!(repository("node"), "node");
+    }
+}
+
+#[cfg(test)]
+mod egress_tests {
+    use super::*;
+
+    #[test]
+    fn nginx_config() {
+        let allow = |v: &[(&str, u16)]| {
+            v.iter()
+                .map(|(h, p)| (h.to_string(), *p))
+                .collect::<Vec<_>>()
+        };
+        let one = egress_conf(&allow(&[("api.github.com", 443), ("api.github.com", 443)]));
+        assert!(
+            one.contains("server { listen 443; proxy_pass api.github.com:443; }"),
+            "{one}"
+        );
+        assert!(!one.contains("ssl_preread on"), "{one}");
+        let two = egress_conf(&allow(&[
+            ("api.github.com", 443),
+            ("github.com", 443),
+            ("db.example.com", 5432),
+        ]));
+        for want in [
+            "upstream p443_0 { server api.github.com:443; }",
+            "upstream p443_1 { server github.com:443; }",
+            "    api.github.com p443_0;",
+            "    default mcpgw_deny;",
+            "server { listen 443; ssl_preread on; proxy_pass $p443; }",
+            "server { listen 5432; proxy_pass db.example.com:5432; }",
+        ] {
+            assert!(two.contains(want), "{want}\n{two}");
+        }
     }
 }
