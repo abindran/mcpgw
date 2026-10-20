@@ -11,7 +11,6 @@ use rmcp::{
         CallToolRequestParams, ClientRequest, PingRequest, ProtocolVersion, ServerResult, Tool,
     },
     service::{PeerRequestOptions, RunningService},
-    transport::TokioChildProcess,
 };
 use serde_json::{Map, Value};
 
@@ -118,38 +117,45 @@ fn legacy_lifecycle() -> ClientLifecycleMode {
     ClientLifecycleMode::Initialize
 }
 
-/// Kills a stdio server's whole process group when dropped (Unix).
+/// Owns a stdio server's process and kills its whole tree when dropped:
+/// `killpg` on the process group (Unix) or `TerminateJobObject` (Windows).
 ///
-/// rmcp's graceful shutdown closes stdin and waits for the server itself to
-/// exit; when it does, nothing signals the rest of the group, so children
-/// (`npx` → `node`) would outlive it. The group id is the server's pid
-/// (`ProcessGroup::leader`). The group can't be recycled while any member
-/// is alive, so a group that is already gone just gives `ESRCH`. On Windows
-/// the Job Object does the same when its handle closes.
+/// rmcp's own child transport only waits for the server to exit after
+/// closing stdin; a server that exits by itself, or crashes, would leave its
+/// children (`npx` → `node`) running. Killing the group or job covers both
+/// cases, even after the leader is gone: the group id can't be reused while
+/// any member is alive, and the job outlives its first process.
 struct TreeGuard {
     pid: Option<u32>,
-    #[cfg(unix)]
-    pgid: Option<i32>,
+    child: Option<Box<dyn process_wrap::tokio::ChildWrapper>>,
 }
 
 impl TreeGuard {
-    fn new(pid: Option<u32>) -> Self {
+    fn none() -> Self {
         Self {
-            pid,
-            #[cfg(unix)]
-            pgid: pid.and_then(|p| i32::try_from(p).ok()),
+            pid: None,
+            child: None,
+        }
+    }
+
+    /// Wait up to `grace` for the server to exit on its own.
+    async fn wait_exit(&mut self, grace: Duration) {
+        if let Some(c) = self.child.as_mut() {
+            let _ = tokio::time::timeout(grace, c.wait()).await;
         }
     }
 }
 
 impl Drop for TreeGuard {
     fn drop(&mut self) {
-        #[cfg(unix)]
-        if let Some(pgid) = self.pgid {
-            let _ = nix::sys::signal::killpg(
-                nix::unistd::Pid::from_raw(pgid),
-                nix::sys::signal::Signal::SIGKILL,
-            );
+        if let Some(mut c) = self.child.take() {
+            let _ = c.start_kill();
+            // Reap, so no zombie is left behind on Unix.
+            if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                rt.spawn(async move {
+                    let _ = c.wait().await;
+                });
+            }
         }
     }
 }
@@ -210,7 +216,11 @@ impl BackendConn {
     ) -> Result<Self, ProtoError> {
         use process_wrap::tokio::{CommandWrap, KillOnDrop};
         let mut cmd = CommandWrap::with_new(&spec.command, |c| {
-            c.args(&spec.args).envs(&spec.env);
+            c.args(&spec.args)
+                .envs(&spec.env)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
             if let Some(dir) = &spec.cwd {
                 c.current_dir(dir);
             }
@@ -220,15 +230,25 @@ impl BackendConn {
         #[cfg(windows)]
         cmd.wrap(process_wrap::tokio::JobObject);
         cmd.wrap(KillOnDrop);
-        let (child, err) = TokioChildProcess::builder(cmd)
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|e| ProtoError::Connect(format!("spawn {}: {e}", spec.command)))?;
-        if let Some(err) = err {
+        let spawn_err =
+            |e: std::io::Error| ProtoError::Connect(format!("spawn {}: {e}", spec.command));
+        let mut child = cmd.spawn().map_err(spawn_err)?;
+        let io = child.inner_mut();
+        let (Some(stdin), Some(stdout)) = (io.stdin().take(), io.stdout().take()) else {
+            return Err(ProtoError::Connect(format!(
+                "spawn {}: no stdio pipes",
+                spec.command
+            )));
+        };
+        if let Some(err) = io.stderr().take() {
             tokio::spawn(drain_stderr(err, spec.command.clone(), stderr));
         }
-        let tree = TreeGuard::new(child.id());
-        let mut conn = Self::connect_transport(child, timeout, lifecycle).await?;
+        let tree = TreeGuard {
+            pid: child.id(),
+            child: Some(child),
+        };
+        // If the handshake fails, dropping `tree` kills the process tree.
+        let mut conn = Self::connect_transport((stdout, stdin), timeout, lifecycle).await?;
         conn._tree = tree;
         Ok(conn)
     }
@@ -254,7 +274,7 @@ impl BackendConn {
         match tokio::time::timeout(timeout, fut).await {
             Ok(Ok(service)) => Ok(Self {
                 service,
-                _tree: TreeGuard::new(None),
+                _tree: TreeGuard::none(),
             }),
             Ok(Err(e)) => Err(ProtoError::Connect(e.to_string())),
             Err(_) => Err(ProtoError::Timeout(timeout)),
@@ -331,9 +351,12 @@ impl BackendConn {
         }
     }
 
-    /// Close the session; the child process is terminated.
+    /// Close the session: stdin closes, the server gets a moment to exit
+    /// on its own, then whatever is left of its process tree is killed.
     pub async fn shutdown(self) {
-        let _ = self.service.cancel().await;
+        let Self { service, mut _tree } = self;
+        let _ = service.cancel().await;
+        _tree.wait_exit(Duration::from_secs(2)).await;
     }
 }
 

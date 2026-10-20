@@ -11,19 +11,27 @@ through `process-wrap`:
 
 | Concern | Unix | Windows |
 |---------|------|---------|
-| Isolation | own process group (`ProcessGroup::leader`), pgid = server pid | Job Object |
-| Tree kill | `TreeGuard` sends `killpg(pgid, SIGKILL)` when the connection is dropped or shut down | `KILL_ON_JOB_CLOSE`: closing the job handle kills every process in it |
+| Isolation | own process group (`ProcessGroup::leader`), pgid = server pid | Job Object (`JobObject` + `KillOnDrop` → `KILL_ON_JOB_CLOSE`) |
+| Tree kill | `start_kill` on the group → `killpg(SIGKILL)` | `start_kill` on the job → `TerminateJobObject` |
 | Env | `env` from the spec, plus `cwd` | same |
 | stderr | piped, read line by line, sent to the sink (or the debug log) | same |
 
-### Why the extra guard
+`mcpgw-proto` spawns the wrapped child itself and builds the MCP transport
+from its stdin and stdout pipes, so `BackendConn` owns the process.
+`shutdown()` closes the session, gives the server 2 s to exit on its own,
+then kills what is left of the tree. Dropping a connection (a crash, or a
+failed handshake) kills the tree immediately; the child is then reaped in
+the background, so no zombies are left.
 
-rmcp's graceful shutdown closes the server's stdin and waits for it to exit.
-Well-behaved servers do exit, so rmcp never signals the rest of the group
-and children like the `node` process behind `npx` are left running. This was
-observed in a test before the guard was added. The guard runs after the
-service is torn down. The group id can't be recycled while any member is
-alive, so killing an already-empty group only returns `ESRCH`.
+### Why not rmcp's child transport
+
+rmcp's `TokioChildProcess` only waits for the server to exit after closing
+stdin. A server that exits by itself, or crashes, leaves its children (the
+`node` process behind `npx`) running. That was observed on macOS for both
+stop and crash, and on Windows for crash, before this design. Killing the
+group or job covers every case, even after the leader is gone: a process
+group id can't be reused while any member is alive, and a job outlives its
+first process.
 
 ### stderr capture
 
