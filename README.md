@@ -56,15 +56,26 @@ cargo test --workspace
 ## Quick start
 
 ```sh
-# Register backends (stored in ~/.local/share/mcpgw/mcpgw.db)
-mcpgw add-server fs --command npx -- -y @modelcontextprotocol/server-filesystem /tmp
-mcpgw add-server gh --command github-mcp --env GITHUB_TOKEN=...
+# Secrets live in an encrypted vault (OS keychain, or MCPGW_VAULT_PASSPHRASE)
+mcpgw secret set github_token            # prompts without echo; or pipe the value in
 
-mcpgw list-servers --check       # start each backend and report status and tool count
-mcpgw serve                      # run the daemon: http://127.0.0.1:7777/mcp
-mcpgw token [--rotate]           # the loopback bearer token clients must send
-mcpgw remove-server gh
+# Register servers; each is started once to read and pin its tools
+mcpgw add fs --command npx -- -y @modelcontextprotocol/server-filesystem /tmp
+mcpgw add gh --command github-mcp-server --secret GITHUB_TOKEN=github_token -- stdio
+
+mcpgw up                         # start the daemon (http://127.0.0.1:7777/mcp)
+mcpgw status                     # daemon and per-server state
+mcpgw logs gh                    # a server's recent stderr (`mcpgw logs` = daemon log)
+mcpgw disable gh / enable gh     # live, no client restart
+mcpgw pin gh                     # trust a quarantined server's changed tools
+mcpgw restart gh                 # clear a failed server
+mcpgw token [--rotate]           # the loopback bearer token for HTTP clients
+mcpgw down
 ```
+
+Servers start on their first call and stop after `idle_timeout`; a bound
+secret is injected only at spawn and redacted from everything the server
+sends back.
 
 Point an HTTP-capable MCP client at the daemon with the token, for example
 Claude Code:

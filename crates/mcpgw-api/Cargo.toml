@@ -10,8 +10,10 @@ repository.workspace = true
 [dependencies]
 mcpgw-core.workspace = true
 mcpgw-auth.workspace = true
-axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
-tokio = { workspace = true, features = ["net"] }
+mcpgw-runtime.workspace = true
+serde.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json", "query"] }
+tokio = { workspace = true, features = ["net", "sync"] }
 tracing.workspace = true
 serde_json.workspace = true
 

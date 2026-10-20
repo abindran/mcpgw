@@ -51,7 +51,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | [M1-10](M1-10-Meta-Tools.md) | Meta-tools mode | ✅ |
 | [M1-11](M1-11-Vault.md) | Vault v1 | ✅ |
 | [M1-12](M1-12-Secret-Injection-and-Redaction.md) | Secret binding, env injection, redaction | ✅ |
-| M1-13 | CLI: up, down, status, add, enable, disable, secret, logs | ⏳ |
+| [M1-13](M1-13-CLI.md) | CLI: up, down, status, add, enable, disable, secret, logs | ✅ |
 | M1-14 | `client install` and `import` | ⏳ |
 
 ### M2 — Auth and control

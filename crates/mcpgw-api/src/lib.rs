@@ -13,6 +13,8 @@
 //! otherwise `401` with `WWW-Authenticate: Bearer`. `/healthz` does not, so
 //! the stdio shim can find a running daemon.
 
+pub mod admin;
+
 use std::{future::Future, sync::Arc};
 
 use axum::{
@@ -129,9 +131,15 @@ async fn bearer(
 /// Compose the edge: `mcp` mounted at [`MCP_PATH`] behind the token check,
 /// `/healthz`, and the Host/Origin checks on everything.
 pub fn edge(mcp: Router, opts: EdgeOptions) -> Router {
+    edge_with(mcp, Router::new(), opts)
+}
+
+/// Like [`edge`], with extra token-protected routes (`/admin`).
+pub fn edge_with(mcp: Router, extra: Router, opts: EdgeOptions) -> Router {
     let state = Arc::new(opts);
     let protected = Router::new()
         .nest_service(MCP_PATH, mcp)
+        .merge(extra)
         .layer(middleware::from_fn_with_state(state.clone(), bearer));
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
