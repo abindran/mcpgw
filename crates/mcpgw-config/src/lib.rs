@@ -4,6 +4,7 @@
 //! ([`ConfigError`]), rejects unknown keys (including inside `[[server]]`),
 //! and applies `MCPGW_<SECTION>__<KEY>` environment overrides.
 
+pub mod clients;
 mod error;
 mod load;
 

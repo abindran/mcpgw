@@ -77,7 +77,15 @@ Servers start on their first call and stop after `idle_timeout`; a bound
 secret is injected only at spawn and redacted from everything the server
 sends back.
 
-Point an HTTP-capable MCP client at the daemon with the token, for example
+Move the servers your clients already use into mcpgw, leaving one entry
+behind (credentials go to the vault, and the original file is backed up):
+
+```sh
+mcpgw client import claude-code    # or claude-desktop, cursor, vscode
+mcpgw client install cursor        # just add the mcpgw entry
+```
+
+Or point an HTTP-capable MCP client at the daemon with the token, for example
 Claude Code:
 
 ```sh

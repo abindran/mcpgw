@@ -8,6 +8,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf, process::ExitCode};
 
+mod clients;
 mod control;
 mod daemon;
 mod secrets;
@@ -105,6 +106,9 @@ enum Cmd {
     /// Manage secrets in the vault.
     #[command(subcommand)]
     Secret(SecretCmd),
+    /// Connect MCP clients (Claude Code, Claude Desktop, Cursor, VS Code).
+    #[command(subcommand)]
+    Client(ClientCmd),
     /// Print the loopback token (creating it if needed).
     Token {
         /// Replace the token with a new one.
@@ -145,6 +149,38 @@ struct AddArgs {
     /// Arguments for the command (after `--`).
     #[arg(last = true)]
     args: Vec<String>,
+}
+
+#[derive(Subcommand)]
+enum ClientCmd {
+    /// Add the mcpgw entry to a client's config, keeping its other servers.
+    Install {
+        /// claude-code, claude-desktop, cursor or vscode.
+        client: mcpgw_config::clients::Client,
+        /// Config file to edit (default: the client's user config).
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Print the result instead of writing it.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Move a client's servers into mcpgw and replace them with one mcpgw
+    /// entry. Credentials in their env move to the vault. The original file
+    /// is backed up.
+    Import {
+        /// claude-code, claude-desktop, cursor or vscode.
+        client: mcpgw_config::clients::Client,
+        /// Config file to read and rewrite (default: the client's user config).
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Show what would be imported without changing anything.
+        #[arg(long)]
+        dry_run: bool,
+        /// Leave credential-looking env values in place instead of moving
+        /// them to the vault.
+        #[arg(long)]
+        keep_env: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -191,6 +227,7 @@ fn main() -> ExitCode {
 type AnyResult<T> = Result<T, Box<dyn std::error::Error>>;
 
 fn run(cli: Cli) -> AnyResult<()> {
+    let explicit_config = cli.config.clone();
     let path = cli.config.unwrap_or_else(Config::default_path);
     let config = Config::load_or_default(&path)?;
     match cli.cmd {
@@ -232,6 +269,24 @@ fn run(cli: Cli) -> AnyResult<()> {
             secrets::cmd::set(&config, &name, description)
         }
         Cmd::Secret(SecretCmd::Ls) => secrets::cmd::ls(&config),
+        Cmd::Client(ClientCmd::Install {
+            client,
+            path,
+            dry_run,
+        }) => clients::install(client, path, explicit_config.as_deref(), dry_run),
+        Cmd::Client(ClientCmd::Import {
+            client,
+            path,
+            dry_run,
+            keep_env,
+        }) => clients::import(
+            &config,
+            client,
+            path,
+            explicit_config.as_deref(),
+            dry_run,
+            keep_env,
+        ),
         Cmd::Secret(SecretCmd::Rm { name }) => secrets::cmd::rm(&config, &name),
         Cmd::Token { rotate } => {
             let p = config.gateway.token_path();

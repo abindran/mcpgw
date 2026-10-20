@@ -52,7 +52,7 @@ Legend: ✅ done · 🟡 in progress · ⏳ to do · ⛔ dropped
 | [M1-11](M1-11-Vault.md) | Vault v1 | ✅ |
 | [M1-12](M1-12-Secret-Injection-and-Redaction.md) | Secret binding, env injection, redaction | ✅ |
 | [M1-13](M1-13-CLI.md) | CLI: up, down, status, add, enable, disable, secret, logs | ✅ |
-| M1-14 | `client install` and `import` | ⏳ |
+| [M1-14](M1-14-Client-Install-and-Import.md) | `client install` and `import` | ✅ |
 
 ### M2 — Auth and control
 
