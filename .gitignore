@@ -1,2 +1,4 @@
 /target
+# build output of crates outside the workspace (wasm/ guests, sdk/ template)
+target/
 **/*.rs.bk

@@ -1,4 +1,0 @@
-cargo:rustc-link-lib=static=wit_bindgen_cabi_realloc_0_63_0
-cargo:rustc-link-search=native=/Users/abindran-21221/Abindran/mcpgw/wasm/echo-tool/target/wasm32-unknown-unknown/release/build/wit-bindgen-ea15febe25f125fa/out
-cargo:rustc-link-lib=static=wit_bindgen_cabi_wasip3_0_63_0
-cargo:rustc-link-search=native=/Users/abindran-21221/Abindran/mcpgw/wasm/echo-tool/target/wasm32-unknown-unknown/release/build/wit-bindgen-ea15febe25f125fa/out
