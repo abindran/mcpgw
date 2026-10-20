@@ -1,0 +1,21 @@
+[package]
+name = "mcpgw-openapi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Serve an OpenAPI 3.x API as MCP tools, no MCP server needed"
+
+[dependencies]
+mcpgw-core.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+serde_yaml_ng = "0.10"
+jsonschema = { version = "0.59", default-features = false }
+tracing.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+mcpgw-testkit.workspace = true

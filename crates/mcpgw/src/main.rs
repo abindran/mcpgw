@@ -195,6 +195,13 @@ struct AddArgs {
     /// with wasmtime.
     #[arg(long, value_name = "FILE", conflicts_with_all = ["command", "url", "image"])]
     wasm: Option<PathBuf>,
+    /// An OpenAPI 3.x spec (file or URL, JSON or YAML): its operations
+    /// become tools, served by mcpgw itself.
+    #[arg(long, value_name = "SPEC", conflicts_with_all = ["command", "url", "image", "wasm"])]
+    openapi: Option<String>,
+    /// For --openapi: where requests go (default: the spec's server URL).
+    #[arg(long, value_name = "URL", requires = "openapi")]
+    base_url: Option<String>,
     /// Let a Wasm server connect to HOST:PORT (repeatable; `*` for any).
     /// Default: no network.
     #[arg(long, value_name = "HOST:PORT", requires = "wasm")]
@@ -249,7 +256,7 @@ struct AddArgs {
     url: Option<String>,
     /// HTTP header for a remote server, NAME=VALUE (repeatable). Values may
     /// use `${secret:<name>}`, e.g. `Authorization=Bearer ${secret:api_key}`.
-    #[arg(long = "header", value_parser = parse_kv, requires = "url")]
+    #[arg(long = "header", value_parser = parse_kv)]
     headers: Vec<(String, String)>,
     /// Environment variable for the command, KEY=VALUE (repeatable).
     #[arg(long = "env", value_parser = parse_kv)]
@@ -498,7 +505,11 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Scan { server } => servers::scan(&config, server.as_deref()),
         Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
         Cmd::Add(a)
-            if a.command.is_none() && a.url.is_none() && a.image.is_none() && a.wasm.is_none() =>
+            if a.command.is_none()
+                && a.url.is_none()
+                && a.image.is_none()
+                && a.wasm.is_none()
+                && a.openapi.is_none() =>
         {
             if !a.name.contains('/') {
                 return Err(format!(
@@ -540,7 +551,27 @@ fn run(cli: Cli) -> AnyResult<()> {
         }
         Cmd::Runtimes(RuntimesCmd::Ls) => servers::runtimes_ls(&config),
         Cmd::Add(a) => {
+            if !a.headers.is_empty() && a.url.is_none() && a.openapi.is_none() {
+                return Err("--header goes with --url or --openapi".into());
+            }
             let transport = match (a.command, a.url) {
+                (None, None) if a.openapi.is_some() => {
+                    let spec = a.openapi.clone().unwrap_or_default();
+                    // a local spec is stored absolute: the daemon may run from elsewhere
+                    let spec = if spec.starts_with("http://") || spec.starts_with("https://") {
+                        spec
+                    } else {
+                        std::fs::canonicalize(&spec)
+                            .map_err(|e| format!("{spec}: {e}"))?
+                            .to_string_lossy()
+                            .into_owned()
+                    };
+                    Transport::OpenApi {
+                        spec,
+                        base_url: a.base_url.clone(),
+                        headers: a.headers.iter().cloned().collect(),
+                    }
+                }
                 (None, None) if a.wasm.is_some() => {
                     let p = a.wasm.clone().unwrap_or_default();
                     // stored absolute: the daemon may run from elsewhere

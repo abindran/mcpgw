@@ -9,6 +9,7 @@
 pub mod container;
 pub mod oauth;
 pub mod otlp;
+pub mod petstore;
 pub mod registry;
 pub mod sse;
 

@@ -759,6 +759,38 @@
               "path"
             ],
             "type": "object"
+          },
+          {
+            "description": "An HTTP API described by an OpenAPI 3.x spec, served as tools by\nmcpgw itself, no MCP server needed (M4-05).",
+            "properties": {
+              "base_url": {
+                "description": "Where requests go. Default: the spec's first server URL\n(relative ones resolve against the spec's URL).",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Headers on every request; values may use `${secret:<name>}`.",
+                "type": "object"
+              },
+              "spec": {
+                "description": "The spec: a file path or an http(s) URL (JSON or YAML).",
+                "type": "string"
+              },
+              "transport": {
+                "const": "openapi",
+                "type": "string"
+              }
+            },
+            "required": [
+              "transport",
+              "spec"
+            ],
+            "type": "object"
           }
         ],
         "properties": {

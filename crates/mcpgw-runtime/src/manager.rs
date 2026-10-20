@@ -894,6 +894,7 @@ pub(crate) enum Template {
     Http(HttpSpec),
     Container(ContainerTemplate),
     Wasm(crate::wasm::WasmTemplate),
+    OpenApi(crate::openapi::OpenApiTemplate),
 }
 
 impl Template {
@@ -911,6 +912,7 @@ impl Template {
                 Ok((conn, Some(info)))
             }
             Template::Wasm(w) => Ok((w.connect(timeout).await?, None)),
+            Template::OpenApi(o) => Ok((o.connect(timeout).await?, None)),
         }
     }
 }
@@ -942,6 +944,7 @@ impl Launch {
                 .unwrap_or_else(|_| "container".into()),
             Template::Http(_) => "http".into(),
             Template::Wasm(_) => "wasm".into(),
+            Template::OpenApi(_) => "openapi".into(),
         }
     }
 
@@ -1015,6 +1018,15 @@ impl Launch {
                             .unwrap_or(d.memory),
                     }
                 },
+            }),
+            Transport::OpenApi {
+                spec,
+                base_url,
+                headers,
+            } => Template::OpenApi(crate::openapi::OpenApiTemplate {
+                spec: spec.clone(),
+                base_url: base_url.clone(),
+                headers: headers.clone(),
             }),
             Transport::Http { url, headers } => Template::Http(HttpSpec {
                 url: url.clone(),
@@ -1103,6 +1115,15 @@ impl Launch {
                     w.env.insert(var.clone(), lookup(name).unwrap_or_default());
                 }
             }
+            Template::OpenApi(o) => {
+                for v in o.headers.values_mut() {
+                    *v = fill(v);
+                }
+                for (header, name) in &self.bindings {
+                    o.headers
+                        .insert(header.clone(), lookup(name).unwrap_or_default());
+                }
+            }
             Template::Http(_) => {}
         }
         if let Template::Container(c) = &mut spec {
@@ -1111,7 +1132,10 @@ impl Launch {
             }
         }
         match &mut spec {
-            Template::Stdio(_) | Template::Container(_) | Template::Wasm(_) => {}
+            Template::Stdio(_)
+            | Template::Container(_)
+            | Template::Wasm(_)
+            | Template::OpenApi(_) => {}
             Template::Http(h) => {
                 h.url = fill(&h.url);
                 for v in h.headers.values_mut() {

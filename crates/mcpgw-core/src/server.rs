@@ -91,6 +91,20 @@ pub enum Transport {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         time_budget: Option<Duration>,
     },
+    /// An HTTP API described by an OpenAPI 3.x spec, served as tools by
+    /// mcpgw itself, no MCP server needed (M4-05).
+    #[serde(rename = "openapi")]
+    OpenApi {
+        /// The spec: a file path or an http(s) URL (JSON or YAML).
+        spec: String,
+        /// Where requests go. Default: the spec's first server URL
+        /// (relative ones resolve against the spec's URL).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        base_url: Option<String>,
+        /// Headers on every request; values may use `${secret:<name>}`.
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        headers: BTreeMap<String, String>,
+    },
 }
 
 /// A host directory granted to a Wasm server.
@@ -238,6 +252,10 @@ impl Transport {
                 .collect::<Vec<_>>()
                 .join(" "),
             Self::Wasm { path, .. } => path.display().to_string(),
+            Self::OpenApi { spec, base_url, .. } => match base_url {
+                Some(b) => format!("{spec} → {b}"),
+                None => spec.clone(),
+            },
         }
     }
 
@@ -248,6 +266,7 @@ impl Transport {
             Self::Http { .. } => "http",
             Self::Container { .. } => "container",
             Self::Wasm { .. } => "wasm",
+            Self::OpenApi { .. } => "openapi",
         }
     }
 }
@@ -449,7 +468,7 @@ impl ServerSpec {
                     *v = fill(v);
                 }
             }
-            Transport::Http { headers, .. } => {
+            Transport::Http { headers, .. } | Transport::OpenApi { headers, .. } => {
                 for v in headers.values_mut() {
                     *v = fill(v);
                 }
@@ -483,7 +502,9 @@ impl ServerSpec {
                 refs.extend(secret_placeholders(s));
             }
         }
-        if let Transport::Http { headers, .. } = &self.transport {
+        if let Transport::Http { headers, .. } | Transport::OpenApi { headers, .. } =
+            &self.transport
+        {
             for s in headers.values() {
                 refs.extend(secret_placeholders(s));
             }
@@ -535,6 +556,7 @@ impl ServerSpec {
             Transport::Http { url, .. } => url.trim().is_empty(),
             Transport::Container { image, .. } => image.trim().is_empty(),
             Transport::Wasm { path, .. } => path.as_os_str().is_empty(),
+            Transport::OpenApi { spec, .. } => spec.trim().is_empty(),
         };
         if empty {
             return Err(Error::Config(format!(
@@ -546,7 +568,7 @@ impl ServerSpec {
             .validate()
             .map_err(|m| Error::Config(format!("server {}: {m}", self.name)))?;
         match &self.transport {
-            Transport::Http { .. } if !self.limits.is_empty() => {
+            Transport::Http { .. } | Transport::OpenApi { .. } if !self.limits.is_empty() => {
                 return Err(Error::Config(format!(
                     "server {}: limits apply to local servers (stdio or container), not remote ones",
                     self.name

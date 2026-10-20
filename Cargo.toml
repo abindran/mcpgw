@@ -15,6 +15,7 @@
 #   mcpgw-registry   -> official MCP Registry search and install plans
 #   mcpgw-wasm       -> Wasm tool servers (wasmtime, component model, WASI p2)
 #   mcpgw-tool       -> SDK for writing Wasm tool servers in Rust (guest side)
+#   mcpgw-openapi    -> OpenAPI 3.x APIs as MCP tools
 #   xtask            -> build, release, conformance and e2e helpers
 #
 # Dependency rule (enforced in CI): no crate other than `mcpgw-proto` may
@@ -38,6 +39,7 @@ members = [
     "crates/mcpgw-registry",
     "crates/mcpgw-wasm",
     "crates/mcpgw-tool",
+    "crates/mcpgw-openapi",
     "xtask",
 ]
 default-members = ["crates/*"]
@@ -67,6 +69,7 @@ mcpgw-telemetry = { path = "crates/mcpgw-telemetry", version = "0.1.0" }
 mcpgw-testkit = { path = "crates/mcpgw-testkit", version = "0.1.0" }
 mcpgw-registry = { path = "crates/mcpgw-registry", version = "0.1.0" }
 mcpgw-wasm = { path = "crates/mcpgw-wasm", version = "0.1.0" }
+mcpgw-openapi = { path = "crates/mcpgw-openapi", version = "0.1.0" }
 
 # Shared third-party crates
 thiserror = "2"

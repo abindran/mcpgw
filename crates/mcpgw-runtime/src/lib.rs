@@ -9,6 +9,7 @@ pub mod calls;
 pub mod catalog;
 pub mod container;
 pub mod manager;
+pub mod openapi;
 pub mod packages;
 pub mod state;
 pub mod wasm;

@@ -34,6 +34,8 @@ allow = [
     "Unicode-3.0",
     "CDLA-Permissive-2.0",
     "MPL-2.0",
+    # MIT without the attribution clause (borrow-or-share, via jsonschema)
+    "MIT-0",
 ]
 
 [licenses.private]
