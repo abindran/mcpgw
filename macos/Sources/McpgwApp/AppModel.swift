@@ -331,6 +331,38 @@ final class AppModel {
         NSWorkspace.shared.open(api.webUIURL)
     }
 
+    /// Where `~/.local/bin/mcpgw` stands.
+    enum CommandLineLink: Equatable {
+        /// A link to this app's mcpgw.
+        case installed
+        /// A link to another mcpgw.
+        case elsewhere(String)
+        /// A file that isn't a link, left alone.
+        case notALink
+        case missing
+    }
+
+    var commandLineLinkPath: String {
+        URL(fileURLWithPath: NSHomeDirectory()).appending(path: ".local/bin/mcpgw").path
+    }
+
+    func commandLineLink() -> CommandLineLink {
+        let fm = FileManager.default
+        let link = commandLineLinkPath
+        guard let dest = try? fm.destinationOfSymbolicLink(atPath: link) else {
+            return fm.fileExists(atPath: link) ? .notALink : .missing
+        }
+        let canon = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().standardizedFileURL.path }
+        if let bin = mcpgw?.binary, canon(dest) == canon(bin.path) { return .installed }
+        return .elsewhere(dest)
+    }
+
+    /// Whether `~/.local/bin` is on the login shell's PATH.
+    var commandLineDirOnPATH: Bool {
+        let dir = (commandLineLinkPath as NSString).deletingLastPathComponent
+        return (shellPATH ?? "").split(separator: ":").contains { $0 == dir }
+    }
+
     /// Link `~/.local/bin/mcpgw` to the bundled binary, so terminals use the
     /// same version as the app.
     func installCommandLineTool() -> String {

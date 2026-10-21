@@ -165,6 +165,7 @@ struct ClientsView: View {
     @State private var status: [String: ClientStatus] = [:]
     @State private var checking = false
     @State private var checkError: String?
+    @State private var cliLink: AppModel.CommandLineLink?
 
     private let clients = [
         ("claude-desktop", "Claude Desktop", "bubble.left.and.text.bubble.right"),
@@ -225,16 +226,43 @@ struct ClientsView: View {
             }
             SwiftUI.Section("Command line") {
                 HStack {
-                    Text("Link ~/.local/bin/mcpgw to the bundled binary, so terminals use the same version.")
-                    Spacer()
-                    Button("Install") { output["cli"] = (true, model.installCommandLineTool()) }
+                    switch cliLink {
+                    case .installed:
+                        Label("~/.local/bin/mcpgw points at this app's mcpgw, so terminals use the same version.",
+                              systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                        Spacer()
+                    case .elsewhere(let dest):
+                        Text("~/.local/bin/mcpgw points at another mcpgw: \(dest)").textSelection(.enabled)
+                        Spacer()
+                        Button("Link to This App") { install() }
+                    case .notALink:
+                        Text("~/.local/bin/mcpgw is a file, not a link; remove it to link this app's mcpgw there.")
+                        Spacer()
+                    case .missing, nil:
+                        Text("Link ~/.local/bin/mcpgw to the bundled binary, so terminals use the same version.")
+                        Spacer()
+                        Button("Install") { install() }
+                    }
+                }
+                if cliLink == .installed, !model.commandLineDirOnPATH {
+                    Text("~/.local/bin isn't on your shell's PATH yet; add it to use `mcpgw` in terminals.")
+                        .font(.caption).foregroundStyle(.orange)
                 }
                 if let o = output["cli"] { Text(o.text).font(.caption).foregroundStyle(.secondary).textSelection(.enabled) }
             }
         }
         .formStyle(.grouped)
         // the app finds its mcpgw a moment after launch; check once it has
-        .task(id: model.mcpgw != nil) { await check() }
+        .task(id: model.mcpgw != nil) {
+            cliLink = model.commandLineLink()
+            await check()
+        }
+    }
+
+    private func install() {
+        output["cli"] = (true, model.installCommandLineTool())
+        cliLink = model.commandLineLink()
     }
 
     private func detail(_ s: ClientStatus?) -> String? {
