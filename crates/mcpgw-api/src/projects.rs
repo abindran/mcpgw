@@ -34,6 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// What a project endpoint is built from.
+#[derive(Clone)]
 pub struct ProjectEndpoint {
     /// The project's id (its servers' owner in the manager).
     pub id: String,
@@ -556,21 +557,27 @@ impl Projects {
         }
     }
 
-    fn service(&self, id: &str) -> Option<Router> {
+    /// What project `id`'s endpoint is built from: its scope, label and
+    /// notice. The API's tool list and inspector use it to act as that
+    /// endpoint does.
+    pub fn endpoint(&self, id: &str) -> Option<ProjectEndpoint> {
         let name = self.list.read().expect("projects").get(id)?.name.clone();
+        let me = self.me.clone();
+        let pid = id.to_string();
+        Some(ProjectEndpoint {
+            id: id.to_string(),
+            label: format!("project {name}"),
+            notice: Arc::new(move || me.upgrade().and_then(|p| p.notice(&pid))),
+        })
+    }
+
+    fn service(&self, id: &str) -> Option<Router> {
+        let ep = self.endpoint(id)?;
         let mut cache = self.cache.lock().expect("project cache");
         Some(
             cache
                 .entry(id.to_string())
-                .or_insert_with(|| {
-                    let me = self.me.clone();
-                    let pid = id.to_string();
-                    (self.build)(ProjectEndpoint {
-                        id: id.to_string(),
-                        label: format!("project {name}"),
-                        notice: Arc::new(move || me.upgrade().and_then(|p| p.notice(&pid))),
-                    })
-                })
+                .or_insert_with(|| (self.build)(ep))
                 .clone(),
         )
     }

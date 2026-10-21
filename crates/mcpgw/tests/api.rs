@@ -650,6 +650,60 @@ async fn every_endpoint_works_and_is_documented() {
     let (_, g) = a.call("GET", "/api/v1/projects/{id}", &one, None).await;
     assert_eq!(g["servers"][0]["name"], "local");
     assert_eq!(g["url"], format!("{}/mcp/project/{id}", a.base));
+    // the tool list and the inspector as the project's endpoint: its
+    // servers with the global ones; the default scope never sees them
+    let tools_in = format!("/api/v1/tools?project={id}");
+    let (s, v) = a.call("GET", "/api/v1/tools", &tools_in, None).await;
+    assert_eq!(s, S::OK, "{v}");
+    let listed = names(&v, "tools");
+    assert!(
+        listed.iter().any(|n| n == "local__echo") && listed.iter().any(|n| n == "fx__add"),
+        "{listed:?}"
+    );
+    let echo = v["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "local__echo")
+        .unwrap();
+    assert_eq!(echo["server"], format!("local-p{id}"), "{echo}");
+    let (_, v) = a.call("GET", "/api/v1/tools", "/api/v1/tools", None).await;
+    assert!(!names(&v, "tools").iter().any(|n| n.starts_with("local__")));
+    let (s, r) = a
+        .call(
+            "POST",
+            "/api/v1/tools/{name}/call",
+            &format!("/api/v1/tools/local__echo/call?project={id}"),
+            Some(json!({"arguments": {"text": "from the project"}})),
+        )
+        .await;
+    assert_eq!(s, S::OK, "{r}");
+    assert_eq!(r["content"][0]["text"], "from the project", "{r}");
+    let (s, r) = a
+        .call(
+            "POST",
+            "/api/v1/tools/{name}/call",
+            "/api/v1/tools/local__echo/call",
+            Some(json!({"arguments": {"text": "x"}})),
+        )
+        .await;
+    assert!(
+        s != S::OK || r["isError"] == true,
+        "the default endpoint can't call a project's tool: {s} {r}"
+    );
+    let (s, _) = a
+        .call("GET", "/api/v1/tools", "/api/v1/tools?project=nope", None)
+        .await;
+    assert_eq!(s, S::NOT_FOUND);
+    let (s, _) = a
+        .call(
+            "GET",
+            "/api/v1/tools",
+            &format!("/api/v1/tools?project={id}&profile=web"),
+            None,
+        )
+        .await;
+    assert_eq!(s, S::BAD_REQUEST);
     let (s, u) = a
         .call(
             "POST",

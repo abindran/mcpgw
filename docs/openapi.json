@@ -733,7 +733,7 @@
         "tags": [
           "tools"
         ],
-        "summary": "Public tools, optionally as a profile sees them",
+        "summary": "Public tools, optionally as a profile or a project sees them",
         "responses": {
           "200": {
             "description": "Tools",
@@ -792,6 +792,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "A project's id: act as its endpoint (`/mcp/project/<id>`) does, with its servers as well as the global ones",
+            "schema": {
+              "type": "string"
+            }
           }
         ]
       }
@@ -801,7 +810,7 @@
         "tags": [
           "tools"
         ],
-        "summary": "Call a tool as the default endpoint does (policy, approvals and audit apply); the inspector uses it",
+        "summary": "Call a tool as the default endpoint does, or a project's endpoint with `project` (policy, approvals and audit apply); the inspector uses it",
         "responses": {
           "200": {
             "description": "The CallToolResult",
@@ -849,6 +858,15 @@
             "name": "name",
             "in": "path",
             "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project",
+            "in": "query",
+            "required": false,
+            "description": "A project's id: act as its endpoint (`/mcp/project/<id>`) does, with its servers as well as the global ones",
             "schema": {
               "type": "string"
             }

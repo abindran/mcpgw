@@ -43,7 +43,7 @@ two seconds.
 | Servers | global servers (badge **global**), and the servers projects declare in their `.mcpgw.toml` (badge **project**, one row per name with the number of projects); state, kind and tools of each; enable, disable, restart, accept new tools, remove; details, pinned tools and live stderr. A project server's details list its **associated projects**, each with its own state, and show the picked project's copy |
 | Projects | each project's `.mcpgw.toml`, what its servers run and which secrets they get; **Review and Trust…**, Untrust, Forget; Add Project creates a file from the template |
 | Add Server | a form for `mcpgw add`: command, URL, container image, Wasm component, OpenAPI spec or MCP Registry entry, with env, headers, secrets and flags |
-| Tools | every public tool, with an inspector that calls it (policy, approvals and audit apply) |
+| Tools | every public tool, with an inspector that calls it (policy, approvals and audit apply). The **scope** picker in the toolbar chooses whose: **Global** (the default endpoint, global servers only) or a trusted project, which lists its servers' tools with the global ones and calls them through its endpoint, as a client started there would |
 | Approvals | calls waiting for a human decision, with Approve and Deny |
 | Activity | recent calls and their outcomes |
 | Profiles | each profile's endpoint, servers, policy and the tools it sees |

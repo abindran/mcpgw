@@ -23,12 +23,14 @@ use serde_json::{Value, json};
 use crate::profiles::{Profiles, Source};
 
 /// Secret storage as the API sees it (the daemon backs it with the vault).
-/// Calls a tool as the default endpoint would, with its policy, approvals
-/// and audit (`POST /api/v1/tools/{name}/call`, the inspector, M4-10).
+/// Calls a tool as the default endpoint would, or as a project's endpoint
+/// would when one is given, with its policy, approvals and audit
+/// (`POST /api/v1/tools/{name}/call`, the inspector, M4-10).
 pub type Invoke = Arc<
     dyn Fn(
             String,
             Option<serde_json::Map<String, Value>>,
+            Option<crate::projects::ProjectEndpoint>,
         ) -> std::pin::Pin<
             Box<
                 dyn std::future::Future<Output = Result<serde_json::Map<String, Value>, String>>
@@ -323,12 +325,46 @@ async fn server_tools(State(s): State<ApiState>, Path(name): Path<String>) -> R 
 #[derive(Deserialize)]
 struct ToolsQuery {
     profile: Option<String>,
+    project: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ProjectQuery {
+    project: Option<String>,
+}
+
+impl ApiState {
+    /// Project `id`'s endpoint, its file checked first (as a request to
+    /// its MCP endpoint does), or 404.
+    async fn project_endpoint(
+        &self,
+        id: &str,
+    ) -> Result<crate::projects::ProjectEndpoint, ApiError> {
+        self.projects.refresh(id).await;
+        self.projects
+            .endpoint(id)
+            .ok_or_else(|| fail(StatusCode::NOT_FOUND, format!("no project with id {id:?}")))
+    }
 }
 
 async fn list_tools(State(s): State<ApiState>, Query(q): Query<ToolsQuery>) -> R {
-    let scope = match &q.profile {
-        None => mcpgw_router::Scope::default(),
-        Some(name) => {
+    let scope = match (&q.profile, &q.project) {
+        (Some(_), Some(_)) => {
+            return Err(fail(
+                StatusCode::BAD_REQUEST,
+                "give a profile or a project, not both",
+            ));
+        }
+        (None, Some(id)) => {
+            let ep = s.project_endpoint(id).await?;
+            mcpgw_router::Scope {
+                label: ep.label,
+                project: Some(ep.id),
+                ..Default::default()
+            }
+        }
+        (None, None) => mcpgw_router::Scope::default(),
+        (Some(name), None) => {
             let (p, _) = s
                 .profiles
                 .get(name)
@@ -348,7 +384,7 @@ async fn list_tools(State(s): State<ApiState>, Query(q): Query<ToolsQuery>) -> R
         .map(|t| {
             let name = t["name"].as_str().unwrap_or_default().to_string();
             let server = mcpgw_router::split_name(&name)
-                .and_then(|(p, _)| s.manager.server_for_prefix(p))
+                .and_then(|(p, _)| s.manager.server_for_prefix_in(p, scope.project.as_deref()))
                 .unwrap_or_default();
             let mut v = Value::Object(t);
             v["server"] = json!(server);
@@ -599,6 +635,7 @@ struct CallBody {
 async fn call_tool(
     State(s): State<ApiState>,
     Path(name): Path<String>,
+    Query(q): Query<ProjectQuery>,
     body: Option<Json<CallBody>>,
 ) -> R {
     let Some(invoke) = &s.invoke else {
@@ -608,7 +645,11 @@ async fn call_tool(
         ));
     };
     let arguments = body.and_then(|b| b.0.arguments);
-    let result = invoke(name, arguments)
+    let project = match &q.project {
+        Some(id) => Some(s.project_endpoint(id).await?),
+        None => None,
+    };
+    let result = invoke(name, arguments, project)
         .await
         .map_err(|e| fail(StatusCode::BAD_GATEWAY, e))?;
     ok(Value::Object(result))
@@ -754,7 +795,11 @@ pub fn openapi() -> Value {
         {"name": "name", "in": "path", "required": true, "schema": {"type": "string"}},
         {"name": "lines", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 0}}
     ]);
-    let profile_q = json!([{"name": "profile", "in": "query", "required": false, "schema": {"type": "string"}}]);
+    let project_p = json!({"name": "project", "in": "query", "required": false, "description": "A project's id: act as its endpoint (`/mcp/project/<id>`) does, with its servers as well as the global ones", "schema": {"type": "string"}});
+    let profile_q = json!([
+        {"name": "profile", "in": "query", "required": false, "schema": {"type": "string"}},
+        project_p.clone(),
+    ]);
     json!({
         "openapi": "3.1.0",
         "info": {
@@ -781,8 +826,8 @@ pub fn openapi() -> Value {
             "/api/v1/servers/{name}/pin": {"post": op("servers", "Accept a quarantined server's new tools", name.clone(), None, "200", resp("New pin", json!({"type": "object", "properties": {"sha256": {"type": "string"}, "tools": {"type": "integer"}}})))},
             "/api/v1/servers/{name}/logs": {"get": op("servers", "Recent stderr (redacted)", lines, None, "200", resp("Lines", list("lines", json!({"type": "string"}))))},
             "/api/v1/servers/{name}/tools": {"get": op("servers", "A server's pinned tools", name.clone(), None, "200", resp("Tools", json!({"type": "object", "properties": {"pin": {"type": ["string", "null"]}, "tools": {"type": "array", "items": {"type": "object"}}}})))},
-            "/api/v1/tools": {"get": op("tools", "Public tools, optionally as a profile sees them", profile_q, None, "200", resp("Tools", list("tools", json!({"type": "object"}))))},
-            "/api/v1/tools/{name}/call": {"post": op("tools", "Call a tool as the default endpoint does (policy, approvals and audit apply); the inspector uses it", name.clone(), Some(body(json!({"type": "object", "properties": {"arguments": {"type": "object"}}}))), "200", resp("The CallToolResult", json!({"type": "object"})))},
+            "/api/v1/tools": {"get": op("tools", "Public tools, optionally as a profile or a project sees them", profile_q, None, "200", resp("Tools", list("tools", json!({"type": "object"}))))},
+            "/api/v1/tools/{name}/call": {"post": op("tools", "Call a tool as the default endpoint does, or a project's endpoint with `project` (policy, approvals and audit apply); the inspector uses it", json!([name[0].clone(), project_p.clone()]), Some(body(json!({"type": "object", "properties": {"arguments": {"type": "object"}}}))), "200", resp("The CallToolResult", json!({"type": "object"})))},
             "/api/v1/profiles": {"get": op("profiles", "List profiles", none.clone(), None, "200", resp("Profiles", list("profiles", r("Profile"))))},
             "/api/v1/profiles/{name}": {
                 "get": op("profiles", "One profile", name.clone(), None, "200", resp("Profile", r("Profile"))),

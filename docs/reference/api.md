@@ -308,21 +308,23 @@ Responses: `200` Tools; `400` Error; `404` Error; `409` Error.
 
 ### `GET /api/v1/tools`
 
-Public tools, optionally as a profile sees them
+Public tools, optionally as a profile or a project sees them
 
 | Parameter | In | Description |
 |---|---|---|
 | `profile` | query |  |
+| `project` | query | A project's id: act as its endpoint (`/mcp/project/<id>`) does, with its servers as well as the global ones |
 
 Responses: `200` Tools; `400` Error; `404` Error; `409` Error.
 
 ### `POST /api/v1/tools/{name}/call`
 
-Call a tool as the default endpoint does (policy, approvals and audit apply); the inspector uses it
+Call a tool as the default endpoint does, or a project's endpoint with `project` (policy, approvals and audit apply); the inspector uses it
 
 | Parameter | In | Description |
 |---|---|---|
 | `name` | path |  |
+| `project` | query | A project's id: act as its endpoint (`/mcp/project/<id>`) does, with its servers as well as the global ones |
 
 Request body: JSON (see `docs/openapi.json`).
 

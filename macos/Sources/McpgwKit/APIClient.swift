@@ -154,14 +154,21 @@ public struct APIClient: Sendable {
         return try await get(R.self, "/servers/\(Self.seg(name))/tools").tools
     }
 
-    public func tools(profile: String? = nil) async throws -> [Tool] {
-        try await list(Tool.self, "/tools", query: profile.map { [.init(name: "profile", value: $0)] } ?? [])
+    /// Public tools as the default endpoint lists them, or as a profile or
+    /// a project's endpoint does.
+    public func tools(profile: String? = nil, project: String? = nil) async throws -> [Tool] {
+        var q: [URLQueryItem] = []
+        if let profile { q.append(.init(name: "profile", value: profile)) }
+        if let project { q.append(.init(name: "project", value: project)) }
+        return try await list(Tool.self, "/tools", query: q)
     }
 
     /// Call a tool as the default endpoint does: policy, approvals and audit apply.
-    public func callTool(_ name: String, arguments: JSONValue) async throws -> CallResult {
-        let data = try await request("POST", "/tools/\(Self.seg(name))/call", body: .object(["arguments": arguments]),
-                                     timeout: 3600)
+    /// With `project`, as that project's endpoint calls it.
+    public func callTool(_ name: String, arguments: JSONValue, project: String? = nil) async throws -> CallResult {
+        let data = try await request("POST", "/tools/\(Self.seg(name))/call",
+                                     query: project.map { [.init(name: "project", value: $0)] } ?? [],
+                                     body: .object(["arguments": arguments]), timeout: 3600)
         return CallResult(raw: try decode(JSONValue.self, data))
     }
 

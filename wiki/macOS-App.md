@@ -16,7 +16,7 @@ macOS UI with the mcpgw binary bundled in the app.
       splitting.
   - **`McpgwApp`** (SwiftUI): a main window with Overview, Servers (with
     Add Server; global servers, and project servers with their associated
-    projects), Tools with an inspector, Approvals, Activity, Profiles,
+    projects), Tools with an inspector and a scope picker (global or a project), Approvals, Activity, Profiles,
     Secrets, Audit Log, Clients and Doctor. Also a menu bar item with
     approvals, notifications, a Dock badge and Settings.
 - **`macos/build.sh`** builds `mcpgw.app`:

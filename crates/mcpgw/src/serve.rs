@@ -513,14 +513,27 @@ async fn serve_http(
         tap: dev.map(|_| crate::dev::tap()),
         ..gateway_options(config)
     };
-    // the inspector calls tools as the default endpoint (M4-10)
+    // the inspector calls tools as the default endpoint (M4-10), or as a
+    // project's endpoint when it names one
     let invoke: mcpgw_api::v1::Invoke = {
-        let p = Arc::new(mcpgw_router::GatewayProvider::with_options(
+        let default = Arc::new(mcpgw_router::GatewayProvider::with_options(
             mgr.clone(),
             opts.clone(),
         ));
-        Arc::new(move |name, args| {
-            let p = p.clone();
+        let (mgr, opts) = (mgr.clone(), opts.clone());
+        Arc::new(move |name, args, project| {
+            let p = match project {
+                None => default.clone(),
+                Some(ep) => Arc::new(mcpgw_router::GatewayProvider::with_options(
+                    mgr.clone(),
+                    mcpgw_router::GatewayOptions {
+                        label: ep.label,
+                        project: Some(ep.id),
+                        notice: Some(ep.notice),
+                        ..opts.clone()
+                    },
+                )),
+            };
             Box::pin(async move {
                 use mcpgw_proto::front::ToolProvider;
                 p.call_tool(name, args, mcpgw_proto::front::CallContext::default())

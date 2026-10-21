@@ -128,6 +128,16 @@ func drivesARealDaemon() async throws {
     p = try await api.trustProject(p.id, sha256: p.sha256)
     #expect(p.state == "trusted" && p.trustedSha256 == p.sha256 && !p.needsTrust)
     #expect(try await api.project(p.id).servers[0].tools > 0)
+    // the Tools screen's project scope: listed and called as its endpoint
+    let scoped = try await api.tools(project: p.id).map(\.name)
+    #expect(scoped.contains("local__echo"))
+    #expect(!(try await api.tools()).map(\.name).contains("local__echo"))
+    let echoed = try await api.callTool("local__echo", arguments: .object(["text": .string("in demo")]), project: p.id)
+    #expect(!echoed.isError && echoed.text.contains("in demo"))
+    // its servers' state, as the Servers screen groups them
+    let rows = ServerRow.rows(servers: try await api.servers(), projects: try await api.projects())
+    #expect(rows.contains { $0.id == "project:local" })
+    #expect(try await api.serverStatus(p.servers[0].server).tools > 0)
     #expect(try await api.untrustProject(p.id).state == "untrusted")
     try await api.forgetProject(p.id)
     #expect(try await api.projects().isEmpty)
