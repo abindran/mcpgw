@@ -2613,6 +2613,7 @@ version = "1.0.0"
 dependencies = [
  "axum",
  "mcpgw-auth",
+ "mcpgw-config",
  "mcpgw-core",
  "mcpgw-router",
  "mcpgw-runtime",
@@ -2659,6 +2660,7 @@ dependencies = [
  "schemars 1.2.3",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "toml",
  "tracing",
 ]

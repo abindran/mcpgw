@@ -300,3 +300,38 @@ public enum ClientStatus: Equatable, Sendable {
 
     public var connected: Bool { self == .connected }
 }
+
+/// One entry of `GET /projects`: a `.mcpgw.toml` and what it runs.
+public struct Project: Codable, Hashable, Sendable, Identifiable {
+    public struct ServerInfo: Codable, Hashable, Sendable, Identifiable {
+        /// The name in the file (its tools' prefix).
+        public var name: String
+        /// The internal server name, `<name>-p<id>`.
+        public var server: String
+        /// What it runs, and the secrets it gets.
+        public var runs: String
+        public var state: String?
+        public var tools: Int
+
+        public var id: String { server }
+    }
+
+    public var id: String
+    public var name: String
+    public var root: String
+    /// `trusted`, `untrusted`, `changed`, `invalid` or `missing`.
+    public var state: String
+    public var error: String?
+    public var sha256: String?
+    public var trustedSha256: String?
+    public var url: String
+    public var servers: [ServerInfo]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, root, state, error, sha256, url, servers
+        case trustedSha256 = "trusted_sha256"
+    }
+
+    /// Its servers are off until the user trusts the file.
+    public var needsTrust: Bool { (state == "untrusted" || state == "changed") && !servers.isEmpty }
+}

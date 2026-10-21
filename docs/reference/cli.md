@@ -97,6 +97,8 @@ mcpgw connect [OPTIONS]
 | Argument | Description |
 |---|---|
 | `--profile <PROFILE>` | Use this profile's endpoint (/mcp/p/<name>). |
+| `--project <PROJECT>` | Serve the project (`.mcpgw.toml`) at or above this directory. Default: the one the working directory is in, if any. |
+| `--no-project` | Ignore any project and serve the default endpoint. |
 
 ### `mcpgw profiles`
 
@@ -434,6 +436,61 @@ List cached packages
 
 ```
 mcpgw runtimes ls [OPTIONS]
+```
+
+### `mcpgw project`
+
+Project servers: a `.mcpgw.toml` in a repository lists servers for clients started there
+
+```
+mcpgw project [OPTIONS] <COMMAND>
+```
+
+#### `mcpgw project init`
+
+Write a `.mcpgw.toml` here, and with --client the client's project-level entry for mcpgw
+
+```
+mcpgw project init [OPTIONS] [DIR]
+```
+
+| Argument | Description |
+|---|---|
+| `<DIR>` | Directory (default: the working directory). |
+| `--name <NAME>` | Project name (default: the directory's). |
+| `--client <CLIENTS>` | Also add mcpgw to this client's project config: claude-code (.mcp.json), cursor (.cursor/mcp.json) or vscode (.vscode/mcp.json). Repeatable. Repeatable. |
+
+#### `mcpgw project trust`
+
+Show what the project's `.mcpgw.toml` runs and trust that content: its servers start. Any later change needs trusting again
+
+```
+mcpgw project trust [OPTIONS] [DIR]
+```
+
+| Argument | Description |
+|---|---|
+| `<DIR>` | A directory in the project (default: the working directory). |
+| `-y, --yes` | Don't ask. |
+
+#### `mcpgw project untrust`
+
+Stop trusting the project: its servers stop
+
+```
+mcpgw project untrust [OPTIONS] [DIR]
+```
+
+| Argument | Description |
+|---|---|
+| `<DIR>` | A directory in the project (default: the working directory). |
+
+#### `mcpgw project ls`
+
+Projects: trusted ones, and those the daemon has seen
+
+```
+mcpgw project ls [OPTIONS]
 ```
 
 ### `mcpgw secret`

@@ -8,6 +8,7 @@
 # Guides
 
 - [Servers](guides/servers.md)
+- [Project servers](guides/projects.md)
 - [Secrets and OAuth](guides/secrets.md)
 - [Profiles and policy](guides/policy.md)
 - [Wasm tools](guides/wasm.md)

@@ -1,0 +1,509 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ProjectFile",
+  "description": "A project's `.mcpgw.toml`.",
+  "type": "object",
+  "properties": {
+    "project": {
+      "description": "About the project.",
+      "$ref": "#/$defs/ProjectMeta"
+    },
+    "server": {
+      "description": "The project's servers, as in the config's `[[server]]`. Relative\npaths resolve against the project's root.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ServerSpec"
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "ProjectMeta": {
+      "description": "`[project]` in a project file.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Shown in listings and messages. Default: the directory's name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ServerSpec": {
+      "description": "One backend tool server (`[[server]]` in the config file).",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Unique server name.",
+          "type": "string"
+        },
+        "alias": {
+          "description": "Shorter prefix for its tools' public names (`<alias>__<tool>`).\nDefault: the name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "enabled": {
+          "description": "Whether the gateway may start this server. Default: `true`.",
+          "type": "boolean"
+        },
+        "idle_timeout": {
+          "description": "Stop the server after this long without calls. Default: gateway-wide.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stateful": {
+          "description": "The server keeps user state (browser, database session): it is never\nstopped for idleness or evicted.",
+          "type": "boolean"
+        },
+        "warm_pool": {
+          "description": "Keep this server started: `{ min = 1 }` starts it with the gateway,\nnever stops it for idleness or evicts it, and restarts it after a\ncrash, so calls never wait for a cold start.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WarmPool"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "startup_timeout": {
+          "description": "Deadline for start-up and the MCP handshake. Default: gateway-wide.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Duration"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "secrets": {
+          "description": "Secrets injected at spawn: environment variable → vault secret name,\ne.g. `{ GITHUB_TOKEN = \"github_token\" }`. Args and env values may\nalso contain `${secret:<name>}`. Injected values are redacted from\neverything the server sends back.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "files": {
+          "description": "Secrets written to files (container servers): container path →\nvault secret, e.g. `{ \"/run/secrets/sa.json\" = \"gcp_sa\" }`. Each is\na read-only file in tmpfs, gone when the server stops.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "limits": {
+          "description": "Resource limits: `{ memory = \"256MiB\", cpus = 0.5, pids = 64 }`.\nContainer servers take all three (unset ones come from the sandbox\nprofile); stdio servers take `memory`, a cap on the process tree.",
+          "$ref": "#/$defs/Limits"
+        },
+        "registry": {
+          "description": "Where it was installed from, when `mcpgw add` took it from the MCP\nRegistry.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RegistryRef"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "oneOf": [
+        {
+          "description": "Spawn a local child process speaking MCP over stdio.",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "stdio"
+            },
+            "command": {
+              "description": "Executable to run.",
+              "type": "string"
+            },
+            "args": {
+              "description": "Arguments.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "env": {
+              "description": "Extra environment variables for the child.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "cwd": {
+              "description": "Working directory. Default: the gateway's.",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "transport",
+            "command"
+          ]
+        },
+        {
+          "description": "Connect to a remote Streamable HTTP endpoint.",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "http"
+            },
+            "url": {
+              "description": "Endpoint URL.",
+              "type": "string"
+            },
+            "headers": {
+              "description": "Extra request headers.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "transport",
+            "url"
+          ]
+        },
+        {
+          "description": "Run an OCI image with Docker or Podman, speaking MCP over the\ncontainer's stdin/stdout (`run -i`, attached). The container is\nremoved when the server stops.",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "container"
+            },
+            "image": {
+              "description": "Image, e.g. `ghcr.io/github/github-mcp-server:2.0.2`.",
+              "type": "string"
+            },
+            "digest": {
+              "description": "Pinned content digest (`sha256:…`): the container always runs\nexactly this image, pulled by digest. `mcpgw add` fills it in.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "runtime": {
+              "description": "`docker` or `podman`. Default: whichever is installed, Docker first.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "args": {
+              "description": "Arguments for the image's entrypoint.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "env": {
+              "description": "Environment variables set inside the container (values are passed\nthrough the runtime's environment, never on its command line).",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "run_args": {
+              "description": "Extra `run` flags, e.g. `[\"-p\", \"127.0.0.1:8085:8085\"]`. They\ncome after the sandbox's flags, so they can add to them\n(`--cap-add=…`).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "sandbox": {
+              "description": "Confinement: `standard` (default), `strict` or `off`.",
+              "$ref": "#/$defs/Sandbox"
+            },
+            "egress": {
+              "description": "Network allowlist, `[\"api.github.com:443\"]`: the container can\nreach these host:port pairs and nothing else. `[]` means no\nnetwork at all. Unset: unrestricted.",
+              "type": [
+                "array",
+                "null"
+              ],
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "transport",
+            "image"
+          ]
+        },
+        {
+          "description": "A Wasm component exporting the `mcpgw:tool` world, run in-process\nwith wasmtime (M4-01).",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "wasm"
+            },
+            "path": {
+              "description": "The component file (`.wasm`).",
+              "type": "string"
+            },
+            "allow_network": {
+              "description": "TCP destinations it may connect to, `[\"api.github.com:443\"]`, or\n`[\"*\"]` for any. Default: no network at all (M4-02).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "allow_dirs": {
+              "description": "Host directories it may use. Default: none.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/DirAccess"
+              }
+            },
+            "env": {
+              "description": "Environment variables it sees (secrets bind through `secrets`).\nDefault: none; the host's environment never leaks in.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "time_budget": {
+              "description": "Longest one call may run before it's stopped (M4-03). Default:\n30s. The memory cap is `limits.memory` (default and maximum\n256MiB).",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Duration"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "transport",
+            "path"
+          ]
+        },
+        {
+          "description": "An HTTP API described by an OpenAPI 3.x spec, served as tools by\nmcpgw itself, no MCP server needed (M4-05).",
+          "type": "object",
+          "properties": {
+            "transport": {
+              "type": "string",
+              "const": "openapi"
+            },
+            "spec": {
+              "description": "The spec: a file path or an http(s) URL (JSON or YAML).",
+              "type": "string"
+            },
+            "base_url": {
+              "description": "Where requests go. Default: the spec's first server URL\n(relative ones resolve against the spec's URL).",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "headers": {
+              "description": "Headers on every request; values may use `${secret:<name>}`.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "auth": {
+              "description": "Credentials for the spec's security schemes, by scheme name\n(M4-06): `{ api_key = { secret = \"petstore_key\" } }`. OAuth logins\nuse their vault name, `oauth/<provider>@{account}`.",
+              "type": "object",
+              "additionalProperties": {
+                "$ref": "#/$defs/AuthBinding"
+              }
+            }
+          },
+          "required": [
+            "transport",
+            "spec"
+          ]
+        }
+      ]
+    },
+    "Sandbox": {
+      "description": "How tightly a container server is confined.",
+      "oneOf": [
+        {
+          "description": "No restrictions beyond the server's own [`Limits`].",
+          "type": "string",
+          "const": "off"
+        },
+        {
+          "description": "All capabilities dropped, no privilege escalation, 1 GiB memory and\n512 processes unless set.",
+          "type": "string",
+          "const": "standard"
+        },
+        {
+          "description": "`standard`, plus a read-only root filesystem with a 64 MiB tmpfs at\n`/tmp`, running as uid/gid 65534 (nobody), and defaults of 512 MiB,\n1 CPU and 128 processes.",
+          "type": "string",
+          "const": "strict"
+        }
+      ]
+    },
+    "DirAccess": {
+      "description": "A host directory granted to a Wasm server.",
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "The directory on the host.",
+          "type": "string"
+        },
+        "guest": {
+          "description": "Where the component sees it. Default: the same path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "write": {
+          "description": "May create and change files. Default: read-only.",
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "path"
+      ]
+    },
+    "Duration": {
+      "description": "A duration such as \"500ms\", \"30s\", \"10m\", \"2h\" or \"1d\", or whole seconds.",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9]+(ms|s|m|h|d)?$"
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ]
+    },
+    "AuthBinding": {
+      "description": "A vault secret bound to an OpenAPI security scheme.",
+      "type": "object",
+      "properties": {
+        "secret": {
+          "description": "The secret: API key, token, password, or `oauth/<provider>@<account>`.",
+          "type": "string"
+        },
+        "username": {
+          "description": "For HTTP basic: the user name (the secret is the password).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "secret"
+      ]
+    },
+    "WarmPool": {
+      "description": "How many instances of a server to keep started.",
+      "type": "object",
+      "properties": {
+        "min": {
+          "description": "Instances kept warm: 0 (start on demand) or 1. Calls share one\nconnection per server, so larger pools aren't supported.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "min"
+      ]
+    },
+    "Limits": {
+      "description": "Resource limits for a server.",
+      "type": "object",
+      "properties": {
+        "memory": {
+          "description": "Memory cap; exceeding it kills the server (no swap).",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ByteSize"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cpus": {
+          "description": "CPU cap in cores, e.g. `0.5`.",
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "pids": {
+          "description": "Most processes (and threads) at once.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ByteSize": {
+      "description": "A size such as \"256MiB\", \"512m\" or \"1GiB\", or bytes.",
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[0-9]+ ?([kKmMgG]i?[bB]?|[bB])?$"
+        },
+        {
+          "type": "integer",
+          "minimum": 0
+        }
+      ]
+    },
+    "RegistryRef": {
+      "description": "A pinned MCP Registry entry.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Registry name, e.g. `io.github.github/github-mcp-server`.",
+          "type": "string"
+        },
+        "version": {
+          "description": "Installed version.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ]
+    }
+  }
+}

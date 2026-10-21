@@ -7,6 +7,7 @@
 pub mod clients;
 mod error;
 mod load;
+pub mod project;
 
 pub use error::{ConfigError, Origin};
 pub use load::{ENV_PREFIX, env_overrides};

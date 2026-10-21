@@ -72,6 +72,8 @@ pub struct ApiState {
     pub mcp_url: String,
     /// Calls tools for the inspector; `None` answers 501.
     pub invoke: Option<Invoke>,
+    /// Projects (`.mcpgw.toml`) and their endpoints.
+    pub projects: Arc<crate::projects::Projects>,
 }
 
 type R = Result<Response, ApiError>;
@@ -439,6 +441,73 @@ async fn delete_profile(State(s): State<ApiState>, Path(name): Path<String>) -> 
     }
 }
 
+// ---- projects
+
+#[derive(Deserialize)]
+struct RegisterBody {
+    path: String,
+}
+
+#[derive(Deserialize, Default)]
+struct TrustBody {
+    #[serde(default)]
+    sha256: Option<String>,
+}
+
+fn project_err(m: String) -> ApiError {
+    if m.starts_with("no project") {
+        fail(StatusCode::NOT_FOUND, m)
+    } else if m.contains("changed since it was shown") || m.contains("has errors") {
+        fail(StatusCode::CONFLICT, m)
+    } else {
+        fail(StatusCode::BAD_REQUEST, m)
+    }
+}
+
+async fn list_projects(State(s): State<ApiState>) -> R {
+    ok(json!({ "projects": s.projects.all() }))
+}
+
+async fn register_project(State(s): State<ApiState>, Json(b): Json<RegisterBody>) -> R {
+    let p = std::path::Path::new(&b.path);
+    if !p.is_absolute() {
+        return Err(fail(StatusCode::BAD_REQUEST, "path must be absolute"));
+    }
+    ok(s.projects.register(p).await.map_err(project_err)?)
+}
+
+async fn get_project(State(s): State<ApiState>, Path(id): Path<String>) -> R {
+    s.projects.refresh(&id).await;
+    s.projects
+        .get(&id)
+        .map(|v| Json(v).into_response())
+        .ok_or_else(|| fail(StatusCode::NOT_FOUND, format!("no project {id:?}")))
+}
+
+async fn trust_project(
+    State(s): State<ApiState>,
+    Path(id): Path<String>,
+    body: Option<Json<TrustBody>>,
+) -> R {
+    let sha = body.and_then(|b| b.0.sha256);
+    ok(s.projects
+        .trust(&id, sha.as_deref())
+        .await
+        .map_err(project_err)?)
+}
+
+async fn untrust_project(State(s): State<ApiState>, Path(id): Path<String>) -> R {
+    ok(s.projects.untrust(&id).await.map_err(project_err)?)
+}
+
+async fn forget_project(State(s): State<ApiState>, Path(id): Path<String>) -> R {
+    match s.projects.forget(&id).await {
+        Ok(true) => no_content(),
+        Ok(false) => Err(fail(StatusCode::NOT_FOUND, format!("no project {id:?}"))),
+        Err(e) => Err(fail(StatusCode::INTERNAL_SERVER_ERROR, e)),
+    }
+}
+
 // ---- secrets
 
 async fn list_secrets(State(s): State<ApiState>) -> R {
@@ -497,6 +566,12 @@ async fn runtime(State(s): State<ApiState>) -> R {
                 .all()
                 .iter()
                 .map(|(p, _)| format!("{}/p/{}", s.mcp_url, p.name)),
+        )
+        .chain(
+            s.projects
+                .all()
+                .iter()
+                .filter_map(|p| p["url"].as_str().map(str::to_string)),
         )
         .collect();
     ok(json!({
@@ -611,6 +686,16 @@ pub fn router(state: ApiState) -> Router {
             "/api/v1/profiles/{name}",
             get(get_profile).put(put_profile).delete(delete_profile),
         )
+        .route(
+            "/api/v1/projects",
+            get(list_projects).post(register_project),
+        )
+        .route(
+            "/api/v1/projects/{id}",
+            get(get_project).delete(forget_project),
+        )
+        .route("/api/v1/projects/{id}/trust", post(trust_project))
+        .route("/api/v1/projects/{id}/untrust", post(untrust_project))
         .route("/api/v1/secrets", get(list_secrets))
         .route(
             "/api/v1/secrets/{name}",
@@ -704,6 +789,16 @@ pub fn openapi() -> Value {
                 "put": op("profiles", "Create or replace a profile; its endpoint works at once", name.clone(), Some(body(r("Profile"))), "200", resp("Profile", r("Profile"))),
                 "delete": op("profiles", "Remove a profile", name.clone(), None, "204", empty.clone())
             },
+            "/api/v1/projects": {
+                "get": op("projects", "Projects (.mcpgw.toml) the daemon knows, with their state", none.clone(), None, "200", resp("Projects", list("projects", r("Project")))),
+                "post": op("projects", "Register the project at an absolute path (or read it again); `mcpgw connect` does this", none.clone(), Some(body(json!({"type": "object", "required": ["path"], "properties": {"path": {"type": "string"}}}))), "200", resp("Project", r("Project")))
+            },
+            "/api/v1/projects/{id}": {
+                "get": op("projects", "One project", id.clone(), None, "200", resp("Project", r("Project"))),
+                "delete": op("projects", "Untrust and forget a project; its servers stop", id.clone(), None, "204", empty.clone())
+            },
+            "/api/v1/projects/{id}/trust": {"post": op("projects", "Trust the project file's current content; its servers run. With `sha256`, only if that's still its content", id.clone(), Some(json!({"required": false, "content": {"application/json": {"schema": {"type": "object", "properties": {"sha256": {"type": "string"}}}}}})), "200", resp("Project", r("Project")))},
+            "/api/v1/projects/{id}/untrust": {"post": op("projects", "Stop trusting a project; its servers stop", id.clone(), None, "200", resp("Project", r("Project")))},
             "/api/v1/secrets": {"get": op("secrets", "Secret metadata (never values)", none.clone(), None, "200", resp("Secrets", list("secrets", r("SecretMeta"))))},
             "/api/v1/secrets/{name}": {
                 "put": op("secrets", "Store a secret", name.clone(), Some(body(json!({"type": "object", "required": ["value"], "properties": {"value": {"type": "string", "writeOnly": true}, "description": {"type": "string"}}}))), "204", empty.clone()),
@@ -750,6 +845,16 @@ pub fn openapi() -> Value {
                     "at_ms": {"type": "integer"}, "endpoint": {"type": "string"}, "tool": {"type": "string"},
                     "outcome": {"enum": ["ok", "tool_error", "error"]}, "duration_ms": {"type": "integer"},
                     "client": {"type": ["string", "null"]}
+                }},
+                "Project": {"type": "object", "properties": {
+                    "id": {"type": "string"}, "name": {"type": "string"}, "root": {"type": "string"},
+                    "state": {"enum": ["trusted", "untrusted", "changed", "invalid", "missing"]},
+                    "error": {"type": ["string", "null"]}, "sha256": {"type": ["string", "null"]},
+                    "trusted_sha256": {"type": ["string", "null"]}, "url": {"type": "string"},
+                    "servers": {"type": "array", "items": {"type": "object", "properties": {
+                        "name": {"type": "string"}, "server": {"type": "string"}, "runs": {"type": "string"},
+                        "state": {"type": ["string", "null"]}, "tools": {"type": "integer"}
+                    }}}
                 }},
                 "Approval": {"type": "object", "properties": {
                     "id": {"type": "string"}, "tool": {"type": "string"}, "arguments": {"type": "string"},

@@ -104,6 +104,9 @@ pub struct Scope {
     pub label: String,
     /// Don't start servers whose tools `search_tools` returns (M3-07).
     pub no_prewarm: bool,
+    /// The project whose endpoint this is (a `.mcpgw.toml`): its servers
+    /// are seen as well as the global ones, and win a prefix clash.
+    pub project: Option<String>,
 }
 
 impl Scope {
@@ -146,7 +149,11 @@ pub async fn list_all_tools(manager: &BackendManager) -> Vec<JsonObject> {
 /// Aggregated tool list of the servers `scope` allows.
 pub async fn list_tools_in(manager: &BackendManager, scope: &Scope) -> Vec<JsonObject> {
     let mut per = Vec::new();
-    for name in manager.names().into_iter().filter(|n| scope.allows(n)) {
+    for name in manager
+        .names_in(scope.project.as_deref())
+        .into_iter()
+        .filter(|n| scope.allows(n))
+    {
         let prefix = manager.prefix(&name).unwrap_or_else(|| name.clone());
         let tools = manager.tools(&name).await;
         per.push((prefix, tools));
@@ -170,7 +177,7 @@ pub async fn resolve_in(
     scope: &Scope,
 ) -> Option<(String, String)> {
     let (prefix, part) = split_name(public)?;
-    let server = manager.server_for_prefix(prefix)?;
+    let server = manager.server_for_prefix_in(prefix, scope.project.as_deref())?;
     if !scope.allows(&server) {
         return None;
     }
@@ -187,8 +194,13 @@ pub async fn resolve_in(
 
 /// The server behind a public tool name, if it is one.
 pub fn server_of(manager: &BackendManager, public: &str) -> Option<String> {
+    server_of_in(manager, public, &Scope::default())
+}
+
+/// The server behind a public tool name as `scope` sees it.
+pub fn server_of_in(manager: &BackendManager, public: &str, scope: &Scope) -> Option<String> {
     let (prefix, _) = split_name(public)?;
-    manager.server_for_prefix(prefix)
+    manager.server_for_prefix_in(prefix, scope.project.as_deref())
 }
 
 /// Route a call by public name to the owning backend (default accounts).

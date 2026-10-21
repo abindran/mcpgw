@@ -30,6 +30,17 @@ struct MenuBarView: View {
                 }
                 .frame(maxHeight: 300)
             }
+            if !model.projectsNeedingTrust.isEmpty {
+                Divider()
+                ForEach(model.projectsNeedingTrust) { p in
+                    HStack {
+                        StateBadge(text: p.state)
+                        Text("\(p.name): \(p.servers.count) server(s) wait to be trusted")
+                        Spacer()
+                    }
+                }
+                Text("Review them in mcpgw → Projects.").font(.caption).foregroundStyle(.secondary)
+            }
             let troubled = model.servers.filter { ["failed", "quarantined"].contains($0.displayState) }
             if !troubled.isEmpty {
                 Divider()

@@ -187,7 +187,7 @@ fn prewarm(manager: &BackendManager, hits: &[JsonObject], scope: &Scope) {
     for t in hits.iter().take(PREWARM_TOP) {
         let Some(server) = t["name"]
             .as_str()
-            .and_then(|n| crate::aggregate::server_of(manager, n))
+            .and_then(|n| crate::aggregate::server_of_in(manager, n, scope))
         else {
             continue;
         };

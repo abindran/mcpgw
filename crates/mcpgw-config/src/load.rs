@@ -95,6 +95,51 @@ pub(crate) fn parse(
     Ok(cfg)
 }
 
+/// Parse a project's `.mcpgw.toml`: the same `[[server]]` checks as the
+/// config file, with positions.
+pub(crate) fn parse_project(
+    src: &str,
+    path: &Path,
+) -> Result<crate::project::ProjectFile, ConfigError> {
+    let origin = Origin::File(path.to_path_buf());
+    let err = |msg: String| ConfigError::new(origin.clone(), msg);
+    let located: Located = toml::from_str(src).unwrap_or_default();
+    check_server_keys(src, &located, &err)?;
+    let file: crate::project::ProjectFile = toml::from_str(src).map_err(|e| {
+        let (msg, hint) = explain(e.message());
+        let mut ce = err(msg).at(src, e.span().map(|r| r.start));
+        if let Some(h) = hint {
+            ce = ce.hint(h);
+        }
+        ce
+    })?;
+    let as_config = Config {
+        servers: file.servers.clone(),
+        ..Config::default()
+    };
+    validate(&as_config).map_err(|issue| {
+        let offset = issue
+            .server
+            .and_then(|i| located.server_key(i, issue.field));
+        let mut ce = err(issue.message).at(src, offset);
+        if let Some(h) = issue.hint {
+            ce = ce.hint(h);
+        }
+        ce
+    })?;
+    for (i, s) in file.servers.iter().enumerate() {
+        if s.name.len() > crate::project::MAX_NAME {
+            return Err(err(format!(
+                "project server names are at most {} characters: {:?}",
+                crate::project::MAX_NAME,
+                s.name
+            ))
+            .at(src, located.server_key(i, "name")));
+        }
+    }
+    Ok(file)
+}
+
 /// Turn serde/toml messages into a message plus a "did you mean" hint.
 fn explain(msg: &str) -> (String, Option<String>) {
     let msg = msg.trim().to_string();

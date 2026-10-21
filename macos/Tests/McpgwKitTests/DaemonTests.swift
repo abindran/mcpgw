@@ -107,6 +107,31 @@ func drivesARealDaemon() async throws {
     let audit = try await api.audit()
     #expect(audit.contains { $0.kind == "secret.set" })
 
+    // a project: registered untrusted, trusted only as shown, then forgotten
+    let proj = dir.appending(path: "proj")
+    try FileManager.default.createDirectory(at: proj, withIntermediateDirectories: true)
+    try """
+    [project]
+    name = "demo"
+
+    [[server]]
+    name = "local"
+    transport = "stdio"
+    command = "\(bins.fake.path)"
+    """.write(to: proj.appending(path: ".mcpgw.toml"), atomically: true, encoding: .utf8)
+    let root = proj.resolvingSymlinksInPath().path
+    var p = try await api.registerProject(path: root)
+    #expect(p.state == "untrusted" && p.needsTrust && p.servers.map(\.name) == ["local"])
+    #expect(p.servers[0].runs.contains("runs \(bins.fake.path)"))
+    #expect(try await api.projects().map(\.name) == ["demo"])
+    await #expect(throws: APIError.self) { try await api.trustProject(p.id, sha256: String(repeating: "0", count: 64)) }
+    p = try await api.trustProject(p.id, sha256: p.sha256)
+    #expect(p.state == "trusted" && p.trustedSha256 == p.sha256 && !p.needsTrust)
+    #expect(try await api.project(p.id).servers[0].tools > 0)
+    #expect(try await api.untrustProject(p.id).state == "untrusted")
+    try await api.forgetProject(p.id)
+    #expect(try await api.projects().isEmpty)
+
     await #expect(throws: APIError.self) { try await api.removeServer("nope") }
     let checks = try await cli.doctor()
     #expect(!checks.isEmpty)

@@ -81,7 +81,7 @@ fn first_line(s: &str, max: usize) -> String {
 }
 
 /// Ask on the terminal (or read a line from piped stdin).
-fn confirm(question: &str) -> AnyResult<bool> {
+pub(crate) fn confirm(question: &str) -> AnyResult<bool> {
     eprint!("{question} [y/N] ");
     std::io::stderr().flush()?;
     let mut line = String::new();

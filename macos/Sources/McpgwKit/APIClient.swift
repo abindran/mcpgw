@@ -176,6 +176,31 @@ public struct APIClient: Sendable {
         _ = try await request("DELETE", "/profiles/\(Self.seg(name))")
     }
 
+    public func projects() async throws -> [Project] { try await list(Project.self, "/projects") }
+
+    /// Register the project at `path` (absolute), or read it again.
+    public func registerProject(path: String) async throws -> Project {
+        try decode(Project.self, try await request("POST", "/projects", body: .object(["path": .string(path)])))
+    }
+
+    public func project(_ id: String) async throws -> Project {
+        try await get(Project.self, "/projects/\(Self.seg(id))")
+    }
+
+    /// Trust the file's content: only if it's still `sha256` (what was shown).
+    public func trustProject(_ id: String, sha256: String?) async throws -> Project {
+        let body: JSONValue = .object(sha256.map { ["sha256": .string($0)] } ?? [:])
+        return try decode(Project.self, try await request("POST", "/projects/\(Self.seg(id))/trust", body: body))
+    }
+
+    public func untrustProject(_ id: String) async throws -> Project {
+        try decode(Project.self, try await request("POST", "/projects/\(Self.seg(id))/untrust"))
+    }
+
+    public func forgetProject(_ id: String) async throws {
+        _ = try await request("DELETE", "/projects/\(Self.seg(id))")
+    }
+
     public func secrets() async throws -> [SecretMeta] { try await list(SecretMeta.self, "/secrets") }
 
     public func setSecret(_ name: String, value: String, description: String?) async throws {

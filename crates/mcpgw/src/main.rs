@@ -16,6 +16,7 @@ mod daemon;
 mod dev;
 mod doctor;
 mod policy;
+mod projects;
 mod reference;
 mod registry;
 mod secrets;
@@ -88,6 +89,13 @@ enum Cmd {
         /// Use this profile's endpoint (/mcp/p/<name>).
         #[arg(long)]
         profile: Option<String>,
+        /// Serve the project (`.mcpgw.toml`) at or above this directory.
+        /// Default: the one the working directory is in, if any.
+        #[arg(long, conflicts_with = "profile")]
+        project: Option<std::path::PathBuf>,
+        /// Ignore any project and serve the default endpoint.
+        #[arg(long, conflicts_with_all = ["profile", "project"])]
+        no_project: bool,
     },
     /// List profiles and their endpoints.
     Profiles,
@@ -177,6 +185,10 @@ enum Cmd {
     /// The package cache for npm and PyPI servers.
     #[command(subcommand)]
     Runtimes(RuntimesCmd),
+    /// Project servers: a `.mcpgw.toml` in a repository lists servers for
+    /// clients started there.
+    #[command(subcommand)]
+    Project(ProjectCmd),
     /// Manage secrets in the vault.
     #[command(subcommand)]
     Secret(SecretCmd),
@@ -489,6 +501,40 @@ enum AuditCmd {
 }
 
 #[derive(Subcommand)]
+enum ProjectCmd {
+    /// Write a `.mcpgw.toml` here, and with --client the client's
+    /// project-level entry for mcpgw.
+    Init {
+        /// Directory (default: the working directory).
+        dir: Option<std::path::PathBuf>,
+        /// Project name (default: the directory's).
+        #[arg(long)]
+        name: Option<String>,
+        /// Also add mcpgw to this client's project config: claude-code
+        /// (.mcp.json), cursor (.cursor/mcp.json) or vscode
+        /// (.vscode/mcp.json). Repeatable.
+        #[arg(long = "client")]
+        clients: Vec<mcpgw_config::clients::Client>,
+    },
+    /// Show what the project's `.mcpgw.toml` runs and trust that content:
+    /// its servers start. Any later change needs trusting again.
+    Trust {
+        /// A directory in the project (default: the working directory).
+        dir: Option<std::path::PathBuf>,
+        /// Don't ask.
+        #[arg(short, long)]
+        yes: bool,
+    },
+    /// Stop trusting the project: its servers stop.
+    Untrust {
+        /// A directory in the project (default: the working directory).
+        dir: Option<std::path::PathBuf>,
+    },
+    /// Projects: trusted ones, and those the daemon has seen.
+    Ls,
+}
+
+#[derive(Subcommand)]
 enum SecretCmd {
     /// Store a secret; the value is read hidden from the terminal, or from stdin.
     Set {
@@ -576,7 +622,17 @@ fn run(cli: Cli) -> AnyResult<()> {
         Cmd::Stats => servers::stats(&config),
         Cmd::Doctor { .. } => unreachable!("handled before the config loads"),
         Cmd::Scan { server } => servers::scan(&config, server.as_deref()),
-        Cmd::Connect { profile } => connect(&config, &path, profile.as_deref()),
+        Cmd::Connect {
+            profile,
+            project,
+            no_project,
+        } => connect(&config, &path, profile.as_deref(), project, no_project),
+        Cmd::Project(ProjectCmd::Init { dir, name, clients }) => {
+            projects::init(dir, name, &clients)
+        }
+        Cmd::Project(ProjectCmd::Trust { dir, yes }) => projects::trust(&config, dir, yes),
+        Cmd::Project(ProjectCmd::Untrust { dir }) => projects::untrust(&config, dir),
+        Cmd::Project(ProjectCmd::Ls) => projects::ls(&config),
         Cmd::Add(a)
             if a.command.is_none()
                 && a.url.is_none()
@@ -905,7 +961,13 @@ fn list_profiles(config: &Config) -> AnyResult<()> {
     Ok(())
 }
 
-fn connect(config: &Config, config_path: &std::path::Path, profile: Option<&str>) -> AnyResult<()> {
+fn connect(
+    config: &Config,
+    config_path: &std::path::Path,
+    profile: Option<&str>,
+    project: Option<std::path::PathBuf>,
+    no_project: bool,
+) -> AnyResult<()> {
     let info = match daemon::running(config) {
         Some(info) => info,
         None => {
@@ -917,7 +979,19 @@ fn connect(config: &Config, config_path: &std::path::Path, profile: Option<&str>
     tracing::info!(url = %info.url, pid = info.pid, "relaying stdio to the daemon");
     let url = match profile {
         Some(p) => format!("{}/p/{p}", info.url),
-        None => info.url.clone(),
+        None if no_project => info.url.clone(),
+        // inside a project, its endpoint: its servers plus the global ones
+        None => match projects::endpoint(config, project) {
+            Ok(Some((url, line))) => {
+                eprintln!("mcpgw: {line}");
+                url
+            }
+            Ok(None) => info.url.clone(),
+            Err(e) => {
+                eprintln!("mcpgw: project: {e}; serving the default endpoint");
+                info.url.clone()
+            }
+        },
     };
     serve::runtime()?.block_on(mcpgw_proto::relay::stdio_to_http(&url, token.expose()))?;
     Ok(())

@@ -48,6 +48,8 @@ fn gateway_options(config: &Config) -> mcpgw_router::GatewayOptions {
         audit: auditor(),
         no_prewarm: config.gateway.prewarm == Some(false),
         tap: None,
+        project: None,
+        notice: None,
     }
 }
 
@@ -121,6 +123,8 @@ fn profile_options(config: &Config, p: &mcpgw_core::Profile) -> mcpgw_router::Ga
         audit: auditor(),
         no_prewarm: config.gateway.prewarm == Some(false),
         tap: None,
+        project: None,
+        notice: None,
     }
 }
 
@@ -539,7 +543,33 @@ async fn serve_http(
     };
     let profiles =
         mcpgw_api::profiles::Profiles::new(config.profiles.clone(), store.profiles()?, build);
-    let mcp = mcpgw_router::http_router(mgr.clone(), opts).merge(profiles.routes());
+    // /mcp/project/<id>: a project's .mcpgw.toml servers with the global
+    // ones, as the default endpoint presents them
+    let build_project: mcpgw_api::projects::ProjectService = {
+        let (cfg, mgr, link) = (config.clone(), mgr.clone(), link.clone());
+        Arc::new(move |p: mcpgw_api::projects::ProjectEndpoint| {
+            let o = mcpgw_router::GatewayOptions {
+                login: Some(link.clone()),
+                label: p.label,
+                project: Some(p.id),
+                notice: Some(p.notice),
+                ..gateway_options(&cfg)
+            };
+            mcpgw_router::http_router(mgr.clone(), o)
+        })
+    };
+    let mcp_url = format!("http://{local}{}", mcpgw_api::MCP_PATH);
+    let projects = mcpgw_api::projects::Projects::new(
+        mgr.clone(),
+        store.clone(),
+        build_project,
+        auditor(),
+        mcp_url.clone(),
+    );
+    projects.start().await;
+    let mcp = mcpgw_router::http_router(mgr.clone(), opts)
+        .merge(profiles.routes())
+        .merge(projects.routes());
     let api = mcpgw_api::v1::router(mcpgw_api::v1::ApiState {
         manager: mgr.clone(),
         store: store.clone(),
@@ -553,8 +583,9 @@ async fn serve_http(
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0),
-        mcp_url: format!("http://{local}{}", mcpgw_api::MCP_PATH),
+        mcp_url,
         invoke: Some(invoke),
+        projects,
     });
     let app = mcpgw_api::edge_full(
         mcp,

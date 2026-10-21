@@ -56,6 +56,7 @@ final class AppModel {
     private(set) var approvals: [Approval] = []
     private(set) var profiles: [Profile] = []
     private(set) var secrets: [SecretMeta] = []
+    private(set) var projects: [Project] = []
     private(set) var version: String?
 
     /// The last failed action, shown as a banner until dismissed.
@@ -173,6 +174,7 @@ final class AppModel {
         approvals = []
         profiles = []
         secrets = []
+        projects = []
         phase = next
     }
 
@@ -231,6 +233,29 @@ final class AppModel {
         guard let api else { return }
         if let p = try? await api.profiles(), p != profiles { profiles = p }
         if let s = try? await api.secrets(), s != secrets { secrets = s }
+        await refreshProjects()
+    }
+
+    func refreshProjects() async {
+        guard let api, let p = try? await api.projects() else { return }
+        if p != projects { projects = p }
+        notifyProjects(p)
+    }
+
+    var projectsNeedingTrust: [Project] { projects.filter(\.needsTrust) }
+
+    /// A notification when a client starts in a project whose servers wait
+    /// to be trusted (once per file content).
+    private func notifyProjects(_ list: [Project]) {
+        guard UserDefaults.standard.bool(forKey: Pref.notifyApprovals), Bundle.main.bundleIdentifier != nil else { return }
+        for p in list where p.needsTrust {
+            let key = "project-\(p.id)-\(p.sha256 ?? "")"
+            guard notified.insert(key).inserted else { continue }
+            let c = UNMutableNotificationContent()
+            c.title = p.state == "changed" ? "\(p.name)'s .mcpgw.toml changed" : "Trust \(p.name)'s servers?"
+            c.body = "\(p.servers.count) server(s) stay off until you review and trust the file in mcpgw → Projects."
+            UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: key, content: c, trigger: nil))
+        }
     }
 
     private func notify(_ list: [Approval]) {
@@ -276,6 +301,12 @@ final class AppModel {
         let out = try await cli.check(args, timeout: 900)
         await refresh()
         return out
+    }
+
+    /// `mcpgw project init <dir>`: write a `.mcpgw.toml` template there.
+    func initProject(at dir: URL) async throws -> String {
+        guard let cli = mcpgw else { throw AddServerError(message: "mcpgw isn't available.") }
+        return try await cli.check(["project", "init", dir.path], timeout: 30)
     }
 
     /// `mcpgw client install <client>`; returns what it printed.

@@ -119,6 +119,7 @@ M4 exit check: [M4-Exit](M4-Exit.md). The release is prepared; publishing it (pu
 | Item | What | Status |
 |------|------|--------|
 | [macOS app](macOS-App.md) | SwiftUI app with the mcpgw binary bundled | ✅ |
+| [Project servers](Project-Servers.md) | `.mcpgw.toml` per repository, trust-gated | ✅ |
 
 ## Earlier numbering
 

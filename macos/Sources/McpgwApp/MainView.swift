@@ -2,7 +2,7 @@ import McpgwKit
 import SwiftUI
 
 enum Section: String, CaseIterable, Identifiable, Hashable {
-    case overview, servers, tools, approvals, activity, profiles, secrets, audit, clients, doctor
+    case overview, servers, projects, tools, approvals, activity, profiles, secrets, audit, clients, doctor
 
     var id: String { rawValue }
 
@@ -10,6 +10,7 @@ enum Section: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .overview: "Overview"
         case .servers: "Servers"
+        case .projects: "Projects"
         case .tools: "Tools"
         case .approvals: "Approvals"
         case .activity: "Activity"
@@ -25,6 +26,7 @@ enum Section: String, CaseIterable, Identifiable, Hashable {
         switch self {
         case .overview: "gauge.with.dots.needle.33percent"
         case .servers: "server.rack"
+        case .projects: "folder.badge.gearshape"
         case .tools: "wrench.and.screwdriver"
         case .approvals: "hand.raised"
         case .activity: "list.bullet.rectangle"
@@ -76,6 +78,7 @@ struct MainView: View {
     private func badge(_ s: Section) -> Int {
         switch s {
         case .approvals: model.pendingApprovals.count
+        case .projects: model.projectsNeedingTrust.count
         default: 0
         }
     }
@@ -84,6 +87,7 @@ struct MainView: View {
         switch section {
         case .overview: OverviewView()
         case .servers: ServersView()
+        case .projects: ProjectsView()
         case .tools: ToolsView()
         case .approvals: ApprovalsView()
         case .activity: ActivityView()
@@ -248,6 +252,9 @@ struct StateBadge: View {
         switch text {
         case "ready", "ok", "approved": .green
         case "busy", "info": .blue
+        case "trusted": .green
+        case "untrusted", "changed", "missing": .orange
+        case "invalid": .red
         case "starting", "draining", "backoff", "pending", "tool_error", "warn": .orange
         case "failed", "quarantined", "error", "denied", "fail": .red
         default: .secondary

@@ -101,6 +101,64 @@ Remove a profile
 
 Responses: `204` Done; `400` Error; `404` Error; `409` Error.
 
+## projects
+
+### `GET /api/v1/projects`
+
+Projects (.mcpgw.toml) the daemon knows, with their state
+
+Responses: `200` Projects; `400` Error; `404` Error; `409` Error.
+
+### `POST /api/v1/projects`
+
+Register the project at an absolute path (or read it again); `mcpgw connect` does this
+
+Request body: JSON (see `docs/openapi.json`).
+
+Responses: `200` Project; `400` Error; `404` Error; `409` Error.
+
+### `GET /api/v1/projects/{id}`
+
+One project
+
+| Parameter | In | Description |
+|---|---|---|
+| `id` | path |  |
+
+Responses: `200` Project; `400` Error; `404` Error; `409` Error.
+
+### `DELETE /api/v1/projects/{id}`
+
+Untrust and forget a project; its servers stop
+
+| Parameter | In | Description |
+|---|---|---|
+| `id` | path |  |
+
+Responses: `204` Done; `400` Error; `404` Error; `409` Error.
+
+### `POST /api/v1/projects/{id}/trust`
+
+Trust the project file's current content; its servers run. With `sha256`, only if that's still its content
+
+| Parameter | In | Description |
+|---|---|---|
+| `id` | path |  |
+
+Request body: JSON (see `docs/openapi.json`).
+
+Responses: `200` Project; `400` Error; `404` Error; `409` Error.
+
+### `POST /api/v1/projects/{id}/untrust`
+
+Stop trusting a project; its servers stop
+
+| Parameter | In | Description |
+|---|---|---|
+| `id` | path |  |
+
+Responses: `200` Project; `400` Error; `404` Error; `409` Error.
+
 ## runtime
 
 ### `GET /api/v1/runtime`

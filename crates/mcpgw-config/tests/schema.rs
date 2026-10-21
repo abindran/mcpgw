@@ -39,3 +39,10 @@ fn profile_schema_is_current() {
     let s = serde_json::to_value(schemars::schema_for!(mcpgw_core::Profile)).unwrap();
     check("profile.schema.json", s);
 }
+
+#[test]
+fn project_schema_is_current() {
+    let s = mcpgw_config::project::json_schema();
+    assert!(s["properties"]["server"].is_object(), "{s}");
+    check("project.schema.json", s);
+}

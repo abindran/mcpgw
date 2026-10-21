@@ -590,6 +590,80 @@ async fn every_endpoint_works_and_is_documented() {
         "removal not persisted"
     );
 
+    // projects (.mcpgw.toml): register, trust (only the content shown),
+    // read, untrust, forget
+    let proj = a.dir.join("proj");
+    std::fs::create_dir_all(&proj).unwrap();
+    std::fs::write(
+        proj.join(".mcpgw.toml"),
+        format!(
+            "[project]\nname = \"demo\"\n\n[[server]]\nname = \"local\"\ntransport = \"stdio\"\ncommand = {:?}\n",
+            mcpgw_testkit::fake_mcp()
+        ),
+    )
+    .unwrap();
+    let proj = proj.canonicalize().unwrap();
+    let (s, p) = a
+        .call(
+            "POST",
+            "/api/v1/projects",
+            "/api/v1/projects",
+            Some(json!({"path": proj})),
+        )
+        .await;
+    assert_eq!(s, S::OK, "{p}");
+    assert_eq!(p["state"], "untrusted");
+    let id = p["id"].as_str().unwrap().to_string();
+    let (s, _) = a
+        .call(
+            "POST",
+            "/api/v1/projects",
+            "/api/v1/projects",
+            Some(json!({"path": "rel"})),
+        )
+        .await;
+    assert_eq!(s, S::BAD_REQUEST);
+    let (_, l) = a
+        .call("GET", "/api/v1/projects", "/api/v1/projects", None)
+        .await;
+    assert_eq!(names(&l, "projects"), ["demo"]);
+    let trust = format!("/api/v1/projects/{id}/trust");
+    let (s, e) = a
+        .call(
+            "POST",
+            "/api/v1/projects/{id}/trust",
+            &trust,
+            Some(json!({"sha256": "0".repeat(64)})),
+        )
+        .await;
+    assert_eq!(s, S::CONFLICT, "{e}");
+    let (s, t) = a
+        .call(
+            "POST",
+            "/api/v1/projects/{id}/trust",
+            &trust,
+            Some(json!({"sha256": p["sha256"]})),
+        )
+        .await;
+    assert_eq!((s, t["state"].as_str()), (S::OK, Some("trusted")), "{t}");
+    let one = format!("/api/v1/projects/{id}");
+    let (_, g) = a.call("GET", "/api/v1/projects/{id}", &one, None).await;
+    assert_eq!(g["servers"][0]["name"], "local");
+    assert_eq!(g["url"], format!("{}/mcp/project/{id}", a.base));
+    let (s, u) = a
+        .call(
+            "POST",
+            "/api/v1/projects/{id}/untrust",
+            &format!("{one}/untrust"),
+            None,
+        )
+        .await;
+    assert_eq!((s, u["state"].as_str()), (S::OK, Some("untrusted")));
+    let (s, _) = a.call("DELETE", "/api/v1/projects/{id}", &one, None).await;
+    assert_eq!(s, S::NO_CONTENT);
+    let (s, _) = a.call("GET", "/api/v1/projects/{id}", &one, None).await;
+    assert_eq!(s, S::NOT_FOUND);
+
     // the token is required
     let r = a
         .http

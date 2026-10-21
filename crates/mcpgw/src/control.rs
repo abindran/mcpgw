@@ -42,7 +42,8 @@ impl Control {
         }))
     }
 
-    fn call(
+    /// Any request to the daemon (`/admin` or `/api/v1`); the JSON answer.
+    pub fn call(
         &self,
         method: reqwest::Method,
         path: &str,

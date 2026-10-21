@@ -15,6 +15,9 @@ and the [CLI reference](../reference/cli.md#mcpgw-add).
 | `openapi` | `mcpgw add pets --openapi https://petstore3.swagger.io/api/v3/openapi.json` | in-process, an HTTP API as tools ([OpenAPI APIs](openapi.md)) |
 | from the Registry | `mcpgw add io.github.github/github-mcp-server` | whatever the entry offers, at a pinned version |
 
+Servers for one repository only go in its `.mcpgw.toml` instead: see
+[Project servers](projects.md).
+
 ## Pins and drift
 
 `mcpgw add` starts the server once and reads its tools. They are pinned:

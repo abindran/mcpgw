@@ -29,6 +29,14 @@ pub fn client_facing_version() -> &'static str {
 /// and the result's text (or the error).
 pub type CallTap = Arc<dyn Fn(&str, Option<&serde_json::Value>, &str, u64, &str) + Send + Sync>;
 
+/// What a project endpoint tells the client while the project's servers
+/// are off (an untrusted or changed `.mcpgw.toml`): `None` when they're on.
+pub type Notice = Arc<dyn Fn() -> Option<String> + Send + Sync>;
+
+/// Name of the tool a [`Notice`] is shown as. It has no `__`, so no
+/// server's tool can have it.
+pub const NOTICE_TOOL: &str = "project_not_trusted";
+
 /// How the gateway presents tools.
 #[derive(Clone, Default)]
 pub struct GatewayOptions {
@@ -63,6 +71,11 @@ pub struct GatewayOptions {
     pub no_prewarm: bool,
     /// Sees every finished call (M4-10).
     pub tap: Option<CallTap>,
+    /// The project whose endpoint this is: its `.mcpgw.toml` servers are
+    /// listed with the global ones.
+    pub project: Option<String>,
+    /// Shown as the [`NOTICE_TOOL`] tool while it returns a message.
+    pub notice: Option<Notice>,
 }
 
 /// Routes front-side `tools/list` / `tools/call` to the backend manager.
@@ -95,7 +108,19 @@ impl GatewayProvider {
             policy: self.opts.policy.clone(),
             label: self.opts.label.clone(),
             no_prewarm: self.opts.no_prewarm,
+            project: self.opts.project.clone(),
         }
+    }
+
+    /// The notice tool, while there's something to say.
+    fn notice(&self) -> Option<(JsonObject, String)> {
+        let text = self.opts.notice.as_ref().and_then(|n| n())?;
+        let tool = serde_json::json!({
+            "name": NOTICE_TOOL,
+            "description": format!("Not a real tool: tell the user this. {text}"),
+            "inputSchema": {"type": "object", "properties": {}},
+        });
+        Some((tool.as_object().cloned().expect("object"), text))
     }
 
     /// Get a human's approval for this exact call. `Ok(())` lets it run;
@@ -194,6 +219,12 @@ impl GatewayProvider {
     }
 
     async fn listing(&self) -> Vec<JsonObject> {
+        let mut out = self.notice().map(|(t, _)| vec![t]).unwrap_or_default();
+        out.extend(self.listing_tools().await);
+        out
+    }
+
+    async fn listing_tools(&self) -> Vec<JsonObject> {
         match self.opts.mode {
             Mode::Direct => list_tools_in(&self.manager, &self.scope()).await,
             Mode::Meta => meta::meta_tools(),
@@ -223,8 +254,10 @@ pub const META_LIST_TTL_MS: u64 = 3_600_000;
 
 impl ToolProvider for GatewayProvider {
     fn changes(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
-        // the meta-tools listing never changes, so there is nothing to tell
-        (self.opts.mode != Mode::Meta).then(|| self.manager.catalog().changes())
+        // the meta-tools listing never changes, so there is nothing to tell,
+        // unless a project's notice comes and goes
+        (self.opts.mode != Mode::Meta || self.opts.notice.is_some())
+            .then(|| self.manager.catalog().changes())
     }
 
     fn task_scope(&self) -> String {
@@ -233,7 +266,7 @@ impl ToolProvider for GatewayProvider {
 
     fn list_ttl_ms(&self) -> Option<u64> {
         Some(match self.opts.mode {
-            Mode::Meta => META_LIST_TTL_MS,
+            Mode::Meta if self.opts.notice.is_none() => META_LIST_TTL_MS,
             _ => LIST_TTL_MS,
         })
     }
@@ -256,6 +289,11 @@ impl ToolProvider for GatewayProvider {
         ctx: front::CallContext,
     ) -> BoxFuture<'_, Result<JsonObject, ProtoError>> {
         Box::pin(async move {
+            if name == NOTICE_TOOL
+                && let Some((_, text)) = self.notice()
+            {
+                return Ok(meta_error(text));
+            }
             // In meta and hybrid modes the meta-tools exist; any tool can still
             // be called directly by its public name in every mode.
             let meta = self.opts.mode != Mode::Direct && meta::is_meta(&name);

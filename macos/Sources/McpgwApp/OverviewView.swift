@@ -81,7 +81,7 @@ struct OverviewView: View {
 
     @ViewBuilder private var attention: some View {
         let troubled = model.servers.filter { ["failed", "quarantined", "backoff"].contains($0.displayState) }
-        if !troubled.isEmpty || !model.pendingApprovals.isEmpty {
+        if !troubled.isEmpty || !model.pendingApprovals.isEmpty || !model.projectsNeedingTrust.isEmpty {
             GroupBox {
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(model.pendingApprovals) { a in
@@ -92,6 +92,16 @@ struct OverviewView: View {
                             Spacer()
                             Button("Approve") { Task { await model.decide(a, approve: true) } }
                             Button("Deny") { Task { await model.decide(a, approve: false) } }
+                        }
+                    }
+                    ForEach(model.projectsNeedingTrust) { p in
+                        HStack {
+                            Image(systemName: "folder.badge.gearshape").foregroundStyle(.orange)
+                            Text("Project \(p.name)").bold()
+                            Text(p.state == "changed" ? "changed since it was trusted" : "\(p.servers.count) server(s) wait to be trusted")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Text("Review in Projects").font(.caption).foregroundStyle(.secondary)
                         }
                     }
                     ForEach(troubled) { s in

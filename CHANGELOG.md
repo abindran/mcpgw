@@ -35,6 +35,18 @@ each config or API change comes with an upgrade note in
   - tasks (SEP-2663) for clients that declare the extension, with backend
     tasks followed;
   - `gateway.call_timeout` and `gateway.max_call_time`.
+- **Project servers:** a `.mcpgw.toml` at a repository's root lists
+  servers for that project only.
+  - `mcpgw connect` finds it from its working directory and serves the
+    project's endpoint (`/mcp/project/<id>`): the project's servers with
+    the global ones, the project's winning a name clash. No other endpoint
+    sees them.
+  - Nothing in the file runs until that exact content is trusted
+    (`mcpgw project trust`, or the macOS app). Any edit turns its servers
+    off until it's trusted again, and until then the endpoint lists a
+    `project_not_trusted` tool saying what to do.
+  - `mcpgw project init|trust|untrust|ls`, `/api/v1/projects`, a
+    `mcpgw doctor` check, and `schema/project.schema.json`.
 - **A macOS app** (`mcpgw.app`, SwiftUI) with the `mcpgw` binary bundled
   inside. It manages servers, tools, approvals, profiles, secrets, the
   audit log and clients, and has a menu bar item for approvals. See

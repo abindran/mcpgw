@@ -101,6 +101,33 @@ impl Client {
         })
     }
 
+    /// The project-level config file in `root`, for clients that have one
+    /// (Claude Desktop doesn't).
+    pub fn project_config(self, root: &Path) -> Option<PathBuf> {
+        match self {
+            Self::ClaudeCode => Some(root.join(".mcp.json")),
+            Self::Cursor => Some(root.join(".cursor/mcp.json")),
+            Self::VsCode => Some(root.join(".vscode/mcp.json")),
+            Self::ClaudeDesktop => None,
+        }
+    }
+
+    /// The gateway entry for a project-level config file, meant to be
+    /// committed: `mcpgw` from `PATH`, and the project named by the
+    /// client's workspace variable where it has one (Claude Code starts
+    /// servers in the project, so `connect` finds it from there).
+    pub fn project_entry(self) -> Value {
+        match self {
+            Self::VsCode => {
+                json!({"type": "stdio", "command": "mcpgw", "args": ["connect", "--project", "${workspaceFolder}"]})
+            }
+            Self::Cursor => {
+                json!({"command": "mcpgw", "args": ["connect", "--project", "${workspaceFolder}"]})
+            }
+            _ => json!({"command": "mcpgw", "args": ["connect"]}),
+        }
+    }
+
     /// The gateway entry for this client: `mcpgw connect` over stdio.
     pub fn gateway_entry(self, exe: &str, config: Option<&Path>, profile: Option<&str>) -> Value {
         let mut args = Vec::new();

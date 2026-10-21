@@ -41,6 +41,7 @@ two seconds.
 |---|---|
 | Overview | daemon state, uptime, endpoints to copy, servers that failed or are quarantined |
 | Servers | state, kind, tools and source of each server; enable, disable, restart, accept new tools, remove; details, pinned tools and live stderr |
+| Projects | each project's `.mcpgw.toml`, what its servers run and which secrets they get; **Review and Trust…**, Untrust, Forget; Add Project creates a file from the template |
 | Add Server | a form for `mcpgw add`: command, URL, container image, Wasm component, OpenAPI spec or MCP Registry entry, with env, headers, secrets and flags |
 | Tools | every public tool, with an inspector that calls it (policy, approvals and audit apply) |
 | Approvals | calls waiting for a human decision, with Approve and Deny |

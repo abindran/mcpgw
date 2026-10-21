@@ -164,6 +164,64 @@ fn checks(config: &Config, path: &Path, r: &mut Report) {
     }
     profiles(config, &store, &servers, r);
     otlp(config, r);
+    project_here(&store, r);
+}
+
+/// The project (`.mcpgw.toml`) the working directory is in, if any: whether
+/// it loads and whether its content is trusted.
+fn project_here(store: &SqliteStore, r: &mut Report) {
+    use mcpgw_config::project;
+    let Some(root) = std::env::current_dir()
+        .ok()
+        .and_then(|d| project::find_root(&d))
+    else {
+        return;
+    };
+    let subject = format!("project {}", root.display());
+    let p = match project::load(&root) {
+        Ok(p) => p,
+        Err(e) => {
+            r.add(
+                "project_invalid",
+                &subject,
+                Level::Fail,
+                format!("{} can't be loaded: {e}", project::PROJECT_FILE),
+                Some("fix the file; its servers are off until it loads".into()),
+            );
+            return;
+        }
+    };
+    let record = mcpgw_api::projects::trusted(store)
+        .ok()
+        .and_then(|t| t.get(&*p.root.to_string_lossy()).cloned());
+    let n = p.servers.len();
+    match record {
+        Some(t) if t.sha256 == p.sha256 => r.ok(
+            "project",
+            &subject,
+            format!("{} is trusted: {n} server(s)", p.name),
+        ),
+        Some(_) => r.add(
+            "project_changed",
+            &subject,
+            Level::Warn,
+            format!(
+                "{} changed since it was trusted; its {n} server(s) are off",
+                project::PROJECT_FILE
+            ),
+            Some("`mcpgw project trust` shows what it runs now and turns them on".into()),
+        ),
+        None => r.add(
+            "project_untrusted",
+            &subject,
+            Level::Info,
+            format!(
+                "{} isn't trusted; its {n} server(s) are off",
+                project::PROJECT_FILE
+            ),
+            Some("`mcpgw project trust` shows what it runs and turns them on".into()),
+        ),
+    }
 }
 
 fn vault(config: &Config, r: &mut Report) -> Option<Vault> {

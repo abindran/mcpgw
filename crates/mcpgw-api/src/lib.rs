@@ -19,6 +19,7 @@
 pub mod admin;
 pub mod oauth;
 pub mod profiles;
+pub mod projects;
 pub mod ui;
 pub mod v1;
 

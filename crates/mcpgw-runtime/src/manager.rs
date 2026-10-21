@@ -242,6 +242,10 @@ struct Handle {
     prefix: String,
     /// For `server@account` instances, the base server.
     instance_of: Option<String>,
+    /// The project that owns it (a `.mcpgw.toml` server): it's seen only
+    /// by that project's endpoint, and its prefix only has to be unique
+    /// among the project's servers.
+    owner: Option<String>,
 }
 
 /// What every actor knows about its peers, for `max_running` eviction.
@@ -367,6 +371,17 @@ impl BackendManager {
     /// itself; other accounts get their own instance on first use
     /// ([`BackendManager::call_tool_as`]).
     pub fn add_server(&self, cfg: &ServerSpec) -> Result<(), ProtoError> {
+        self.add_owned(cfg, None)
+    }
+
+    /// Add a server that belongs to project `project`: hidden from
+    /// [`BackendManager::names`] and [`BackendManager::server_for_prefix`],
+    /// seen through the `_in` variants with that project.
+    pub fn add_project_server(&self, cfg: &ServerSpec, project: &str) -> Result<(), ProtoError> {
+        self.add_owned(cfg, Some(project))
+    }
+
+    fn add_owned(&self, cfg: &ServerSpec, owner: Option<&str>) -> Result<(), ProtoError> {
         if self.read().contains_key(&cfg.name) {
             return Err(ProtoError::Unavailable(format!(
                 "server {} already exists",
@@ -382,7 +397,7 @@ impl BackendManager {
         } else {
             cfg.clone()
         };
-        self.insert(&cfg.name, &launch, None)?;
+        self.insert(&cfg.name, &launch, None, owner)?;
         self.catalog.bump();
         Ok(())
     }
@@ -409,7 +424,8 @@ impl BackendManager {
         }
         let mut inst = spec.for_account(account);
         inst.name = key.clone();
-        match self.insert(&key, &inst, Some(server)) {
+        let owner = self.handle(server)?.owner;
+        match self.insert(&key, &inst, Some(server), owner.as_deref()) {
             Ok(()) => Ok(key),
             // another caller created it first
             Err(_) if self.read().contains_key(&key) => Ok(key),
@@ -468,6 +484,7 @@ impl BackendManager {
         key: &str,
         cfg: &ServerSpec,
         instance_of: Option<&str>,
+        owner: Option<&str>,
     ) -> Result<(), ProtoError> {
         let catalog_key = instance_of.unwrap_or(key).to_string();
         let (state, why) = match cfg.enabled {
@@ -485,7 +502,11 @@ impl BackendManager {
             Some(_) => key.to_string(),
             None => cfg.prefix().to_string(),
         };
-        if instance_of.is_none() && backends.values().any(|h| h.prefix == prefix) {
+        if instance_of.is_none()
+            && backends
+                .values()
+                .any(|h| h.prefix == prefix && h.owner.as_deref() == owner)
+        {
             tracing::warn!(server = %cfg.name, %prefix, "tool prefix already used; using the server name");
             prefix = cfg.name.clone();
         }
@@ -558,6 +579,7 @@ impl BackendManager {
                 tx,
                 prefix,
                 instance_of: instance_of.map(str::to_string),
+                owner: owner.map(str::to_string),
             },
         );
         drop(backends);
@@ -628,19 +650,64 @@ impl BackendManager {
         self.read().get(server).map(|h| h.prefix.clone())
     }
 
-    /// The server whose tools use `prefix`.
+    /// The global server whose tools use `prefix` (project servers aren't
+    /// considered; see [`BackendManager::server_for_prefix_in`]).
     pub fn server_for_prefix(&self, prefix: &str) -> Option<String> {
-        self.read()
-            .iter()
-            .find(|(_, h)| h.prefix == prefix)
-            .map(|(n, _)| n.clone())
+        self.server_for_prefix_in(prefix, None)
     }
 
-    /// Names of all servers, sorted (account instances excluded).
+    /// The server whose tools use `prefix` as `project` sees them: its own
+    /// server with that prefix, else the global one.
+    pub fn server_for_prefix_in(&self, prefix: &str, project: Option<&str>) -> Option<String> {
+        let backends = self.read();
+        let find = |owner: Option<&str>| {
+            backends
+                .iter()
+                .find(|(_, h)| {
+                    h.prefix == prefix && h.instance_of.is_none() && h.owner.as_deref() == owner
+                })
+                .map(|(n, _)| n.clone())
+        };
+        project.and_then(|p| find(Some(p))).or_else(|| find(None))
+    }
+
+    /// Names of the global servers, sorted (account instances and project
+    /// servers excluded).
     pub fn names(&self) -> Vec<String> {
         self.read()
             .iter()
-            .filter(|(_, h)| h.instance_of.is_none())
+            .filter(|(_, h)| h.instance_of.is_none() && h.owner.is_none())
+            .map(|(k, _)| k.clone())
+            .collect()
+    }
+
+    /// The servers `project` sees: its own first, then the global ones whose
+    /// prefix none of its own uses (its servers win a clash).
+    pub fn names_in(&self, project: Option<&str>) -> Vec<String> {
+        let Some(project) = project else {
+            return self.names();
+        };
+        let backends = self.read();
+        let own: Vec<(&String, &Handle)> = backends
+            .iter()
+            .filter(|(_, h)| h.instance_of.is_none() && h.owner.as_deref() == Some(project))
+            .collect();
+        let mut out: Vec<String> = own.iter().map(|(n, _)| (*n).clone()).collect();
+        out.extend(
+            backends
+                .iter()
+                .filter(|(_, h)| h.instance_of.is_none() && h.owner.is_none())
+                .filter(|(_, h)| !own.iter().any(|(_, o)| o.prefix == h.prefix))
+                .map(|(n, _)| n.clone()),
+        );
+        out
+    }
+
+    /// Servers owned by `project`, sorted.
+    pub fn project_servers(&self, project: &str) -> Vec<String> {
+        self.read()
+            .iter()
+            .filter(|(_, h)| h.instance_of.is_none() && h.owner.as_deref() == Some(project))
             .map(|(k, _)| k.clone())
             .collect()
     }
