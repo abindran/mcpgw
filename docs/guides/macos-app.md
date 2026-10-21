@@ -40,7 +40,7 @@ two seconds.
 | Section | What's there |
 |---|---|
 | Overview | daemon state, uptime, endpoints to copy, servers that failed or are quarantined |
-| Servers | state, kind, tools and source of each server; enable, disable, restart, accept new tools, remove; details, pinned tools and live stderr |
+| Servers | global servers (badge **global**), and the servers projects declare in their `.mcpgw.toml` (badge **project**, one row per name with the number of projects); state, kind and tools of each; enable, disable, restart, accept new tools, remove; details, pinned tools and live stderr. A project server's details list its **associated projects**, each with its own state, and show the picked project's copy |
 | Projects | each project's `.mcpgw.toml`, what its servers run and which secrets they get; **Review and Trust…**, Untrust, Forget; Add Project creates a file from the template |
 | Add Server | a form for `mcpgw add`: command, URL, container image, Wasm component, OpenAPI spec or MCP Registry entry, with env, headers, secrets and flags |
 | Tools | every public tool, with an inspector that calls it (policy, approvals and audit apply) |
@@ -51,6 +51,21 @@ two seconds.
 | Audit Log | the hash-chained log, with a verify button |
 | Clients | whether Claude Desktop, Claude Code, Cursor and VS Code go through mcpgw (from `mcpgw doctor`), and Connect (`mcpgw client install`) |
 | Doctor | `mcpgw doctor`'s findings and fixes |
+
+**Server states**, as the Servers and Projects screens show them:
+
+| Badge | Means |
+|---|---|
+| cold | not running; it starts on its next call (it also stops after `idle_timeout`, 10 minutes by default, without calls) |
+| starting | launching and connecting; calls wait |
+| ready / idle | running, with no call in progress |
+| busy | running a call right now |
+| draining | stopping; calls in progress finish first |
+| backoff | its last start failed; it tries again shortly |
+| failed | gave up after repeated failed starts; **Restart** clears it |
+| quarantined | its tools changed since they were pinned; calls are refused until you **Accept New Tools** |
+| disabled | turned off |
+| off | a project server whose project isn't trusted |
 
 The menu bar icon shows the daemon's state and any calls waiting for
 approval, which you can approve or deny from there. It changes to an

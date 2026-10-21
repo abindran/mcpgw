@@ -119,6 +119,11 @@ public struct APIClient: Sendable {
     public func runtime() async throws -> Runtime { try await get(Runtime.self, "/runtime") }
     public func servers() async throws -> [Server] { try await list(Server.self, "/servers") }
 
+    /// One server's status: a global server, or a project's (`<name>-p<id>`).
+    public func serverStatus(_ name: String) async throws -> Server {
+        try await get(Server.self, "/servers/\(Self.seg(name))")
+    }
+
     public func server(_ name: String) async throws -> JSONValue {
         try await get(JSONValue.self, "/servers/\(Self.seg(name))")
     }

@@ -1,41 +1,66 @@
 import McpgwKit
 import SwiftUI
 
+/// Servers: global ones, which every client sees, and the ones projects
+/// declare in their `.mcpgw.toml`, one row per name with the projects
+/// that use it.
 struct ServersView: View {
     @Environment(AppModel.self) private var model
-    @State private var selection: Server.ID?
+    @State private var selection: ServerRow.ID?
     @State private var adding = false
     @State private var removing: Server?
 
     var body: some View {
+        let rows = model.serverRows
         HStack(spacing: 0) {
-            Table(model.servers, selection: $selection) {
-                TableColumn("Server") { s in
+            Table(rows, selection: $selection) {
+                TableColumn("Server") { r in
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(s.name).bold()
-                        Text(s.target).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(r.name).bold()
+                        Text(subtitle(r)).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.head)
                     }
                 }
-                TableColumn("State") { s in StateBadge(text: s.displayState) }
-                    .width(min: 80, ideal: 95)
-                TableColumn("Kind") { s in Text(s.transport) }
-                    .width(min: 60, ideal: 75)
-                TableColumn("Tools") { s in Text("\(s.tools)").monospacedDigit() }
-                    .width(min: 40, ideal: 50)
-                TableColumn("Source") { s in Text(s.source).foregroundStyle(.secondary) }
-                    .width(min: 50, ideal: 60)
+                .width(min: 120, ideal: 150)
+                TableColumn("Scope") { r in
+                    switch r {
+                    case .global: StateBadge(text: "global").help("Every client and project sees it")
+                    case .project(_, let uses):
+                        StateBadge(text: "project")
+                            .help(uses.map(\.project.name).joined(separator: ", "))
+                        Text(uses.count == 1 ? uses[0].project.name : "\(uses.count) projects")
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .width(min: 80, ideal: 90)
+                TableColumn("State") { r in StateBadge(text: r.state) }
+                    .width(min: 70, ideal: 80)
+                TableColumn("Kind") { r in
+                    switch r {
+                    case .global(let s): Text(s.transport)
+                    case .project(_, let uses): Text(uses.first?.server.kind ?? "")
+                    }
+                }
+                .width(min: 45, ideal: 50)
+                TableColumn("Tools") { r in
+                    switch r {
+                    case .global(let s): Text("\(s.tools)").monospacedDigit()
+                    case .project(_, let uses): Text("\(uses.map(\.server.tools).max() ?? 0)").monospacedDigit()
+                    }
+                }
+                .width(min: 34, ideal: 40)
             }
-            .contextMenu(forSelectionType: Server.ID.self) { ids in
-                if let s = model.servers.first(where: { ids.contains($0.id) }) { actions(s) }
+            .contextMenu(forSelectionType: ServerRow.ID.self) { ids in
+                if case .global(let s)? = rows.first(where: { ids.contains($0.id) }) { actions(s) }
             }
             .alternatingRowBackgrounds(.disabled)
-            .frame(minWidth: 380, maxWidth: .infinity)
+            .frame(minWidth: 400, maxWidth: .infinity)
             .overlay {
-                if model.servers.isEmpty {
+                if rows.isEmpty {
                     ContentUnavailableView {
                         Label("No servers", systemImage: "server.rack")
                     } description: {
-                        Text("Add one here, with `mcpgw add`, or import a client's servers with `mcpgw client import`.")
+                        Text("Add one here, with `mcpgw add`, or import a client's servers with `mcpgw client import`. Servers a project declares in its `.mcpgw.toml` show here too.")
                     } actions: {
                         Button("Add Server…") { adding = true }
                     }
@@ -44,18 +69,21 @@ struct ServersView: View {
 
             Divider()
             Group {
-                if let s = model.servers.first(where: { $0.id == selection }) {
+                switch rows.first(where: { $0.id == selection }) {
+                case .global(let s)?:
                     ServerDetail(server: s, remove: { removing = s })
-                } else {
+                case .project(let name, let uses)?:
+                    ProjectServerDetail(name: name, uses: uses).id(name)
+                case nil:
                     ContentUnavailableView("Select a server", systemImage: "sidebar.right")
                 }
             }
-            .frame(width: 400)
+            .frame(width: 420)
             .frame(maxHeight: .infinity)
         }
         .toolbar {
             Button { adding = true } label: { Label("Add Server", systemImage: "plus") }
-                .help("Add a server")
+                .help("Add a global server")
         }
         .sheet(isPresented: $adding) { AddServerSheet() }
         .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } })) {
@@ -65,6 +93,13 @@ struct ServersView: View {
             }
         } message: {
             Text("The server stops and its pinned tools are forgotten. Its secrets stay in the vault.")
+        }
+    }
+
+    private func subtitle(_ r: ServerRow) -> String {
+        switch r {
+        case .global(let s): s.target
+        case .project(_, let uses): String((uses.first?.server.runs ?? "").drop(while: { $0 != " " }).dropFirst())
         }
     }
 
@@ -82,9 +117,78 @@ struct ServersView: View {
     }
 }
 
+/// A server that projects declare: the projects that use it, each with
+/// its own process, state and pinned tools, and the details of the one
+/// picked.
+struct ProjectServerDetail: View {
+    @Environment(AppModel.self) private var model
+    var name: String
+    var uses: [ProjectUse]
+    @State private var picked: ProjectUse.ID?
+    @State private var status: Server?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(name).font(.title2.bold())
+                    StateBadge(text: "project")
+                    Spacer()
+                }
+                Text("Declared in the .mcpgw.toml of \(uses.count == 1 ? "1 project" : "\(uses.count) projects"). Clients see it only when started in one of them, as `\(name)__<tool>`; each project runs its own copy.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Associated projects").font(.headline).padding(.top, 4)
+            }
+            .padding([.horizontal, .top], 14)
+            List(uses, selection: $picked) { u in
+                HStack {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(u.project.name).bold()
+                        Text(u.project.root).font(.caption).foregroundStyle(.secondary)
+                            .lineLimit(1).truncationMode(.head)
+                    }
+                    Spacer()
+                    if u.project.state != "trusted" { StateBadge(text: u.project.state) }
+                    StateBadge(text: u.state)
+                }
+            }
+            .frame(height: min(CGFloat(uses.count) * 44 + 12, 230))
+            Divider()
+            Group {
+                if let s = status, let u = uses.first(where: { $0.id == picked }) {
+                    ServerDetail(server: s, project: u.project.name, remove: {})
+                } else if uses.first(where: { $0.id == picked })?.project.state != "trusted", picked != nil {
+                    ContentUnavailableView("Not running", systemImage: "lock.shield",
+                                           description: Text("The project isn't trusted, so its servers are off. Trust it in Projects."))
+                } else {
+                    ContentUnavailableView("Pick a project", systemImage: "folder",
+                                           description: Text("Its copy's state, tools and logs show here."))
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+        .onAppear { if picked == nil { picked = uses.first?.id } }
+        .task(id: picked) { await follow() }
+    }
+
+    /// The picked copy's status, refreshed while it's shown.
+    private func follow() async {
+        status = nil
+        guard let id = picked, uses.first(where: { $0.id == id })?.project.state == "trusted" else { return }
+        while !Task.isCancelled {
+            if let api = model.api, let s = try? await api.serverStatus(id) { status = s }
+            try? await Task.sleep(for: .seconds(2))
+        }
+    }
+}
+
 struct ServerDetail: View {
     @Environment(AppModel.self) private var model
     var server: Server
+    /// The project whose `.mcpgw.toml` declares it; its file and trust
+    /// decide whether it runs, so enable, disable and remove are hidden.
+    var project: String? = nil
     var remove: () -> Void
 
     @State private var tab = 0
@@ -96,7 +200,7 @@ struct ServerDetail: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(server.name).font(.title2.bold())
+                    Text(project ?? server.name).font(project == nil ? .title2.bold() : .title3.bold())
                     StateBadge(text: server.displayState)
                     Spacer()
                 }
@@ -104,11 +208,13 @@ struct ServerDetail: View {
                     Text(e).foregroundStyle(.red).textSelection(.enabled).font(.callout)
                 }
                 HStack {
-                    Button(server.enabled ? "Disable" : "Enable") {
-                        Task { await model.perform { try await $0.setEnabled(server.name, !server.enabled) } }
+                    if project == nil {
+                        Button(server.enabled ? "Disable" : "Enable") {
+                            Task { await model.perform { try await $0.setEnabled(server.name, !server.enabled) } }
+                        }
+                        .disabled(server.fromConfig)
+                        .help(server.fromConfig ? "Defined in the config file; change it there" : "")
                     }
-                    .disabled(server.fromConfig)
-                    .help(server.fromConfig ? "Defined in the config file; change it there" : "")
                     Button("Restart") { Task { await model.perform { try await $0.restart(server.name) } } }
                         .help("Clear failures and stop; it starts fresh on its next call")
                     if server.displayState == "quarantined" {
@@ -117,7 +223,9 @@ struct ServerDetail: View {
                             .help("Its tools changed since they were pinned; accept the new ones")
                     }
                     Spacer()
-                    Button("Remove…", role: .destructive, action: remove).disabled(server.fromConfig)
+                    if project == nil {
+                        Button("Remove…", role: .destructive, action: remove).disabled(server.fromConfig)
+                    }
                 }
                 Picker("", selection: $tab) {
                     Text("Details").tag(0)
@@ -136,6 +244,7 @@ struct ServerDetail: View {
             }
         }
         .task(id: "\(server.name)-\(tab)") { await load() }
+        .padding(.top, project == nil ? 0 : 2)
     }
 
     private var details: some View {
@@ -143,7 +252,12 @@ struct ServerDetail: View {
             LabeledContent("Kind", value: server.transport)
             LabeledContent("Target") { Text(server.target).textSelection(.enabled) }
             if let a = server.alias { LabeledContent("Tool prefix", value: "\(a)__") }
-            LabeledContent("Source", value: server.source)
+            if let p = project {
+                LabeledContent("Declared by", value: "\(p)'s .mcpgw.toml")
+                LabeledContent("Internal name") { Text(server.name).font(.caption.monospaced()).textSelection(.enabled) }
+            } else {
+                LabeledContent("Source", value: server.source)
+            }
             LabeledContent("Enabled", value: server.enabled ? "yes" : "no")
             LabeledContent("Stateful", value: server.stateful ? "yes" : "no")
             LabeledContent("Warm", value: server.warm ? "yes" : "no")

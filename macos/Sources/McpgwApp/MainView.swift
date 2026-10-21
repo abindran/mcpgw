@@ -250,7 +250,9 @@ struct StateBadge: View {
 
     private var color: Color {
         switch text {
-        case "ready", "ok", "approved": .green
+        case "ready", "idle", "ok", "approved": .green
+        case "global": .purple
+        case "project": .teal
         case "busy", "info": .blue
         case "trusted": .green
         case "untrusted", "changed", "missing": .orange

@@ -314,6 +314,16 @@ public struct Project: Codable, Hashable, Sendable, Identifiable {
         public var tools: Int
 
         public var id: String { server }
+
+        /// The transport, from what it runs.
+        public var kind: String {
+            if runs.hasPrefix("runs container") { return "container" }
+            if runs.hasPrefix("runs Wasm") { return "wasm" }
+            if runs.hasPrefix("runs ") { return "stdio" }
+            if runs.hasPrefix("connects to") { return "http" }
+            if runs.hasPrefix("calls the API") { return "openapi" }
+            return "?"
+        }
     }
 
     public var id: String
@@ -334,4 +344,63 @@ public struct Project: Codable, Hashable, Sendable, Identifiable {
 
     /// Its servers are off until the user trusts the file.
     public var needsTrust: Bool { (state == "untrusted" || state == "changed") && !servers.isEmpty }
+}
+
+/// A project's use of a server it declares.
+public struct ProjectUse: Hashable, Sendable, Identifiable {
+    public var project: Project
+    public var server: Project.ServerInfo
+    public var id: String { server.server }
+
+    /// Its state: off while the project isn't trusted.
+    public var state: String { server.state ?? (project.state == "trusted" ? "cold" : "off") }
+
+    public init(project: Project, server: Project.ServerInfo) {
+        self.project = project
+        self.server = server
+    }
+}
+
+/// A row of the Servers screen: a global server, which every endpoint
+/// serves, or a server that projects declare in their `.mcpgw.toml`, once
+/// per name however many projects use it.
+public enum ServerRow: Hashable, Sendable, Identifiable {
+    case global(Server)
+    case project(name: String, uses: [ProjectUse])
+
+    public var id: String {
+        switch self {
+        case .global(let s): "global:\(s.name)"
+        case .project(let n, _): "project:\(n)"
+        }
+    }
+
+    public var name: String {
+        switch self {
+        case .global(let s): s.name
+        case .project(let n, _): n
+        }
+    }
+
+    /// The most telling state among a project server's instances.
+    public var state: String {
+        switch self {
+        case .global(let s): return s.displayState
+        case .project(_, let uses):
+            let order = ["quarantined", "failed", "backoff", "busy", "starting", "draining", "ready", "idle", "cold", "disabled", "off"]
+            return uses.map(\.state).min { (order.firstIndex(of: $0) ?? 99) < (order.firstIndex(of: $1) ?? 99) } ?? "off"
+        }
+    }
+
+    /// Global servers, then project servers grouped by name.
+    public static func rows(servers: [Server], projects: [Project]) -> [ServerRow] {
+        var byName: [String: [ProjectUse]] = [:]
+        for p in projects {
+            for s in p.servers { byName[s.name, default: []].append(ProjectUse(project: p, server: s)) }
+        }
+        let grouped = byName.keys.sorted().map { n in
+            ServerRow.project(name: n, uses: byName[n]!.sorted { $0.project.name < $1.project.name })
+        }
+        return servers.map(ServerRow.global) + grouped
+    }
 }

@@ -117,3 +117,29 @@ import Testing
     #expect(ClientStatus.from(report, client: "claude-desktop") == .broken("client_entry_broken msg"))
     #expect(ClientStatus.from([], client: "cursor") == .noConfig)
 }
+
+@Test func groupsProjectServersByNameAfterGlobalOnes() throws {
+    func project(_ name: String, _ state: String, _ servers: [(String, String?)]) throws -> Project {
+        let s = servers.map { n, st in
+            ["name": n, "server": "\(n)-p\(name)", "runs": "runs /bin/\(n)", "tools": 3, "state": st as Any].compactMapValues { $0 is NSNull ? nil : $0 }
+        }
+        let j: [String: Any] = ["id": name, "name": name, "root": "/src/\(name)", "state": state, "url": "u", "servers": s]
+        return try JSONDecoder().decode(Project.self, from: JSONSerialization.data(withJSONObject: j))
+    }
+    let global = try JSONDecoder().decode(Server.self, from: Data(#"{"name":"fs","transport":"stdio","target":"npx","enabled":true,"stateful":false,"source":"store","warm":false,"tools":2}"#.utf8))
+    let projects = [
+        try project("b", "trusted", [("zrepo", "idle"), ("db", "cold")]),
+        try project("a", "trusted", [("zrepo", "quarantined")]),
+        try project("c", "changed", [("zrepo", nil)]),
+    ]
+    let rows = ServerRow.rows(servers: [global], projects: projects)
+    #expect(rows.map(\.id) == ["global:fs", "project:db", "project:zrepo"])
+    guard case .project(_, let uses) = rows[2] else { Issue.record("not a project row"); return }
+    #expect(uses.map(\.project.name) == ["a", "b", "c"])
+    #expect(uses.map(\.state) == ["quarantined", "idle", "off"])
+    // the row shows the state that needs attention first
+    #expect(rows[2].state == "quarantined")
+    #expect(rows[1].state == "cold")
+    #expect(rows[0].state == "cold")
+    #expect(uses[0].server.kind == "stdio")
+}

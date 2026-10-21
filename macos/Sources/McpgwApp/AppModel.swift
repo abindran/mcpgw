@@ -214,6 +214,8 @@ final class AppModel {
             if approvals != ap { approvals = ap; notify(ap) }
             if calls != cl { calls = cl }
             if tools != tl { tools = tl }
+            // projects every tick too: the Servers screen shows their servers' states
+            await refreshProjects()
             if slowTick % 5 == 0 || profiles.isEmpty { await refreshSlow() }
             slowTick += 1
             NSApp?.dockTile.badgeLabel = pendingApprovals.isEmpty ? nil : "\(pendingApprovals.count)"
@@ -233,7 +235,6 @@ final class AppModel {
         guard let api else { return }
         if let p = try? await api.profiles(), p != profiles { profiles = p }
         if let s = try? await api.secrets(), s != secrets { secrets = s }
-        await refreshProjects()
     }
 
     func refreshProjects() async {
@@ -243,6 +244,9 @@ final class AppModel {
     }
 
     var projectsNeedingTrust: [Project] { projects.filter(\.needsTrust) }
+
+    /// The Servers screen's rows: global servers, then project servers.
+    var serverRows: [ServerRow] { ServerRow.rows(servers: servers, projects: projects) }
 
     /// A notification when a client starts in a project whose servers wait
     /// to be trusted (once per file content).
