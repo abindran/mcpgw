@@ -35,7 +35,7 @@ Both MCP `2026-07-28` and `2025-11-25` are supported, on both sides.
 |---|---|
 | [Getting started](getting-started.md) | install, add servers, connect a client |
 | [Upgrading to v1.0](upgrading.md) | from earlier builds; what changed |
-| [Guides](guides/servers.md) | servers, secrets, policy, Wasm, OpenAPI, long calls, the dev loop, troubleshooting |
+| [Guides](guides/servers.md) | servers, secrets, policy, Wasm, OpenAPI, long calls, the dev loop, troubleshooting, the macOS app |
 | [Reference](reference/cli.md) | every [CLI command](reference/cli.md), [config key](reference/config.md) and [API endpoint](reference/api.md), generated from the code |
 
 The documentation builds as a book with [mdBook](https://rust-lang.github.io/mdBook/):

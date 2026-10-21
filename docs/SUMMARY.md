@@ -15,6 +15,7 @@
 - [Long calls and tasks](guides/long-calls.md)
 - [Developing a server](guides/dev.md)
 - [Observability and troubleshooting](guides/observability.md)
+- [The macOS app](guides/macos-app.md)
 
 # Reference
 

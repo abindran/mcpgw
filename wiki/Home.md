@@ -114,6 +114,12 @@ M3 exit check: [M3-Exit](M3-Exit.md).
 
 M4 exit check: [M4-Exit](M4-Exit.md). The release is prepared; publishing it (pushing the `v1.0.0` tag) is the maintainer's step.
 
+## After the plan
+
+| Item | What | Status |
+|------|------|--------|
+| [macOS app](macOS-App.md) | SwiftUI app with the mcpgw binary bundled | ✅ |
+
 ## Earlier numbering
 
 Work before the plan used its own IDs. The pages are kept in

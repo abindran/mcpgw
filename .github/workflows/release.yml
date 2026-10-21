@@ -59,6 +59,28 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+  macos-app:
+    name: build (macOS app)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      # a universal mcpgw.app with the mcpgw binary inside, signed ad hoc
+      # (not notarized: there's no Developer ID in this workflow)
+      - name: build
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_TYPE" = tag ] || version="0.0.0-dev"
+          MCPGW_VERSION="$version" macos/build.sh --universal --zip --out dist-app
+          mkdir -p dist && mv dist-app/*.zip dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-macos-app
+          path: dist/*
+          if-no-files-found: error
+
   sbom:
     runs-on: ubuntu-latest
     steps:
@@ -75,7 +97,7 @@ jobs:
           path: dist/*
 
   publish:
-    needs: [build, sbom]
+    needs: [build, macos-app, sbom]
     runs-on: ubuntu-latest
     if: github.ref_type == 'tag'
     permissions:

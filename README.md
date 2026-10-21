@@ -65,6 +65,9 @@ cargo install --locked --git https://github.com/abindran/mcpgw mcpgw            
 Release archives (five targets) come with checksums, Sigstore signatures, build
 attestations and an SBOM; see [Getting started](docs/getting-started.md).
 
+On macOS there's also **mcpgw.app**, a SwiftUI app with the binary bundled
+inside (`macos/build.sh` builds it); see [the macOS app](docs/guides/macos-app.md).
+
 ## Build & run
 
 ```sh

@@ -35,6 +35,10 @@ each config or API change comes with an upgrade note in
   - tasks (SEP-2663) for clients that declare the extension, with backend
     tasks followed;
   - `gateway.call_timeout` and `gateway.max_call_time`.
+- **A macOS app** (`mcpgw.app`, SwiftUI) with the `mcpgw` binary bundled
+  inside. It manages servers, tools, approvals, profiles, secrets, the
+  audit log and clients, and has a menu bar item for approvals. See
+  [docs/guides/macos-app.md](docs/guides/macos-app.md).
 - **`mcpgw dev`:** run a server under a private gateway, restart it on
   every edit, and log each call.
 - **The web UI's Inspector** calls any tool, through the new

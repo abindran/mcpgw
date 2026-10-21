@@ -3,3 +3,6 @@
 target/
 **/*.rs.bk
 .mcpgw-petstore/
+# SwiftPM build output of the macOS app
+macos/.build/
+macos/.swiftpm/
