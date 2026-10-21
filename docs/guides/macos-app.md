@@ -48,7 +48,7 @@ two seconds.
 | Profiles | each profile's endpoint, servers, policy and the tools it sees |
 | Secrets | vault metadata; set or delete values (they can't be read back) |
 | Audit Log | the hash-chained log, with a verify button |
-| Clients | `mcpgw client install` for Claude Desktop, Claude Code, Cursor and VS Code |
+| Clients | whether Claude Desktop, Claude Code, Cursor and VS Code go through mcpgw (from `mcpgw doctor`), and Connect (`mcpgw client install`) |
 | Doctor | `mcpgw doctor`'s findings and fixes |
 
 The menu bar icon shows the daemon's state and any calls waiting for

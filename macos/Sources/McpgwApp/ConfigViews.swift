@@ -162,6 +162,9 @@ struct ClientsView: View {
     @State private var profile = ""
     @State private var output: [String: (ok: Bool, text: String)] = [:]
     @State private var running: String?
+    @State private var status: [String: ClientStatus] = [:]
+    @State private var checking = false
+    @State private var checkError: String?
 
     private let clients = [
         ("claude-desktop", "Claude Desktop", "bubble.left.and.text.bubble.right"),
@@ -178,24 +181,46 @@ struct ClientsView: View {
                     ForEach(model.profiles) { Text($0.name).tag($0.name) }
                 }
             } footer: {
-                Text("Adds an mcpgw entry to the client's config (`mcpgw client install`), keeping its other servers. The entry runs this app's bundled mcpgw, so keep the app where it is (e.g. /Applications).")
+                Text("Connect adds an mcpgw entry to the client's config (`mcpgw client install`), keeping its other servers. The entry runs this app's bundled mcpgw, so keep the app where it is (e.g. /Applications). Restart the client afterwards so it reads the change.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            SwiftUI.Section("Clients") {
+            SwiftUI.Section {
                 ForEach(clients, id: \.0) { id, name, icon in
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
                             Label(name, systemImage: icon)
                             Spacer()
                             if running == id { ProgressView().controlSize(.small) }
-                            Button("Connect") { Task { await install(id) } }
+                            if let s = status[id] { ClientBadge(status: s) }
+                            Button(status[id]?.connected == true ? "Reconnect" : "Connect") { Task { await install(id) } }
                                 .disabled(running != nil || model.mcpgw == nil)
+                                .help(status[id]?.connected == true
+                                      ? "Write the entry again (e.g. to point it at another profile)"
+                                      : "Add the mcpgw entry to its config")
+                        }
+                        if let detail = detail(status[id]) {
+                            Text(markdown(detail)).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
                         }
                         if let o = output[id] {
                             Text(o.text).font(.caption.monospaced()).foregroundStyle(o.ok ? Color.secondary : Color.red)
                                 .textSelection(.enabled)
                         }
                     }
+                }
+            } header: {
+                HStack {
+                    Text("Clients")
+                    Spacer()
+                    if checking { ProgressView().controlSize(.mini) }
+                    Button { Task { await check() } } label: { Image(systemName: "arrow.clockwise") }
+                        .buttonStyle(.borderless)
+                        .help("Check the clients' configs again")
+                        .disabled(checking)
+                }
+            }
+            if let checkError {
+                SwiftUI.Section {
+                    Text("Can't read the clients' status: \(checkError)").foregroundStyle(.red).textSelection(.enabled)
                 }
             }
             SwiftUI.Section("Command line") {
@@ -208,6 +233,32 @@ struct ClientsView: View {
             }
         }
         .formStyle(.grouped)
+        // the app finds its mcpgw a moment after launch; check once it has
+        .task(id: model.mcpgw != nil) { await check() }
+    }
+
+    private func detail(_ s: ClientStatus?) -> String? {
+        switch s {
+        case .broken(let m), .otherConfig(let m), .unreadable(let m): m
+        case .noConfig: "No config file yet; Connect creates one."
+        default: nil
+        }
+    }
+
+    /// Read every client's status from `mcpgw doctor`.
+    private func check() async {
+        guard model.mcpgw != nil else { return }
+        checking = true
+        defer { checking = false }
+        let checks: [DoctorCheck]
+        do {
+            checks = try await model.doctor()
+            checkError = nil
+        } catch {
+            checkError = error.localizedDescription
+            return
+        }
+        status = Dictionary(uniqueKeysWithValues: clients.map { ($0.0, ClientStatus.from(checks, client: $0.0)) })
     }
 
     private func install(_ id: String) async {
@@ -218,6 +269,31 @@ struct ClientsView: View {
         } catch {
             output[id] = (false, error.localizedDescription)
         }
+        await check()
+    }
+}
+
+struct ClientBadge: View {
+    var status: ClientStatus
+
+    var body: some View {
+        switch status {
+        case .connected: label("connected", .green)
+        case .notConnected: label("not connected", .secondary)
+        case .noConfig: label("not set up", .secondary)
+        case .otherConfig: label("other config", .orange)
+        case .broken: label("broken", .red)
+        case .unreadable: label("unreadable", .red)
+        }
+    }
+
+    private func label(_ text: String, _ color: Color) -> some View {
+        Text(text)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.18), in: Capsule())
+            .foregroundStyle(color)
     }
 }
 
@@ -247,11 +323,11 @@ struct DoctorView: View {
             }
         }
         .overlay { if running && checks.isEmpty { ProgressView("Running checks…") } }
+        .task(id: model.mcpgw != nil) { if model.mcpgw != nil { await run() } }
         .toolbar {
             Button { Task { await run() } } label: { Label("Run Again", systemImage: "arrow.clockwise") }
                 .disabled(running)
         }
-        .task { await run() }
     }
 
     private func run() async {

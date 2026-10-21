@@ -269,3 +269,34 @@ public struct DoctorCheck: Codable, Hashable, Sendable {
     public var message: String
     public var fix: String?
 }
+
+/// Whether an MCP client goes through mcpgw, as `mcpgw doctor` sees its
+/// user config (the `client <name>` checks).
+public enum ClientStatus: Equatable, Sendable {
+    /// Its config has an mcpgw entry that runs and uses this config.
+    case connected
+    /// It has servers of its own, none through mcpgw.
+    case notConnected
+    /// Its mcpgw entry runs a binary that's gone (e.g. the app moved).
+    case broken(String)
+    /// Its mcpgw entry uses another `--config`.
+    case otherConfig(String)
+    /// Its config can't be read.
+    case unreadable(String)
+    /// No config file (not installed, or never set up).
+    case noConfig
+
+    /// The status of `client` (`claude-desktop`, `cursor`, …) from a
+    /// doctor report. With several mcpgw entries, the worst one wins.
+    public static func from(_ checks: [DoctorCheck], client: String) -> ClientStatus {
+        let mine = checks.filter { $0.subject == "client \(client)" }
+        if let c = mine.first(where: { $0.id == "client_config_unreadable" }) { return .unreadable(c.message) }
+        if let c = mine.first(where: { $0.id == "client_entry_broken" }) { return .broken(c.message) }
+        if let c = mine.first(where: { $0.id == "client_other_config" }) { return .otherConfig(c.message) }
+        if mine.contains(where: { $0.id == "client" }) { return .connected }
+        if mine.contains(where: { $0.id == "client_not_using_mcpgw" }) { return .notConnected }
+        return .noConfig
+    }
+
+    public var connected: Bool { self == .connected }
+}

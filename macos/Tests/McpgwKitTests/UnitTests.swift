@@ -98,3 +98,22 @@ import Testing
     #expect(MCPGW.mergePATH("/a:/b", ["/b", "/c", ""]) == "/a:/b:/c")
     #expect(MCPGW.mergePATH(nil, ["/c"]) == "/c")
 }
+
+@Test func readsClientStatusFromDoctor() {
+    let check = { (id: String, subject: String, level: String) in
+        DoctorCheck(id: id, subject: subject, level: level, message: "\(id) msg", fix: nil)
+    }
+    let report = [
+        check("client", "client cursor", "ok"),
+        check("client_not_using_mcpgw", "client vscode", "info"),
+        check("client", "client claude-code", "ok"),
+        check("client_other_config", "client claude-code", "warn"),
+        check("client_entry_broken", "client claude-desktop", "fail"),
+        check("config", "config", "ok"),
+    ]
+    #expect(ClientStatus.from(report, client: "cursor") == .connected)
+    #expect(ClientStatus.from(report, client: "vscode") == .notConnected)
+    #expect(ClientStatus.from(report, client: "claude-code") == .otherConfig("client_other_config msg"))
+    #expect(ClientStatus.from(report, client: "claude-desktop") == .broken("client_entry_broken msg"))
+    #expect(ClientStatus.from([], client: "cursor") == .noConfig)
+}
